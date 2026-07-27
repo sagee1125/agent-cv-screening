@@ -1,4 +1,7 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 513bc65 (feat: initial project structure for agent-cv-screening)
 # Agent-CV-Screening
 
 **AI-powered CV screening system with deterministic LLM parsing & multi-department scoring.**
@@ -29,7 +32,11 @@ Built for university departments to automatically parse, match, and rank candida
 
 ```bash
 # 1. Clone
+<<<<<<< HEAD
 git clone {}
+=======
+git clone https://github.com/YOUR_USERNAME/agent-cv-screening.git
+>>>>>>> 513bc65 (feat: initial project structure for agent-cv-screening)
 cd agent-cv-screening
 
 # 2. Copy environment config
@@ -45,6 +52,9 @@ docker-compose exec backend alembic upgrade head
 # 5. Open API docs
 open http://localhost:8000/docs
 ```
+<<<<<<< HEAD
 =======
 # agent-cv-screening
 >>>>>>> 03982fd (first commit)
+=======
+>>>>>>> 513bc65 (feat: initial project structure for agent-cv-screening)
