@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Agent-CV-Screening
 
 **AI-powered CV screening system with deterministic LLM parsing & multi-department scoring.**
@@ -44,3 +45,6 @@ docker-compose exec backend alembic upgrade head
 # 5. Open API docs
 open http://localhost:8000/docs
 ```
+=======
+# agent-cv-screening
+>>>>>>> 03982fd (first commit)
