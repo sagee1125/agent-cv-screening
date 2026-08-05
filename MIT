@@ -1,0 +1,55 @@
+
+---
+
+### 3.2 `.gitignore`
+
+```gitignore
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+poetry.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment
+.env
+.env.local
+
+# Data
+data/uploads/*
+data/reports/*
+data/cache/*
+!data/uploads/.gitkeep
+!data/reports/.gitkeep
+!data/cache/.gitkeep
+
+# Database
+*.db
+*.sqlite
+
+# Docker
+*.log
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,76 @@
+# Skill Taxonomy for Agent-CV-Screening
+
+- skill: "Python"
+  category: "Programming Language"
+  synonyms: ["python", "py", "PYTHON"]
+  parent: null
+
+- skill: "Java"
+  category: "Programming Language"
+  synonyms: ["java", "JAVA"]
+  parent: null
+
+- skill: "SQL"
+  category: "Database"
+  synonyms: ["sql", "postgresql", "mysql", "structured query language"]
+  parent: null
+
+- skill: "Machine Learning"
+  category: "AI"
+  synonyms: ["ML", "机器学习", "machine learning"]
+  parent: null
+
+- skill: "Deep Learning"
+  category: "AI"
+  synonyms: ["DL", "深度學習", "deep learning"]
+  parent: "Machine Learning"
+
+- skill: "PyTorch"
+  category: "AI"
+  synonyms: ["pytorch", "Pytorch", "torch"]
+  parent: "Deep Learning"
+
+- skill: "TensorFlow"
+  category: "AI"
+  synonyms: ["tensorflow", "Tensorflow", "tf"]
+  parent: "Deep Learning"
+
+- skill: "Natural Language Processing"
+  category: "AI"
+  synonyms: ["NLP", "自然語言處理", "natural language processing"]
+  parent: "Machine Learning"
+
+- skill: "Computer Vision"
+  category: "AI"
+  synonyms: ["CV", "電腦視覺", "computer vision"]
+  parent: "Deep Learning"
+
+- skill: "R"
+  category: "Programming Language"
+  synonyms: ["r", "R语言"]
+  parent: null
+
+- skill: "Docker"
+  category: "DevOps"
+  synonyms: ["docker", "container"]
+  parent: null
+
+- skill: "Kubernetes"
+  category: "DevOps"
+  synonyms: ["k8s", "kubernetes"]
+  parent: null
+
+- skill: "AWS"
+  category: "Cloud"
+  synonyms: ["aws", "Amazon Web Services"]
+  parent: null
+
+- skill: "GCP"
+  category: "Cloud"
+  synonyms: ["gcp", "Google Cloud Platform"]
+  parent: null
+
+- skill: "Azure"
+  category: "Cloud"
+  synonyms: ["azure", "Microsoft Azure"]
+  parent: null
