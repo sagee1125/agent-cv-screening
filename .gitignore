@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+.env
+
+frontend/node_modules/
+frontend/.env
+frontend/dist/
+*.tsbuildinfo
