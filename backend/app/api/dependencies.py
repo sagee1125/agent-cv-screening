@@ -19,7 +19,12 @@ def _to_async_database_url(url: str) -> str:
     return url
 
 
-engine = create_async_engine(_to_async_database_url(settings.database_url), echo=settings.debug, future=True)
+engine = create_async_engine(
+    _to_async_database_url(settings.database_url),
+    echo=settings.debug,
+    future=True,
+    pool_pre_ping=True,
+)
 AsyncSessionFactory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 taxonomy_loader = SkillTaxonomyLoader("data/taxonomy/skill_taxonomy.yaml")

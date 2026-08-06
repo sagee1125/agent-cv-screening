@@ -3,7 +3,9 @@ import sys
 from pathlib import Path
 
 
-os.environ.setdefault("OPENAI_API_KEY", "test-key")
+os.environ.setdefault("ZAI_API_KEY", "test-key")
+os.environ.setdefault("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+os.environ.setdefault("LLM_MODEL", "glm-4-flash")
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test_db")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 

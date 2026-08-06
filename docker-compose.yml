@@ -12,11 +12,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user"]
+      test: ["CMD-SHELL", "pg_isready -U user -d agent_cv"]
       interval: 5s
       timeout: 5s
       retries: 5
-
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    ports:
+      - "5050:80" # map the container's 80 port to PC's 5050 port
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: "False"
   backend:
     build: ./backend
     ports:
@@ -26,7 +33,9 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
       LLM_SEED: ${LLM_SEED:-42}
