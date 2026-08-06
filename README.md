@@ -33,7 +33,10 @@ cd agent-cv-screening
 
 # 2. Copy environment config
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and configure LLM credentials:
+# ZAI_API_KEY / LLM_BASE_URL / LLM_MODEL
+# Optional multimodal parser settings:
+# LLM_VISION_MODEL / LLM_VISION_MAX_PAGES
 
 # 3. Start services
 docker-compose up -d
@@ -43,4 +46,12 @@ docker-compose exec backend alembic upgrade head
 
 # 5. Open API docs
 open http://localhost:8000/docs
+```
+
+## Reset Database (Test Convenience)
+
+```bash
+# Clear all rows from PostgreSQL tables (keep structures)
+# and clear local files under data/cache + data/uploads
+bash scripts/reset-db.sh
 ```

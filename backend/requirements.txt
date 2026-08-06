@@ -10,7 +10,7 @@ asyncpg==0.30.0
 alembic==1.14.1
 
 # LLM
-openai==1.59.3
+zai-sdk==0.2.3
 tenacity==9.0.0
 
 # PDF/File Processing

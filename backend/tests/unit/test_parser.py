@@ -82,3 +82,97 @@ async def test_parse_cv_cache_miss_stores_structured_and_raw() -> None:
     assert cache.saved_key == "abc123"
     assert cache.saved_value is not None
     assert cache.saved_value["structured_data"]["skills"] == ["Python"]
+
+
+def test_normalize_schema_handles_aliases_and_string_payloads() -> None:
+    payload = {
+        "name": "Bob",
+        "technical_skills": "Python, FastAPI; PostgreSQL",
+        "educations": "MSc in Computer Science, MIT 2020",
+        "work_experience": {"company": "ACME", "role": "Engineer", "from": "2021-01", "to": "2023-02"},
+        "publication": "Efficient CV Parsing 2022",
+    }
+
+    normalized = CVParserService._normalize_schema(payload)
+
+    assert normalized["skills"] == ["Python", "FastAPI", "PostgreSQL"]
+    assert "MIT 2020" in normalized["education"][0]["school"]
+    assert normalized["education"][0]["degree"] == "Master"
+    assert normalized["experience"][0]["title"] == "Engineer"
+    assert normalized["publications"][0]["title"] == "Efficient CV Parsing 2022"
+
+
+def test_apply_content_fallback_recovers_sections_when_arrays_empty() -> None:
+    service = CVParserService(llm_client=DummyLLM(), cache=DummyCache())
+    raw_text = """
+    Skills:
+    Python, FastAPI, Docker
+    Education:
+    MPhil in Computer Science, National Taiwan University 2021
+    Experience:
+    Backend Engineer at ACME 2021-2024
+    Publications:
+    Practical LLM Systems 2023
+    """
+
+    enriched = service._apply_content_fallback(
+        raw_text,
+        {"skills": [], "education": [], "experience": [], "publications": []},
+    )
+
+    assert "Python" in enriched["skills"]
+    assert "National Taiwan University" in enriched["education"][0]["school"]
+    assert enriched["education"][0]["degree"] == "MPhil"
+    assert "ACME" in enriched["experience"][0]["description"]
+    assert enriched["publications"][0]["year"] == "2023"
+
+
+def test_normalize_experience_extracts_fields_from_text_line() -> None:
+    payload = {
+        "experience": [
+            "Senior Backend Engineer at ACME Corp 2021-01 - 2024-03 built APIs and services"
+        ]
+    }
+
+    normalized = CVParserService._normalize_schema(payload)
+    first = normalized["experience"][0]
+    assert first["title"] is not None
+    assert first["company"] == "ACME Corp"
+    assert first["start_date"] == "2021-01"
+    assert first["end_date"] == "2024-03"
+
+
+def test_merge_contact_hints_prefers_bracket_phone_format() -> None:
+    merged = CVParserService._merge_contact_hints(
+        {"phone": "+852 61234567"},
+        {"phone": "+852 (6123) 4567", "email": None, "name": None},
+    )
+    assert merged["phone"] == "+852 (6123) 4567"
+
+
+def test_normalize_education_uses_major_for_degree_only_line() -> None:
+    payload = {
+        "education": [
+            "Master of Engineering (MEng) in Aerospace Engineering",
+            "Imperial College London",
+        ]
+    }
+
+    normalized = CVParserService._normalize_schema(payload)
+    assert normalized["education"][0]["school"] == "Aerospace Engineering"
+    assert normalized["education"][0]["degree"] == "Master"
+    assert normalized["education"][1]["school"] == "Imperial College London"
+
+
+def test_normalize_education_drops_date_location_only_line() -> None:
+    payload = {
+        "education": [
+            "01/2008 - 01/2012 London",
+            "Bachelor of Engineering (BEng) in Mechanical Engineering",
+        ]
+    }
+
+    normalized = CVParserService._normalize_schema(payload)
+    schools = [item["school"] for item in normalized["education"]]
+    assert "01/2008 - 01/2012 London" not in schools
+    assert "Mechanical Engineering" in schools
