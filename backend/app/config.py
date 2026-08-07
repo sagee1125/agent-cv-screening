@@ -10,7 +10,13 @@ class Settings(BaseSettings):
     llm_base_url: str
     llm_model: str = "gpt-4o-mini"
     llm_vision_model: str = "glm-4v-flash"
-    llm_vision_max_pages: int = 3
+    llm_vision_max_pages: int = 6
+    llm_vision_render_scale: float = 2.6
+    llm_vision_image_format: str = "PNG"
+    llm_vision_jpeg_quality: int = 90
+    llm_vision_retry_attempts: int = 2
+    llm_vision_focus_pass_enabled: bool = True
+    llm_text_fallback_enabled: bool = True
     llm_temperature: float = 0
     llm_seed: int = 42
 
