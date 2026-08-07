@@ -1,3 +1,12 @@
+# to extract the information from the CV and return the structured data
+# 1. multimodal parsing
+# 2. text parsing
+# 3. contact fallback
+# 4. content fallback
+# 5. cache
+# 6. return the structured data
+
+
 from __future__ import annotations
 
 import asyncio
@@ -53,22 +62,41 @@ KNOWN_SKILLS = {
 
 PARSER_SYSTEM_PROMPT = """You are a CV parser. Extract the following fields from the candidate's CV and output valid JSON.
 
-Fields:
-- name: string
-- email: string
-- phone: string (optional)
-- education: array of {school, degree, major, year}
-- experience: array of {company, title, start_date, end_date, description}
-- skills: array of string (tech skills only)
-- publications: array of {title, journal, year} (optional)
+Output schema:
+{
+  "name": string,
+  "email": string,
+  "phone": string,
+  "skills": [string],          # Extract from tech skills section or mentioned technologies
+  "education": [
+    {
+      "school": string,        # Full institution name only
+      "degree": string,        # e.g., "MEng", "BSc", "PhD"
+      "major": string,         # Field of study
+      "period": string         # Date range as shown (e.g., "09/2018 - 06/2022")
+    }
+  ],
+  "experience": [
+    {
+      "company": string,
+      "job_title": string,
+      "period": string,
+      "description": string    # Full combined description, not split by lines
+    }
+  ],
+  "publications": [...]
+}
+
 
 Rules:
 - Only extract information explicitly stated in the CV. Do not infer.
 - For skills, extract exact terms used (do not standardize).
-- For education.degree, capture the explicit degree text when present (e.g., Bachelor, Master, PhD, MPhil, BSc, MSc, MBA).
-- If a field is not found, use null or empty array.
-
-Output valid JSON only. No explanations."""
+- Each education entry = ONE degree. Merge all info about that degree into ONE object.
+- Each experience entry = ONE job. Merge ALL bullet points and descriptions into ONE description string.
+- Do NOT split descriptions across multiple objects.
+- If you cannot determine a field, use null (not empty string).
+- Output valid JSON only.No explanations.
+"""
 
 PARSER_VISION_USER_PROMPT = """Parse this CV into the target JSON schema.
 
@@ -77,16 +105,40 @@ Important:
 - If one field is missing, set it to null or empty array.
 - Return JSON only, no markdown fences."""
 
+PARSER_VISION_FOCUS_PROMPT = """Re-read the same CV images and focus on timeline accuracy.
+
+Skills extraction hints - look for these technologies (exact match or similar):
+{known_skills}
+
+Important:
+- Group experience by job: all bullets under one company belong in ONE experience object.
+- Group education by degree: each degree is ONE education object.
+- For each experience, combine the full description into a single string.
+- Return JSON only, no markdown fences.
+""".format(known_skills=", ".join(sorted(KNOWN_SKILLS)[:50]))
+
 
 class CVParserService:
     def __init__(self, llm_client: LLMClient, cache: HashCache) -> None:
         self.llm_client = llm_client
         self.cache = cache
 
+# 1. check the cache first
+# 2. extract the raw text from the PDF
+# 3. extract the contact information hints(email, phone, name)
+# 4. main path (Vision): render the first N pages as image URLs, and parse with multimodal LLM
+# 5. normalize the schema
+# 6. merge the contact information hints
+# 7. content fallback: fill the empty arrays from the raw text when the LLM left them blank
+# 8. exception downgrade
+# 9. write the cache and return the result (include status/model/raw_llm_response/cache_hit)
+ 
     async def parse_cv(self, file_path: str, jd_text: str | None = None) -> dict[str, Any]:
+        # check the cache first
         file_hash = await self.cache.md5_for_file(file_path)
         cached = await self.cache.get(file_hash)
         if cached:
+            # MD5 hash
             logger.info("Parser cache hit hash=%s", file_hash)
             return {
                 "file_hash": file_hash,
@@ -108,35 +160,14 @@ class CVParserService:
                 "extraction_model": llm_result["model"],
                 "extraction_seed": 42,
                 "status": "success",
+                "parse_path": llm_result.get("parse_path", "vision"),
                 "error_message": None,
             }
         except Exception as image_exc:
-            logger.exception("Vision parse failed; retrying with text-only prompt.")
-            try:
-                # Fallback to text-only parsing when image path is unavailable/unstable.
-                user_prompt = self._build_prompt(raw_text=raw_text, jd_text=jd_text)
-                llm_result = await self.llm_client.chat_completion(
-                    PARSER_SYSTEM_PROMPT,
-                    user_prompt,
-                    response_format={"type": "json_object"},
-                    temperature=0,
-                    seed=42,
-                )
-                # Secondary path: text parse fallback when vision fails.
-                structured = self._merge_contact_hints(self._normalize_schema(llm_result["parsed"]), contact_hints)
-                structured = self._apply_content_fallback(raw_text, structured)
-                cache_payload = {
-                    "structured_data": structured,
-                    "raw_llm_response": llm_result["parsed"],
-                    "extraction_model": llm_result["model"],
-                    "extraction_seed": 42,
-                    "status": "success",
-                    "error_message": None,
-                }
-            except Exception as text_exc:
-                logger.exception("Text parse also failed; using rule-based contact fallback.")
+            logger.exception("Vision parse failed; considering text fallback.")
+            if not settings.llm_text_fallback_enabled:
+                logger.exception("Text fallback disabled; using rule-based fallback.")
                 structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
-                # Last resort: recover minimum structured content from raw text.
                 structured = self._apply_content_fallback(raw_text, structured)
                 cache_payload = {
                     "structured_data": structured,
@@ -144,8 +175,46 @@ class CVParserService:
                     "extraction_model": settings.llm_vision_model,
                     "extraction_seed": 42,
                     "status": "fallback",
-                    "error_message": f"vision_error={image_exc}; text_error={text_exc}",
+                    "parse_path": "rule_fallback",
+                    "error_message": f"vision_error={image_exc}; text_fallback_disabled=true",
                 }
+            else:
+                try:
+                    # Fallback to text-only parsing when image path is unavailable/unstable.
+                    user_prompt = self._build_prompt(raw_text=raw_text, jd_text=jd_text)
+                    llm_result = await self.llm_client.chat_completion(
+                        PARSER_SYSTEM_PROMPT,
+                        user_prompt,
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                        seed=42,
+                    )
+                    # Secondary path: text parse fallback when vision fails.
+                    structured = self._merge_contact_hints(self._normalize_schema(llm_result["parsed"]), contact_hints)
+                    structured = self._apply_content_fallback(raw_text, structured)
+                    cache_payload = {
+                        "structured_data": structured,
+                        "raw_llm_response": llm_result["parsed"],
+                        "extraction_model": llm_result["model"],
+                        "extraction_seed": 42,
+                        "status": "success",
+                        "parse_path": "text_fallback",
+                        "error_message": None,
+                    }
+                except Exception as text_exc:
+                    logger.exception("Text parse also failed; using rule-based contact fallback.")
+                    structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
+                    # Last resort: recover minimum structured content from raw text.
+                    structured = self._apply_content_fallback(raw_text, structured)
+                    cache_payload = {
+                        "structured_data": structured,
+                        "raw_llm_response": None,
+                        "extraction_model": settings.llm_vision_model,
+                        "extraction_seed": 42,
+                        "status": "fallback",
+                        "parse_path": "rule_fallback",
+                        "error_message": f"vision_error={image_exc}; text_error={text_exc}",
+                    }
         await self.cache.set(file_hash, cache_payload)
         return {
             "file_hash": file_hash,
@@ -154,13 +223,62 @@ class CVParserService:
         }
 
     async def _parse_with_pdf_images(self, *, file_path: str, jd_text: str | None) -> dict[str, Any]:
-        # Convert first N pages into inline image URLs for the multimodal endpoint.
         image_urls = await asyncio.to_thread(
             self._render_pdf_pages_as_data_urls,
             file_path,
             settings.llm_vision_max_pages,
         )
-        user_content: list[dict[str, Any]] = [{"type": "text", "text": PARSER_VISION_USER_PROMPT}]
+        last_exc: Exception | None = None
+        attempts = max(1, settings.llm_vision_retry_attempts)
+        for attempt in range(1, attempts + 1):
+            try:
+                primary_result = await self._run_vision_prompt(
+                    image_urls=image_urls,
+                    jd_text=jd_text,
+                    user_prompt=PARSER_VISION_USER_PROMPT,
+                )
+                merged_payload = primary_result["parsed"]
+                pass_count = 1
+
+                if settings.llm_vision_focus_pass_enabled:
+                    primary_structured = self._normalize_schema(merged_payload)
+                    if self._needs_focus_pass(primary_structured):
+                        focus_result = await self._run_vision_prompt(
+                            image_urls=image_urls,
+                            jd_text=jd_text,
+                            user_prompt=PARSER_VISION_FOCUS_PROMPT,
+                        )
+                        merged_payload = self._merge_prefer_non_empty(
+                            base=merged_payload,
+                            preferred=focus_result["parsed"],
+                            keys=("education", "experience"),
+                        )
+                        pass_count = 2
+                return {
+                    **primary_result,
+                    "parsed": merged_payload,
+                    "parse_path": "vision_focus" if pass_count == 2 else "vision",
+                }
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Vision parse attempt failed attempt=%s/%s error=%s",
+                    attempt,
+                    attempts,
+                    exc,
+                )
+
+        assert last_exc is not None
+        raise last_exc
+
+    async def _run_vision_prompt(
+        self,
+        *,
+        image_urls: list[str],
+        jd_text: str | None,
+        user_prompt: str,
+    ) -> dict[str, Any]:
+        user_content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
         if jd_text:
             user_content.append({"type": "text", "text": f"JD Context:\n{jd_text}"})
         user_content.extend(
@@ -173,13 +291,26 @@ class CVParserService:
                 {"role": "user", "content": user_content},
             ],
             model=settings.llm_vision_model,
+            response_format={"type": "json_object"},
             temperature=0,
             seed=42,
         )
 
     def _build_prompt(self, *, raw_text: str, jd_text: str | None) -> str:
-        jd_segment = f"\nJD Context:\n{jd_text}\n" if jd_text else ""
-        return f"CV Text:\n{raw_text}\n{jd_segment}\nOutput valid JSON only."
+        return self.build_compressed_prompt(raw_text=raw_text, jd_text=jd_text)
+
+    def build_compressed_prompt(self, *, raw_text: str, jd_text: str | None, max_chars: int = 12000) -> str:
+        compressed_cv_text = self._compress_cv_text(raw_text=raw_text, max_chars=max_chars)
+        segments = [
+            "Task: Parse the CV text below into the target JSON schema from system prompt.",
+            "Rules: Use explicit facts only. Merge one job into one experience object. Merge one degree into one education object.",
+            f"CV Text (compressed):\n{compressed_cv_text}",
+        ]
+        if jd_text:
+            compressed_jd_text = self._compress_cv_text(raw_text=jd_text, max_chars=3000)
+            segments.append(f"JD Context (compressed):\n{compressed_jd_text}")
+        segments.append("Return valid JSON only.")
+        return "\n\n".join(segments)
 
     async def _extract_pdf_text(self, file_path: str) -> str:
         path = Path(file_path)
@@ -212,7 +343,7 @@ class CVParserService:
 
     @staticmethod
     def _render_pdf_pages_as_data_urls(file_path: str, max_pages: int) -> list[str]:
-        # Render PDF pages to JPEG base64 so we can send them as multimodal inputs.
+        # Render PDF pages to high-fidelity images for multimodal parsing.
         document = pdfium.PdfDocument(file_path)
         total_pages = len(document)
         if total_pages == 0:
@@ -220,16 +351,46 @@ class CVParserService:
 
         page_count = min(max_pages, total_pages)
         image_urls: list[str] = []
+        image_format = settings.llm_vision_image_format.strip().upper()
+        if image_format not in {"PNG", "JPEG"}:
+            image_format = "PNG"
         for page_index in range(page_count):
             page = document[page_index]
-            pil_image = page.render(scale=2.0).to_pil()
+            pil_image = page.render(scale=settings.llm_vision_render_scale).to_pil()
             buffer = io.BytesIO()
-            pil_image.save(buffer, format="JPEG", quality=85)
+            if image_format == "JPEG":
+                pil_image.save(buffer, format="JPEG", quality=settings.llm_vision_jpeg_quality)
+                mime_type = "jpeg"
+            else:
+                pil_image.save(buffer, format="PNG")
+                mime_type = "png"
             encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-            image_urls.append(f"data:image/jpeg;base64,{encoded}")
+            image_urls.append(f"data:image/{mime_type};base64,{encoded}")
             page.close()
             pil_image.close()
         return image_urls
+
+    @staticmethod
+    def _needs_focus_pass(structured: dict[str, Any]) -> bool:
+        education = structured.get("education") or []
+        experience = structured.get("experience") or []
+        return len(education) == 0 or len(experience) == 0
+
+    @staticmethod
+    def _merge_prefer_non_empty(
+        *,
+        base: dict[str, Any],
+        preferred: dict[str, Any],
+        keys: tuple[str, ...],
+    ) -> dict[str, Any]:
+        merged = dict(base) if isinstance(base, dict) else {}
+        if not isinstance(preferred, dict):
+            return merged
+        for key in keys:
+            value = preferred.get(key)
+            if value not in (None, "", []):
+                merged[key] = value
+        return merged
 
     @staticmethod
     def _normalize_schema(payload: dict[str, Any]) -> dict[str, Any]:
@@ -304,7 +465,7 @@ class CVParserService:
                     or item.get("education_level")
                 )
                 major = item.get("major") or item.get("field") or item.get("field_of_study")
-                year = item.get("year") or item.get("graduation_year")
+                period = item.get("period") or item.get("year") or item.get("graduation_year")
                 if not degree:
                     # Only infer from local context when the explicit degree field is missing.
                     context = " ".join(
@@ -313,20 +474,20 @@ class CVParserService:
                         if part not in (None, "")
                     )
                     degree = CVParserService._extract_degree_from_text(context)
-                if not year:
+                if not period:
                     context = " ".join(
                         str(part).strip()
                         for part in (school, major, item.get("description"), item.get("summary"))
                         if part not in (None, "")
                     )
-                    year = CVParserService._extract_year_from_text(context)
+                    period = CVParserService._extract_year_from_text(context)
                 school = CVParserService._normalize_education_school(str(school).strip() if school else None, degree, major)
                 rows.append(
                     {
                         "school": school,
                         "degree": degree,
                         "major": major,
-                        "year": year,
+                        "period": period,
                     }
                 )
             else:
@@ -344,14 +505,15 @@ class CVParserService:
                             "school": school,
                             "degree": degree,
                             "major": major,
-                            "year": CVParserService._extract_year_from_text(text),
+                            "period": CVParserService._extract_year_from_text(text),
                         }
                     )
-        return [
+        rows = [
             row
             for row in rows
             if any(value not in (None, "") for value in row.values()) and CVParserService._is_valid_education_row(row)
         ]
+        return CVParserService._merge_fragmented_education_rows(rows)
 
     @staticmethod
     def _normalize_experience_items(value: Any) -> list[dict[str, Any]]:
@@ -359,9 +521,10 @@ class CVParserService:
         for item in CVParserService._as_list(value):
             if isinstance(item, dict):
                 company = item.get("company") or item.get("employer") or item.get("organization")
-                title = item.get("title") or item.get("role") or item.get("position")
+                job_title = item.get("job_title") or item.get("title") or item.get("role") or item.get("position")
                 start_date = item.get("start_date") or item.get("start") or item.get("from")
                 end_date = item.get("end_date") or item.get("end") or item.get("to") or item.get("until")
+                period = item.get("period")
                 description = item.get("description") or item.get("summary") or item.get("responsibilities")
                 context = " ".join(
                     str(part).strip()
@@ -370,16 +533,17 @@ class CVParserService:
                 )
                 if not company:
                     company = CVParserService._extract_company_from_text(context)
-                if not title:
-                    title = CVParserService._extract_title_from_text(context)
-                if not start_date and not end_date:
+                if not job_title:
+                    job_title = CVParserService._extract_title_from_text(context)
+                if not period and not start_date and not end_date:
                     start_date, end_date = CVParserService._extract_date_range_from_text(context)
+                if not period:
+                    period = CVParserService._combine_period(start_date, end_date)
                 rows.append(
                     {
                         "company": company,
-                        "title": title,
-                        "start_date": start_date,
-                        "end_date": end_date,
+                        "job_title": job_title,
+                        "period": period,
                         "description": description,
                     }
                 )
@@ -391,13 +555,13 @@ class CVParserService:
                     rows.append(
                         {
                             "company": CVParserService._extract_company_from_text(text),
-                            "title": CVParserService._extract_title_from_text(text),
-                            "start_date": start_date,
-                            "end_date": end_date,
+                            "job_title": CVParserService._extract_title_from_text(text),
+                            "period": CVParserService._combine_period(start_date, end_date),
                             "description": text,
                         }
                     )
-        return [row for row in rows if any(value not in (None, "") for value in row.values())]
+        rows = [row for row in rows if any(value not in (None, "") for value in row.values())]
+        return CVParserService._merge_fragmented_experience_rows(rows)
 
     @staticmethod
     def _normalize_publication_items(value: Any) -> list[dict[str, Any]]:
@@ -418,6 +582,161 @@ class CVParserService:
         return [row for row in rows if any(value not in (None, "") for value in row.values())]
 
     @staticmethod
+    def _compress_cv_text(*, raw_text: str, max_chars: int) -> str:
+        lines = [" ".join(line.split()) for line in raw_text.splitlines()]
+        lines = [line for line in lines if line]
+        if not lines:
+            return ""
+
+        selected: list[str] = []
+        seen: set[str] = set()
+        for line in lines:
+            key = line.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(line)
+
+        joined = "\n".join(selected)
+        if len(joined) <= max_chars:
+            return joined
+
+        priority_pattern = re.compile(
+            r"(experience|employment|work history|education|university|college|skills|projects|publications|email|phone|@|\b\d{4}\b)",
+            re.IGNORECASE,
+        )
+        priority_lines = [line for line in selected if priority_pattern.search(line)]
+        fallback_lines = [line for line in selected if line not in priority_lines]
+        ordered = priority_lines + fallback_lines
+
+        result: list[str] = []
+        current_len = 0
+        for line in ordered:
+            candidate_len = len(line) + (1 if result else 0)
+            if current_len + candidate_len > max_chars:
+                continue
+            result.append(line)
+            current_len += candidate_len
+            if current_len >= max_chars:
+                break
+        return "\n".join(result)
+
+    @staticmethod
+    def _merge_fragmented_experience_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+
+        merged: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+
+        for raw_item in rows:
+            item = {
+                "company": CVParserService._to_clean_text(raw_item.get("company")),
+                "job_title": CVParserService._to_clean_text(raw_item.get("job_title")),
+                "period": CVParserService._to_clean_text(raw_item.get("period")),
+                "description": CVParserService._to_clean_text(raw_item.get("description")),
+            }
+            has_company = bool(item.get("company"))
+            has_description = bool(item.get("description"))
+            has_period = bool(item.get("period"))
+            has_job_title = bool(item.get("job_title"))
+
+            if has_company:
+                if current:
+                    merged.append(current)
+                current = dict(item)
+                continue
+
+            if current and has_description:
+                current["description"] = CVParserService._concat_text(
+                    current.get("description"),
+                    item["description"],
+                )
+                if has_job_title and not current.get("job_title"):
+                    current["job_title"] = item["job_title"]
+                if has_period and not current.get("period"):
+                    current["period"] = item["period"]
+                continue
+
+            if current and has_period and not current.get("period"):
+                current["period"] = item["period"]
+                if has_job_title and not current.get("job_title"):
+                    current["job_title"] = item["job_title"]
+                continue
+
+            if current:
+                current["description"] = CVParserService._concat_text(
+                    current.get("description"),
+                    item.get("description"),
+                )
+                if not current.get("job_title") and has_job_title:
+                    current["job_title"] = item["job_title"]
+                if not current.get("period") and has_period:
+                    current["period"] = item["period"]
+            else:
+                merged.append(item)
+
+        if current:
+            merged.append(current)
+
+        return [
+            item
+            for item in merged
+            if item.get("company") or item.get("job_title") or item.get("description")
+        ]
+
+    @staticmethod
+    def _merge_fragmented_education_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+
+        merged_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        pass_through: list[dict[str, Any]] = []
+
+        for raw_item in rows:
+            item = {
+                "school": CVParserService._to_clean_text(raw_item.get("school")),
+                "degree": CVParserService._to_clean_text(raw_item.get("degree")),
+                "major": CVParserService._to_clean_text(raw_item.get("major")),
+                "period": CVParserService._to_clean_text(raw_item.get("period")),
+            }
+            key = (
+                (item.get("school") or "").casefold(),
+                (item.get("degree") or "").casefold(),
+            )
+            if not key[0] and not key[1]:
+                pass_through.append(item)
+                continue
+            if key in merged_by_key:
+                existing = merged_by_key[key]
+                for field in ("major", "period", "school", "degree"):
+                    if item.get(field) and not existing.get(field):
+                        existing[field] = item[field]
+            else:
+                merged_by_key[key] = dict(item)
+
+        return [*merged_by_key.values(), *pass_through]
+
+    @staticmethod
+    def _to_clean_text(value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return " ".join(text.split())
+
+    @staticmethod
+    def _concat_text(left: Any, right: Any) -> str | None:
+        left_text = CVParserService._to_clean_text(left)
+        right_text = CVParserService._to_clean_text(right)
+        if left_text and right_text:
+            return f"{left_text} {right_text}".strip()
+        return left_text or right_text
+
+    @staticmethod
+    # to extract the contact information from the raw text
+    # email, phone, name
     def _extract_contact_hints(raw_text: str) -> dict[str, str | None]:
         email_match = re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", raw_text)
         phone_matches = re.findall(r"(?:\+?\d[\d\s().-]{7,}\d)", raw_text)
@@ -510,7 +829,7 @@ class CVParserService:
         return self._unique_keep_order(matches + section_tokens)
 
     def _extract_education_fallback(self, raw_text: str) -> list[dict[str, Any]]:
-        # Keep education lines intact and extract degree/year conservatively.
+        # Keep education lines intact and extract degree/period conservatively.
         lines = self._extract_section_lines(
             raw_text,
             ("education", "academic background", "academics"),
@@ -523,13 +842,13 @@ class CVParserService:
                     "school": line,
                     "degree": self._extract_degree_from_text(line),
                     "major": self._extract_major_from_text(line),
-                    "year": self._extract_year_from_text(line),
+                    "period": self._extract_year_from_text(line),
                 }
             )
         return output
 
     def _extract_experience_fallback(self, raw_text: str) -> list[dict[str, Any]]:
-        # Preserve chronology text even if company/title cannot be reliably split.
+        # Preserve chronology text even if company/job_title cannot be reliably split.
         lines = self._extract_section_lines(
             raw_text,
             ("experience", "work experience", "employment history"),
@@ -540,9 +859,8 @@ class CVParserService:
             output.append(
                 {
                     "company": None,
-                    "title": None,
-                    "start_date": None,
-                    "end_date": None,
+                    "job_title": None,
+                    "period": None,
                     "description": line,
                 }
             )
@@ -713,6 +1031,16 @@ class CVParserService:
         end_raw = match.group(2)
         end_value = "Present" if end_raw.lower() in {"present", "current", "now"} else end_raw
         return start_raw, end_value
+
+    @staticmethod
+    def _combine_period(start_date: str | None, end_date: str | None) -> str | None:
+        if start_date and end_date:
+            return f"{start_date} - {end_date}"
+        if start_date:
+            return start_date
+        if end_date:
+            return end_date
+        return None
 
     @staticmethod
     def _extract_company_from_text(text: str | None) -> str | None:
