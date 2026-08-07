@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Zhipu AI SDK credentials
     zai_api_key: str = Field(validation_alias=AliasChoices("ZAI_API_KEY", "OPENAI_API_KEY"))
     llm_base_url: str
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "glm-4-flash"
     llm_vision_model: str = "glm-4v-flash"
     llm_vision_max_pages: int = 6
     llm_vision_render_scale: float = 2.6

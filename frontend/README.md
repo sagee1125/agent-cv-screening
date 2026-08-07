@@ -4,7 +4,8 @@
 
 1. Install dependencies
    - `npm install`
-   - 若证书问题导致失败，可临时执行：`npm install --strict-ssl=false --registry=https://registry.npmjs.org`
+   - If installation fails due to certificate issues, you can temporarily run:
+     `npm install --strict-ssl=false --registry=https://registry.npmjs.org`
 2. Start dev server
    - `npm run dev`
 3. Open browser

@@ -1,57 +1,83 @@
-# Agent-CV-Screening
+# Agent CV Screening
 
-**AI-powered CV screening system with deterministic LLM parsing & multi-department scoring.**
+Agent CV Screening is a full-stack application for resume screening workflows. It provides:
 
-Built for university departments to automatically parse, match, and rank candidates based on job descriptions.
+- CV parsing (PDF-focused, with multimodal parsing and text fallback)
+- Structured candidate extraction (name, education, experience, skills, publications)
+- Backend APIs (FastAPI) and a frontend UI (React + Vite)
+- Cache + reproducible LLM parameters (`temperature` / `seed`)
 
-## Features
+## Project Structure
 
-- 📄 **PDF/DOCX parsing** with GPT-4o-mini (deterministic: temp=0, seed=42)
-- 🧠 **Skill taxonomy** with hierarchical matching & synonym mapping
-- ⚖️ **Multi-dimensional scoring** with department-customizable weights
-- 🔁 **Hash-based caching** for reproducible LLM outputs
-- 📊 **Exportable reports** (PDF, Excel, JSON)
-- 🔍 **Feedback logging** for continuous improvement
-
-## Tech Stack
-
-| Layer       | Technology                         |
-| :---------- | :--------------------------------- |
-| Backend     | Python 3.11+ / FastAPI             |
-| Database    | PostgreSQL 15+ (JSONB)             |
-| LLM         | OpenAI GPT-4o-mini                 |
-| PDF Parsing | PyPDF2 / pdfplumber                |
-| Reports     | ReportLab (PDF) / openpyxl (Excel) |
-| Deployment  | Docker + docker-compose            |
+- `backend`: FastAPI service, parser logic, and database integration
+- `frontend`: React application
+- `scripts`: local development utility scripts
+- `data`: runtime files (uploads, cache, reports)
 
 ## Quick Start
 
+### 1) Prerequisites
+
+- Docker and Docker Compose installed
+- `.env` configured (already present in this repository)
+
+### 2) Start backend and database
+
 ```bash
-# 1. Clone
-git clone {}
-cd agent-cv-screening
-
-# 2. Copy environment config
-cp .env.example .env
-# Edit .env and configure LLM credentials:
-# ZAI_API_KEY / LLM_BASE_URL / LLM_MODEL
-# Optional multimodal parser settings:
-# LLM_VISION_MODEL / LLM_VISION_MAX_PAGES
-
-# 3. Start services
-docker-compose up -d
-
-# 4. Run database migrations
-docker-compose exec backend alembic upgrade head
-
-# 5. Open API docs
-open http://localhost:8000/docs
+docker compose up -d
+docker compose exec backend alembic upgrade head
 ```
 
-## Reset Database (Test Convenience)
+Backend API docs:
+
+- `http://localhost:8000/docs`
+
+### 3) Start frontend (optional for local UI development)
 
 ```bash
-# Clear all rows from PostgreSQL tables (keep structures)
-# and clear local files under data/cache + data/uploads
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend default URL:
+
+- `http://localhost:5173`
+
+## Scripts
+
+Current utility script in `scripts`:
+
+- `scripts/reset-db.sh`
+
+What it does:
+
+- Truncates all tables in PostgreSQL `public` schema (keeps table structure)
+- Clears local `data/cache` and `data/uploads`
+
+Usage:
+
+```bash
 bash scripts/reset-db.sh
 ```
+
+Note:
+
+- The database container must already be running (the script checks the `db` service in `docker compose`)
+
+## Model and Hardcoded Behavior
+
+Current main model in `.env`:
+
+- `LLM_MODEL=glm-4-flash`
+
+Important defaults and fixed behaviors in code:
+
+- `backend/app/config.py`
+  - default `llm_model` is `glm-4-flash`
+  - default `llm_vision_model` is `glm-4v-flash`
+- `docker-compose.yml`
+  - `LLM_MODEL` fallback default is `glm-4-flash`
+- `backend/app/services/parser.py` and `backend/app/services/parser/service.py`
+  - many parser calls use fixed `temperature=0` and `seed=42`
+  - vision retry, focus pass, and text fallback are configurable, but call-time parameters remain fixed

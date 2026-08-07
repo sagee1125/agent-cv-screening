@@ -35,7 +35,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MODEL: ${LLM_MODEL:-glm-4-flash}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
       LLM_SEED: ${LLM_SEED:-42}
       DEBUG: ${DEBUG:-true}
