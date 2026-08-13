@@ -392,7 +392,7 @@ agent-cv-screening/
 │   │   │   └── schemas.py          # Pydantic request/response schemas
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   ├── parser.py           # Module 1: LLM-based CV parsing
+│   │   │   ├── cv_parser/
 │   │   │   ├── skill_matcher.py    # Module 2: Deterministic skill matching
 │   │   │   ├── scorer.py           # Module 3: Deterministic scoring & ranking
 │   │   │   ├── reporter.py         # Report generation (PDF/Excel/JSON)
@@ -637,7 +637,7 @@ http://localhost:8000/api/v1
 
 ## 5. Core Service Implementations
 
-### 5.1 Module 1: CV Parser (`services/parser.py`)
+### 5.1 Module 1: CV Parser (`services/cv_parser/service.py`)
 
 **Purpose:** Extract structured data from unstructured CV text using LLM.
 
@@ -994,7 +994,7 @@ Cursor should generate files in the following order:
 
 3. **Phase 3: Services**
 
-   - `backend/app/services/parser.py`
+   - `backend/app/services/cv_parser/service.py`
    - `backend/app/services/skill_matcher.py`
    - `backend/app/services/scorer.py`
    - `backend/app/services/reporter.py`
@@ -1019,8 +1019,8 @@ Cursor should generate files in the following order:
 When Cursor generates code, it must ensure:
 
 1. **No LLM calls in scoring logic** — verify `scorer.py` never imports or calls `LLMClient`
-2. **All LLM calls use `temperature=0` and `seed=42`** — check `parser.py` calls `llm_client.chat_completion(..., temperature=0, seed=42)`
-3. **Hash-based caching is implemented** — check `parser.py` calls `cache.get()` before `llm_client.chat_completion()`
+2. **All LLM calls use `temperature=0` and `seed=42`** — check `cv_parser/service.py` calls `llm_client.chat_completion(..., temperature=0, seed=42)`
+3. **Hash-based caching is implemented** — check `cv_parser/service.py` calls `cache.get()` before `llm_client.chat_completion()`
 4. **All functions have type hints** — verify with `mypy` compatibility
 5. **All API responses include version metadata** — check `app/main.py` response wrappers
 

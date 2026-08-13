@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""CV parser service implementation.
+
+This module owns candidate CV parsing logic only.
+JD parsing must live in a dedicated service/module.
+"""
+
 import asyncio
 import logging
 from pathlib import Path
@@ -8,7 +14,7 @@ from typing import Any
 from app.config import settings
 from app.core.hash_cache import HashCache
 from app.core.llm_client import LLMClient
-from app.services.parser.helpers import (
+from app.services.cv_parser.helpers import (
     apply_content_fallback,
     as_list,
     build_compressed_prompt,
@@ -44,12 +50,12 @@ from app.services.parser.helpers import (
     to_clean_text,
     unique_keep_order,
 )
-from app.services.parser.pdf_utils import (
+from app.services.cv_parser.pdf_utils import (
     extract_with_pdfplumber,
     extract_with_pypdf,
     render_pdf_pages_as_data_urls,
 )
-from app.services.parser.prompts import (
+from app.services.cv_parser.prompts import (
     PARSER_SYSTEM_PROMPT,
     PARSER_VISION_FOCUS_PROMPT,
     PARSER_VISION_USER_PROMPT,
@@ -298,8 +304,13 @@ class CVParserService:
         return merged
 
 
-def build_parser_service() -> CVParserService:
+def build_cv_parser_service() -> CVParserService:
     return CVParserService(
         llm_client=LLMClient(),
         cache=HashCache(settings.cache_dir),
     )
+
+
+def build_parser_service() -> CVParserService:
+    """Backward-compatible alias for existing imports."""
+    return build_cv_parser_service()

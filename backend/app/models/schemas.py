@@ -125,3 +125,120 @@ class FeedbackAnalyticsResponse(VersionedResponse):
     top_10_hit_rate: float = Field(ge=0, le=1)
     average_score_invited: float
     avg_time_to_hire_days: float
+
+
+class SkillSchema(BaseModel):
+    skill_id: str
+    display_name: str
+    canonical_skill: str
+    priority_order: int
+    weight: float
+    provenance: dict[str, Any] | None = None
+
+
+class JobPostCreateRequest(BaseModel):
+    title: str
+    description: str
+    head_count: int = Field(ge=1)
+    status: str = "draft"
+    start_date: datetime
+    closed_date: datetime | None = None
+
+
+class JobPostUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    head_count: int | None = Field(default=None, ge=1)
+    start_date: datetime | None = None
+    closed_date: datetime | None = None
+
+
+class JobPostStatusUpdateRequest(BaseModel):
+    status: str
+    closed_date: datetime | None = None
+
+
+class JDParseRequest(BaseModel):
+    jd_text: str
+
+
+class JobPostItemResponse(BaseModel):
+    id: UUID
+    title: str
+    description: str
+    jd_summary_200: str
+    head_count: int
+    status: str
+    start_date: datetime
+    closed_date: datetime | None
+    jd_parsed_json: dict[str, Any] | None
+    weight_config_json: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobPostListResponse(VersionedResponse):
+    items: list[JobPostItemResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class JobPostDetailResponse(VersionedResponse):
+    job: JobPostItemResponse
+    candidates: list[dict[str, Any]]
+
+
+class JobPostMutationResponse(VersionedResponse):
+    id: UUID
+    status: str
+    updated_at: datetime
+
+
+class JobPostDuplicateResponse(VersionedResponse):
+    new_job_id: UUID
+
+
+class JDParseResponse(VersionedResponse):
+    id: UUID
+    jd_parsed_json: dict[str, Any]
+    weight_config_json: dict[str, Any]
+    updated_at: datetime
+
+
+class JobCandidateSummaryItem(BaseModel):
+    candidate_id: UUID
+    match_score: float
+    fit_level: str
+    source_channel: str
+    cv_parse_status: str
+    score_breakdown: dict[str, Any]
+
+
+class JobCandidateListResponse(VersionedResponse):
+    items: list[JobCandidateSummaryItem]
+    total: int
+    page: int
+    limit: int
+
+
+class JobChannelStatItem(BaseModel):
+    source_channel: str
+    candidate_count: int
+    avg_match_score: float
+
+
+class JobChannelStatsResponse(VersionedResponse):
+    job_post_id: UUID
+    by_channel: list[JobChannelStatItem]
+
+
+class JobDiagnosisItem(BaseModel):
+    skill: str
+    satisfaction_rate: float
+    flag_low: bool
+
+
+class JobDiagnosisResponse(VersionedResponse):
+    job_post_id: UUID
+    must_skill_satisfaction: list[JobDiagnosisItem]

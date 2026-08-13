@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.services.parser.prompts import KNOWN_SKILLS
+from app.services.cv_parser.prompts import KNOWN_SKILLS
 
 
 def as_list(value: Any) -> list[Any]:

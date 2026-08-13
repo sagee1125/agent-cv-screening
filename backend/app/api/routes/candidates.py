@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.dependencies import get_db_session, get_parser_service
+from app.api.dependencies import get_cv_parser_service, get_db_session
 from app.config import settings
 from app.models.database import Candidate, ExtractedData, Resume
 from app.models.schemas import (
@@ -20,7 +20,7 @@ from app.models.schemas import (
     CandidateListResponse,
     CandidateUploadResponse,
 )
-from app.services.parser import CVParserService
+from app.services.cv_parser import CVParserService
 
 router = APIRouter(prefix="/candidates")
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ async def upload_candidate_cv(
     name: str | None = Form(default=None),
     phone: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db_session),
-    parser: CVParserService = Depends(get_parser_service),
+    parser: CVParserService = Depends(get_cv_parser_service),
 ) -> CandidateUploadResponse:
     del job_id  # kept for API compatibility
     extracted: ExtractedData | None = None
