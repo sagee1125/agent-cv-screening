@@ -78,6 +78,6 @@ Important defaults and fixed behaviors in code:
   - default `llm_vision_model` is `glm-4v-flash`
 - `docker-compose.yml`
   - `LLM_MODEL` fallback default is `glm-4-flash`
-- `backend/app/services/parser.py` and `backend/app/services/parser/service.py`
+- `backend/app/services/cv_parser/service.py`
   - many parser calls use fixed `temperature=0` and `seed=42`
   - vision retry, focus pass, and text fallback are configurable, but call-time parameters remain fixed

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.services.parser import CVParserService
+from app.services.cv_parser import CVParserService
 
 
 class DummyCache:

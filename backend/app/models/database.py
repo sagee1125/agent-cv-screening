@@ -1,9 +1,86 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, DECIMAL, Text, Boolean, func, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
-from sqlalchemy.orm import declarative_base, relationship
+import enum
 import uuid
 
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    DECIMAL,
+    Enum as SQLEnum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.orm import declarative_base, relationship
+
 Base = declarative_base()
+
+
+class JobPostStatus(enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    CLOSED = "closed"
+
+
+class FitLevel(enum.Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class CVParseStatus(enum.Enum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    PENDING = "pending"
+
+
+ENUM_VALUE_OPTIONS = {
+    "values_callable": lambda enum_cls: [item.value for item in enum_cls],
+    "validate_strings": True,
+}
+
+
+class JobPost(Base):
+    __tablename__ = "job_posts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    head_count = Column(Integer, nullable=False, default=1)
+    status = Column(
+        SQLEnum(JobPostStatus, name="job_post_status", **ENUM_VALUE_OPTIONS),
+        nullable=False,
+        default=JobPostStatus.DRAFT,
+    )
+    start_date = Column(DateTime, nullable=False)
+    closed_date = Column(DateTime, nullable=True)
+    jd_parsed_json = Column(JSONB, nullable=False, default=dict)
+    weight_config_json = Column(JSONB, nullable=False, default=dict)
+    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    job_candidates = relationship("JobCandidate", back_populates="job_post", cascade="all, delete-orphan")
+    jd_parser_histories = relationship(
+        "JDParserHistory",
+        back_populates="job_post",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        CheckConstraint("head_count > 0", name="ck_job_posts_head_count_positive"),
+        Index("idx_job_posts_status_created_at", "status", "created_at"),
+        Index("idx_job_posts_deleted_at", "deleted_at"),
+        Index("idx_job_posts_jd_parsed_json", "jd_parsed_json", postgresql_using="gin"),
+        Index("idx_job_posts_weight_config_json", "weight_config_json", postgresql_using="gin"),
+    )
+
 
 class Candidate(Base):
     __tablename__ = "candidates"
@@ -15,6 +92,7 @@ class Candidate(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     resumes = relationship("Resume", back_populates="candidate")
+    job_candidates = relationship("JobCandidate", back_populates="candidate")
 
 
 class Resume(Base):
@@ -98,6 +176,60 @@ class FeedbackLog(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     scoring_result = relationship("ScoringResult", back_populates="feedback_logs")
+
+
+class JobCandidate(Base):
+    __tablename__ = "job_candidates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_post_id = Column(UUID(as_uuid=True), ForeignKey("job_posts.id"), nullable=False)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), nullable=False)
+    match_score = Column(DECIMAL(5, 2), nullable=False, default=0)
+    score_breakdown_json = Column(JSONB, nullable=False, default=dict)
+    source_channel = Column(String(64), nullable=False)
+    fit_level = Column(
+        SQLEnum(FitLevel, name="fit_level_type", **ENUM_VALUE_OPTIONS),
+        nullable=False,
+        default=FitLevel.LOW,
+    )
+    cv_parse_status = Column(
+        SQLEnum(CVParseStatus, name="cv_parse_status_type", **ENUM_VALUE_OPTIONS),
+        nullable=False,
+        default=CVParseStatus.PENDING,
+    )
+    imported_at = Column(DateTime, server_default=func.now(), nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    job_post = relationship("JobPost", back_populates="job_candidates")
+    candidate = relationship("Candidate", back_populates="job_candidates")
+
+    __table_args__ = (
+        UniqueConstraint("job_post_id", "candidate_id", name="uq_job_candidates_job_post_candidate"),
+        CheckConstraint("match_score >= 0 AND match_score <= 100", name="ck_job_candidates_match_score_range"),
+        Index("idx_job_candidates_job_post_score", "job_post_id", "match_score"),
+        Index("idx_job_candidates_candidate_imported", "candidate_id", "imported_at"),
+        Index("idx_job_candidates_job_post_source_channel", "job_post_id", "source_channel"),
+        Index("idx_job_candidates_fit_level", "fit_level"),
+        Index("idx_job_candidates_score_breakdown_json", "score_breakdown_json", postgresql_using="gin"),
+    )
+
+
+class JDParserHistory(Base):
+    __tablename__ = "jd_parser_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_post_id = Column(UUID(as_uuid=True), ForeignKey("job_posts.id"), nullable=False, index=True)
+    parsed_json = Column(JSONB, nullable=False, default=dict)
+    weight_config_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    job_post = relationship("JobPost", back_populates="jd_parser_histories")
+
+    __table_args__ = (
+        Index("idx_jd_parser_history_job_post_created_at", "job_post_id", "created_at"),
+        Index("idx_jd_parser_history_parsed_json", "parsed_json", postgresql_using="gin"),
+    )
 
 
 class SkillTaxonomy(Base):
