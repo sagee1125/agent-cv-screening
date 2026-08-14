@@ -3,7 +3,7 @@ import { JDPasteArea } from "../components/JDParser/JDPasteArea";
 import { SkillTagList } from "../components/JDParser/SkillTagList";
 import { SkillWeightDrag } from "../components/JDParser/SkillWeightDrag";
 import { JobCard } from "../components/JobCard";
-import { JobPostDetail } from "../components/JobPostDetail";
+import { JobPostCreate } from "../components/JobPostCreate";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -17,6 +17,7 @@ import {
   duplicateJobPost,
   parseJobJD,
   patchJobStatus,
+  updateJobPost,
 } from "../services/jobService";
 import type { JDParsedPayload, JobPostStatus, SkillItem } from "../types";
 import { formatDate } from "../utils";
@@ -46,6 +47,7 @@ export function JobPostList() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jdText, setJdText] = useState("");
   const [parsing, setParsing] = useState(false);
+  const [savingJD, setSavingJD] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [parsedJD, setParsedJD] = useState<JDParsedPayload | null>(null);
   const [weightedSkills, setWeightedSkills] = useState<SkillItem[]>([]);
@@ -142,12 +144,13 @@ export function JobPostList() {
     }
   };
 
-  const handleParseJD = async () => {
+  const handleParseJD = async (nextJDText: string) => {
     if (!selectedJob) return;
     setParsing(true);
     setParseError(null);
+    setJdText(nextJDText);
     try {
-      const response = await parseJobJD(selectedJob.id, jdText);
+      const response = await parseJobJD(selectedJob.id, nextJDText);
       setParsedJD(response.jdParsedJson);
       setWeightedSkills([
         ...response.jdParsedJson.mustSkills,
@@ -162,6 +165,24 @@ export function JobPostList() {
       setParseError(message);
     } finally {
       setParsing(false);
+    }
+  };
+
+  const handleSaveJD = async (nextJDText: string) => {
+    if (!selectedJob) return;
+    setSavingJD(true);
+    setJdText(nextJDText);
+    try {
+      await updateJobPost(selectedJob.id, {
+        description: nextJDText,
+      });
+      refresh();
+    } catch (saveError) {
+      window.alert(
+        saveError instanceof Error ? saveError.message : "Failed to save JD."
+      );
+    } finally {
+      setSavingJD(false);
     }
   };
 
@@ -212,8 +233,8 @@ export function JobPostList() {
                       }}
                       className={`cursor-pointer rounded-xl transition ${
                         selectedJobId === job.id
-                          ? "ring-2 ring-sky-500"
-                          : "hover:ring-1 hover:ring-slate-300"
+                          ? "ring-2 ring-slate-500"
+                          : "hover:ring-2 hover:ring-slate-300"
                       } ${workingJobId === job.id ? "opacity-60" : ""}`}
                     >
                       <JobCard
@@ -277,10 +298,12 @@ export function JobPostList() {
                   </div>
 
                   <JDPasteArea
+                    key={selectedJob.id}
                     value={jdText}
-                    onChange={setJdText}
                     onParse={handleParseJD}
+                    onSave={handleSaveJD}
                     parsing={parsing}
+                    saving={savingJD}
                   />
                   {parseError ? (
                     <p className="text-sm text-rose-600">{parseError}</p>
@@ -304,8 +327,8 @@ export function JobPostList() {
         </div>
       </div>
       {createOpen && (
-        <JobPostDetail
-          editable
+        <JobPostCreate
+          modalTitle="Create Job Post"
           onClose={() => setCreateOpen(false)}
           onSaved={refresh}
         />

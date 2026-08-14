@@ -98,25 +98,89 @@ function normalizeJDParsedPayload(value: unknown): JDParsedPayload | null {
   const mustSkills = mapSkills(payload.mustSkills ?? payload.must_skills, "must");
   const preferredSkills = mapSkills(payload.preferredSkills ?? payload.preferred_skills, "preferred");
 
-  const languageRequirements = Array.isArray(payload.languageRequirements)
+  const normalizeSourceSentence = (raw: Record<string, unknown>): string | undefined => {
+    if (typeof raw.sourceSentence === "string") return raw.sourceSentence;
+    if (typeof raw.source_sentence === "string") return raw.source_sentence;
+    if (typeof raw.provenance === "string") return raw.provenance;
+    const provenance = (raw.provenance ?? {}) as Record<string, unknown>;
+    if (typeof provenance.source_sentence === "string") return provenance.source_sentence;
+    return undefined;
+  };
+  type LanguageItem = JDParsedPayload["languageRequirements"][number];
+  type EducationItem = NonNullable<JDParsedPayload["educationRequirement"]>;
+  type VisaItem = NonNullable<JDParsedPayload["visaRequirement"]>;
+
+  const languageRaw = Array.isArray(payload.languageRequirements)
     ? payload.languageRequirements
     : Array.isArray(payload.language_requirements)
       ? payload.language_requirements
       : [];
+  const languageRequirements = languageRaw.reduce<LanguageItem[]>((acc, item) => {
+      const raw = (item ?? {}) as Record<string, unknown>;
+      if (typeof raw.language !== "string" || typeof raw.level !== "string") return acc;
+      const normalized: LanguageItem = {
+        language: raw.language,
+        level: raw.level as LanguageItem["level"],
+        isMandatory:
+          typeof raw.isMandatory === "boolean"
+            ? raw.isMandatory
+            : typeof raw.is_mandatory === "boolean"
+              ? raw.is_mandatory
+              : false,
+      };
+      const sourceSentence = normalizeSourceSentence(raw);
+      if (sourceSentence) {
+        normalized.sourceSentence = sourceSentence;
+      }
+      acc.push(normalized);
+      return acc;
+    }, []);
 
-  const educationRequirement =
-    (payload.educationRequirement as JDParsedPayload["educationRequirement"]) ??
-    (payload.education_requirement as JDParsedPayload["educationRequirement"]) ??
-    null;
-  const visaRequirement =
-    (payload.visaRequirement as JDParsedPayload["visaRequirement"]) ??
-    (payload.visa_requirement as JDParsedPayload["visaRequirement"]) ??
-    null;
+  const educationRaw = ((payload.educationRequirement ??
+    payload.education_requirement ??
+    null) ?? null) as Record<string, unknown> | null;
+  const educationRequirement: JDParsedPayload["educationRequirement"] =
+    educationRaw && typeof educationRaw === "object"
+      ? {
+          minimumDegree:
+            (educationRaw.minimumDegree as EducationItem["minimumDegree"]) ??
+            (educationRaw.minimum_degree as EducationItem["minimumDegree"]) ??
+            "none",
+          fieldOfStudy:
+            (educationRaw.fieldOfStudy as string | null | undefined) ??
+            (educationRaw.field_of_study as string | null | undefined) ??
+            null,
+          isMandatory:
+            typeof educationRaw.isMandatory === "boolean"
+              ? educationRaw.isMandatory
+              : typeof educationRaw.is_mandatory === "boolean"
+                ? educationRaw.is_mandatory
+                : false,
+          sourceSentence: normalizeSourceSentence(educationRaw) ?? null,
+        }
+      : null;
+
+  const visaRaw = ((payload.visaRequirement ?? payload.visa_requirement ?? null) ??
+    null) as Record<string, unknown> | null;
+  const visaRequirement: JDParsedPayload["visaRequirement"] =
+    visaRaw && typeof visaRaw === "object"
+      ? {
+          requirementType:
+            (visaRaw.requirementType as VisaItem["requirementType"]) ??
+            (visaRaw.requirement_type as VisaItem["requirementType"]) ??
+            "unknown",
+          targetRegion:
+            (visaRaw.targetRegion as string | null | undefined) ??
+            (visaRaw.target_region as string | null | undefined) ??
+            null,
+          sourceSentence: normalizeSourceSentence(visaRaw) ?? null,
+        }
+      : null;
 
   return {
     mustSkills,
     preferredSkills,
-    languageRequirements: languageRequirements as JDParsedPayload["languageRequirements"],
+    languageRequirements,
     educationRequirement,
     visaRequirement,
   };

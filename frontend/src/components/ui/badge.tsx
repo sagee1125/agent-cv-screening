@@ -7,7 +7,8 @@ type BadgeVariant =
   | "outline"
   | "success"
   | "info"
-  | "danger";
+  | "danger"
+  | "language";
 
 const badgeVariantClasses: Record<BadgeVariant, string> = {
   default: "border-transparent bg-slate-900 text-slate-50",
@@ -16,10 +17,10 @@ const badgeVariantClasses: Record<BadgeVariant, string> = {
   success: "border-transparent bg-emerald-100 text-emerald-700",
   info: "border-transparent bg-sky-100 text-sky-700",
   danger: "border-transparent bg-rose-100 text-rose-700",
+  language: "border-transparent bg-amber-100 text-amber-700",
 };
 
-export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement> {
+export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: BadgeVariant;
 }
 
