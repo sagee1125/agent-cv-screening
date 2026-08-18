@@ -4,7 +4,7 @@
 **Version:** 1.0.0  
 **Status:** Draft  
 **Date:** 2026-08-03  
-**Reference Documents:** `docs/PRD.md`, `docs/IMPLEMENTATION_PLAN.md`
+**Reference Documents:** `docs/PRD-Overall-v1.0.md`, `docs/IMPLEMENTATION_PLAN.md`
 
 ---
 
@@ -67,7 +67,7 @@ This document defines detailed functional requirements for the Agent-CV-Screenin
 ## 5. Canonical Data Contract Dependency
 
 All functional behavior in this document must follow canonical enums and field names defined in:
-- `docs/PRD.md` -> `Canonical Data Dictionary (Single Source of Truth)`
+- `docs/PRD-Overall-v1.0.md` -> Section 5 (Canonical Data Dictionary)
 
 Critical enums:
 - `processing_status`: `queued | processing | success | failed`
@@ -314,7 +314,7 @@ Demo is considered functionally complete when:
 ## 12. Change Control
 
 Any change to enums, field names, or required data structures must:
-1. Update `docs/PRD.md` canonical dictionary first.
+1. Update `docs/PRD-Overall-v1.0.md` canonical dictionary first.
 2. Update this FRS accordingly.
 3. Update backend schemas and frontend types in the same change set.
 

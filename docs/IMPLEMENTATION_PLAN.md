@@ -80,7 +80,7 @@ This plan is based on the current repository state and focuses on closing the ga
 - Keep scoring rules/config externalized in versioned config payloads so future domains can reuse the engine without code rewrite.
 - Keep API boundaries clear so each module can later be extracted into an independent service/package.
 - Enforce one canonical contract source for enums/field names:
-  - Follow `docs/PRD.md` section `Canonical Data Dictionary (Single Source of Truth)`.
+  - Follow `docs/PRD-Overall-v1.0.md` section `Canonical Data Dictionary (Single Source of Truth)`.
 
 ## 4) Technology Stack
 
