@@ -72,14 +72,18 @@ def extract_major_from_text(text: str | None) -> str | None:
     if not text:
         return None
     normalized = re.sub(r"\s+", " ", str(text)).strip()
-    # Heuristic: capture phrase after "in/of", e.g. "Master in Computer Science".
-    match = re.search(r"\b(?:in|of)\s+([A-Za-z][A-Za-z\s&/-]{2,60})", normalized, flags=re.IGNORECASE)
-    if not match:
-        return None
-    candidate = match.group(1).strip(" .,-;:")
-    if len(candidate) < 3:
-        return None
-    return candidate
+    # Prefer a major introduced by "in" (e.g. "BSc in Computer Science").
+    # Fall back to the last "of" phrase so degree-name "of" matches such as
+    # "Master of Engineering" do not shadow the real major.
+    match = re.search(r"\bin\s+([A-Za-z][A-Za-z\s&/-]{2,60})", normalized, flags=re.IGNORECASE)
+    if match:
+        candidate = match.group(1).strip(" .,-;:")
+        return candidate if len(candidate) >= 3 else None
+    of_matches = list(re.finditer(r"\bof\s+([A-Za-z][A-Za-z\s&/-]{2,60})", normalized, flags=re.IGNORECASE))
+    if of_matches:
+        candidate = of_matches[-1].group(1).strip(" .,-;:")
+        return candidate if len(candidate) >= 3 else None
+    return None
 
 
 def extract_institution_from_text(text: str | None) -> str | None:
@@ -182,8 +186,10 @@ def extract_company_from_text(text: str | None) -> str | None:
         return None
     normalized = re.sub(r"\s+", " ", str(text)).strip()
     patterns = [
-        r"\bat\s+([A-Z][A-Za-z0-9&.,'()/-]{1,80}?)(?=\s+(?:19|20)\d{2}(?:[./-](?:0?[1-9]|1[0-2]))?\b|$)",
-        r"\bwith\s+([A-Z][A-Za-z0-9&.,'()/-]{1,80}?)(?=\s+(?:19|20)\d{2}(?:[./-](?:0?[1-9]|1[0-2]))?\b|$)",
+        # Allow spaces so multi-word company names ("ACME Corp") are captured;
+        # the lookahead still stops the match right before the year range.
+        r"\bat\s+([A-Z][A-Za-z0-9&.,'()/\s-]{1,80}?)(?=\s+(?:19|20)\d{2}(?:[./-](?:0?[1-9]|1[0-2]))?\b|$)",
+        r"\bwith\s+([A-Z][A-Za-z0-9&.,'()/\s-]{1,80}?)(?=\s+(?:19|20)\d{2}(?:[./-](?:0?[1-9]|1[0-2]))?\b|$)",
     ]
     for pattern in patterns:
         match = re.search(pattern, normalized)
@@ -310,6 +316,8 @@ def normalize_experience_items(value: Any) -> list[dict[str, Any]]:
                     "company": company,
                     "job_title": job_title,
                     "period": period,
+                    "start_date": start_date,
+                    "end_date": end_date,
                     "description": description,
                 }
             )
@@ -323,6 +331,8 @@ def normalize_experience_items(value: Any) -> list[dict[str, Any]]:
                         "company": extract_company_from_text(text),
                         "job_title": extract_title_from_text(text),
                         "period": combine_period(start_date, end_date),
+                        "start_date": start_date,
+                        "end_date": end_date,
                         "description": text,
                     }
                 )
@@ -390,6 +400,8 @@ def merge_fragmented_experience_rows(rows: list[dict[str, Any]]) -> list[dict[st
             "company": to_clean_text(raw_item.get("company")),
             "job_title": to_clean_text(raw_item.get("job_title")),
             "period": to_clean_text(raw_item.get("period")),
+            "start_date": to_clean_text(raw_item.get("start_date")),
+            "end_date": to_clean_text(raw_item.get("end_date")),
             "description": to_clean_text(raw_item.get("description")),
         }
         has_company = bool(item.get("company"))
@@ -409,10 +421,14 @@ def merge_fragmented_experience_rows(rows: list[dict[str, Any]]) -> list[dict[st
                 current["job_title"] = item["job_title"]
             if has_period and not current.get("period"):
                 current["period"] = item["period"]
+                current["start_date"] = current["start_date"] or item.get("start_date")
+                current["end_date"] = current["end_date"] or item.get("end_date")
             continue
 
         if current and has_period and not current.get("period"):
             current["period"] = item["period"]
+            current["start_date"] = current["start_date"] or item.get("start_date")
+            current["end_date"] = current["end_date"] or item.get("end_date")
             if has_job_title and not current.get("job_title"):
                 current["job_title"] = item["job_title"]
             continue
@@ -423,6 +439,8 @@ def merge_fragmented_experience_rows(rows: list[dict[str, Any]]) -> list[dict[st
                 current["job_title"] = item["job_title"]
             if not current.get("period") and has_period:
                 current["period"] = item["period"]
+                current["start_date"] = current["start_date"] or item.get("start_date")
+                current["end_date"] = current["end_date"] or item.get("end_date")
         else:
             merged.append(item)
 
@@ -440,9 +458,7 @@ def merge_fragmented_education_rows(rows: list[dict[str, Any]]) -> list[dict[str
     if not rows:
         return []
 
-    merged_by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    pass_through: list[dict[str, Any]] = []
-
+    merged: list[dict[str, Any]] = []
     for raw_item in rows:
         item = {
             "school": to_clean_text(raw_item.get("school")),
@@ -450,22 +466,41 @@ def merge_fragmented_education_rows(rows: list[dict[str, Any]]) -> list[dict[str
             "major": to_clean_text(raw_item.get("major")),
             "period": to_clean_text(raw_item.get("period")),
         }
+        # A school-only fragment (no degree/major) that is not a standalone
+        # institution belongs to the previous degree row: use it as the school
+        # (e.g. "MSc in Computer Science, MIT 2020" -> school "MIT 2020").
+        is_school_fragment = bool(item.get("school")) and not item.get("degree") and not item.get("major")
+        if is_school_fragment and merged:
+            previous = merged[-1]
+            if previous.get("degree") and not extract_institution_from_text(item["school"]):
+                previous["school"] = item["school"]
+                if item.get("period") and not previous.get("period"):
+                    previous["period"] = item["period"]
+                continue
+        # Otherwise merge rows sharing the same (school, degree) key.
         key = (
             (item.get("school") or "").casefold(),
             (item.get("degree") or "").casefold(),
         )
         if not key[0] and not key[1]:
-            pass_through.append(item)
+            merged.append(item)
             continue
-        if key in merged_by_key:
-            existing = merged_by_key[key]
+        existing = next(
+            (
+                row
+                for row in merged
+                if (row.get("school") or "").casefold() == key[0]
+                and (row.get("degree") or "").casefold() == key[1]
+            ),
+            None,
+        )
+        if existing is not None:
             for field in ("major", "period", "school", "degree"):
                 if item.get(field) and not existing.get(field):
                     existing[field] = item[field]
-        else:
-            merged_by_key[key] = dict(item)
-
-    return [*merged_by_key.values(), *pass_through]
+            continue
+        merged.append(item)
+    return merged
 
 
 def compress_cv_text(*, raw_text: str, max_chars: int) -> str:

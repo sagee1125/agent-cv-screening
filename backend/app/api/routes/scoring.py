@@ -1,3 +1,7 @@
+# TODO(agent-migration): This legacy REST router exists for the traditional frontend.
+# It invokes the shared skill layer (app.skills.score) for scoring/ranking, then persists
+# results to the DB. When the API is deprecated, delete this router; the integrated agent
+# calls .codex/skills/scorer/scripts/run_score.py directly instead.
 from __future__ import annotations
 
 import logging
@@ -13,6 +17,7 @@ from app.api.dependencies import get_db_session, get_scorer_service
 from app.config import settings
 from app.models.database import Candidate, DepartmentConfig, ExtractedData, Resume, ScoringResult
 from app.models.schemas import ScoreDetailResponse, ScoreStartResponse, ScoringListItem, ScoringListResponse
+from app.skills.score import rank_candidates_skill, score_candidate_skill
 from app.services.scorer import ScorerService
 
 router = APIRouter(prefix="/jobs")
@@ -48,7 +53,7 @@ async def score_job_candidates(
 
     scored_items: list[dict[str, object]] = []
     for resume, candidate, extracted in rows:
-        score_payload = scorer.score_candidate(extracted.structured_data, job.config)
+        score_payload = score_candidate_skill(extracted.structured_data, job.config, scorer=scorer)
         scored_items.append(
             {
                 "candidate_id": candidate.id,
@@ -57,7 +62,7 @@ async def score_job_candidates(
             }
         )
 
-    ranked = scorer.rank(
+    ranked = rank_candidates_skill(
         [
             {
                 "candidate_id": item["candidate_id"],

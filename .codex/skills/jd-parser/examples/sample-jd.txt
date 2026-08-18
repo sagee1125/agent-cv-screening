@@ -1,0 +1,15 @@
+Senior Backend Engineer
+
+Requirements:
+- 3+ years of experience with Python and FastAPI
+- Strong SQL and PostgreSQL skills
+- Must have Docker
+- Nice to have: AWS, Kubernetes, Redis
+
+Preferred:
+- Experience with distributed systems
+- Kubernetes is a plus
+
+Responsibilities:
+- Design and maintain REST APIs
+- Optimize database queries

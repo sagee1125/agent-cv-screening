@@ -1,0 +1,4 @@
+interface:
+  display_name: "CV Parser"
+  short_description: "Parse CV/PDF resumes into structured candidate JSON"
+  default_prompt: "Use $skill-cv-parser to parse this resume file into structured data: <path>"

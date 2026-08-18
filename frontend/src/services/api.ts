@@ -1,9 +1,3 @@
-const mockFlagRaw = (
-  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-    ?.REACT_APP_USE_MOCK ?? "false"
-).toLowerCase();
-
-export const USE_MOCK_MODE = mockFlagRaw === "true" || mockFlagRaw === "1";
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 

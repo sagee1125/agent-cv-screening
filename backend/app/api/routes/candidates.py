@@ -1,3 +1,7 @@
+# TODO(agent-migration): This legacy REST router exists for the traditional frontend.
+# It invokes the shared skill layer (app.skills.cv_parse) for CV parsing, then persists
+# results to the DB. When the API is deprecated, delete this router; the integrated agent
+# calls .codex/skills/cv-parser/scripts/run_cv_parse.py directly instead.
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +24,7 @@ from app.models.schemas import (
     CandidateListResponse,
     CandidateUploadResponse,
 )
+from app.skills.cv_parse import parse_cv_skill
 from app.services.cv_parser import CVParserService
 
 router = APIRouter(prefix="/candidates")
@@ -102,7 +107,7 @@ async def upload_candidate_cv(
 
         logger.info(f"Parsing candidate CV: {saved_path}")
         try:
-            parse_result = await parser.parse_cv(str(saved_path))
+            parse_result = await parse_cv_skill(str(saved_path), parser=parser)
             structured = parse_result["structured_data"]
 
             # Backfill candidate profile with parsed fields when available.

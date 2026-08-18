@@ -39,6 +39,9 @@ class Settings(BaseSettings):
         "http://localhost:8000",
     ]
 
-    model_config = SettingsConfigDict(env_file=".env")
+    # Ignore unrelated .env keys so loading never fails on extra input
+    # (pydantic-settings defaults to extra="forbid", which breaks when the
+    # .env contains aliased keys such as OPENAI_API_KEY).
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

@@ -1,0 +1,4 @@
+interface:
+  display_name: "JD Parser"
+  short_description: "Parse job descriptions into structured requirements and skills"
+  default_prompt: "Use $skill-jd-parser to parse this job description into structured requirements: <jd-text>"
