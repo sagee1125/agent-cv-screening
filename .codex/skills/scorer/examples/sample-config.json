@@ -1,0 +1,41 @@
+{
+  "required_skills": [
+    "Python",
+    "FastAPI",
+    "Docker"
+  ],
+  "target_experience_years": 3,
+  "target_degrees": [
+    "MSc",
+    "硕士"
+  ],
+  "weights": {
+    "skill_match": 0.3,
+    "experience_match": 0.2,
+    "education_match": 0.2,
+    "research_quality": 0.15,
+    "experience_quality": 0.15
+  },
+  "tiers": [
+    {
+      "name": "Tier 1",
+      "min_score": 85,
+      "max_score": 100
+    },
+    {
+      "name": "Tier 2",
+      "min_score": 70,
+      "max_score": 84.99
+    },
+    {
+      "name": "Tier 3",
+      "min_score": 50,
+      "max_score": 69.99
+    },
+    {
+      "name": "Tier 4",
+      "min_score": 0,
+      "max_score": 49.99
+    }
+  ]
+}

@@ -98,7 +98,7 @@ def test_normalize_schema_handles_aliases_and_string_payloads() -> None:
     assert normalized["skills"] == ["Python", "FastAPI", "PostgreSQL"]
     assert "MIT 2020" in normalized["education"][0]["school"]
     assert normalized["education"][0]["degree"] == "Master"
-    assert normalized["experience"][0]["title"] == "Engineer"
+    assert normalized["experience"][0]["job_title"] == "Engineer"
     assert normalized["publications"][0]["title"] == "Efficient CV Parsing 2022"
 
 
@@ -136,7 +136,7 @@ def test_normalize_experience_extracts_fields_from_text_line() -> None:
 
     normalized = CVParserService._normalize_schema(payload)
     first = normalized["experience"][0]
-    assert first["title"] is not None
+    assert first["job_title"] is not None
     assert first["company"] == "ACME Corp"
     assert first["start_date"] == "2021-01"
     assert first["end_date"] == "2024-03"

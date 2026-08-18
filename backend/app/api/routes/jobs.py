@@ -1,3 +1,7 @@
+# TODO(agent-migration): This legacy REST router exists for the traditional frontend.
+# It invokes the shared skill layer (app.skills.jd_parse) for JD parsing, then persists
+# results to the DB. When the API is deprecated, delete this router; the integrated agent
+# calls .codex/skills/jd-parser/scripts/run_jd_parse.py directly instead.
 from __future__ import annotations
 
 import logging
@@ -30,6 +34,7 @@ from app.models.schemas import (
     JobPostStatusUpdateRequest,
     JobPostUpdateRequest,
 )
+from app.skills.jd_parse import parse_jd_skill
 from app.services.jd_parser import JDParserService
 
 router = APIRouter(prefix="/jobs")
@@ -119,7 +124,7 @@ async def create_job(
         if not description.strip():
             raise HTTPException(status_code=422, detail="JD description is required.")
         ## parse the JD
-        parse_result = await parser.parse_jd(description)
+        parse_result = await parse_jd_skill(description, parser=parser)
         parsed = parse_result.get("structured_data")
         if not isinstance(parsed, dict):
             raise HTTPException(status_code=422, detail=parse_result.get("error_message", "Failed to parse JD."))
@@ -426,7 +431,7 @@ async def parse_jd(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    parse_result = await parser.parse_jd(payload.jd_text)
+    parse_result = await parse_jd_skill(payload.jd_text, parser=parser)
     parsed = parse_result.get("structured_data")
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=422, detail=parse_result.get("error_message", "Failed to parse JD."))

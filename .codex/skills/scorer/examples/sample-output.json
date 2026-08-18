@@ -1,0 +1,76 @@
+{
+  "dimension_scores": {
+    "skill_match": 86.5,
+    "experience_match": 0.0,
+    "education_match": 100.0,
+    "research_quality": 30.0,
+    "experience_quality": 55.0
+  },
+  "total_score": 58.7,
+  "tier": "Tier 3",
+  "rejected": false,
+  "rejection_reasons": [],
+  "skill_match_details": {
+    "hit": [
+      {
+        "required": "Python",
+        "matched_with": "Python"
+      },
+      {
+        "required": "FastAPI",
+        "matched_with": "FastAPI"
+      },
+      {
+        "required": "Docker",
+        "matched_with": "Docker"
+      }
+    ],
+    "miss": [],
+    "quality": 0.55
+  },
+  "full_snapshot": {
+    "dimension_scores": {
+      "skill_match": 86.5,
+      "experience_match": 0.0,
+      "education_match": 100.0,
+      "research_quality": 30.0,
+      "experience_quality": 55.0
+    },
+    "skill_match_details": {
+      "hit": [
+        {
+          "required": "Python",
+          "matched_with": "Python"
+        },
+        {
+          "required": "FastAPI",
+          "matched_with": "FastAPI"
+        },
+        {
+          "required": "Docker",
+          "matched_with": "Docker"
+        }
+      ],
+      "miss": [],
+      "quality": 0.55
+    },
+    "interview_suggestions": [
+      {
+        "rule_id": "LOW-EXPERIENCE_MATCH",
+        "severity": "high",
+        "text": "Dimension `experience_match` is below 50. Probe depth and practical evidence."
+      },
+      {
+        "rule_id": "LOW-RESEARCH_QUALITY",
+        "severity": "high",
+        "text": "Dimension `research_quality` is below 50. Probe depth and practical evidence."
+      },
+      {
+        "rule_id": "MID-EXPERIENCE_QUALITY",
+        "severity": "medium",
+        "text": "Dimension `experience_quality` is between 50-70. Verify consistency and recency."
+      }
+    ],
+    "hard_filter_status": "passed"
+  }
+}

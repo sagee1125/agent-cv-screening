@@ -1,0 +1,262 @@
+{
+  "status": "success",
+  "parse_path": "jd_preprocessed_rule_parser",
+  "error_message": null,
+  "structured_data": {
+    "must_skills": [
+      {
+        "skill_id": "docker_1",
+        "display_name": "Docker",
+        "canonical_skill": "docker",
+        "priority_order": 1,
+        "weight": 1.0,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      },
+      {
+        "skill_id": "fastapi_2",
+        "display_name": "Fastapi",
+        "canonical_skill": "fastapi",
+        "priority_order": 2,
+        "weight": 1.0,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      },
+      {
+        "skill_id": "postgresql_3",
+        "display_name": "Postgresql",
+        "canonical_skill": "postgresql",
+        "priority_order": 3,
+        "weight": 1.0,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      },
+      {
+        "skill_id": "python_4",
+        "display_name": "Python",
+        "canonical_skill": "python",
+        "priority_order": 4,
+        "weight": 1.0,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      },
+      {
+        "skill_id": "sql_5",
+        "display_name": "Sql",
+        "canonical_skill": "sql",
+        "priority_order": 5,
+        "weight": 1.0,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      }
+    ],
+    "preferred_skills": [
+      {
+        "skill_id": "aws_1",
+        "display_name": "Aws",
+        "canonical_skill": "aws",
+        "priority_order": 1,
+        "weight": 0.6,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      },
+      {
+        "skill_id": "distributed_systems_2",
+        "display_name": "Distributed Systems",
+        "canonical_skill": "distributed_systems",
+        "priority_order": 2,
+        "weight": 0.6,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      },
+      {
+        "skill_id": "kubernetes_3",
+        "display_name": "Kubernetes",
+        "canonical_skill": "kubernetes",
+        "priority_order": 3,
+        "weight": 0.6,
+        "provenance": {
+          "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+          "source_char_start": 0,
+          "source_char_end": 240,
+          "confidence": 0.75
+        }
+      }
+    ],
+    "language_requirements": [
+      {
+        "language": "English",
+        "level": "business",
+        "is_mandatory": false,
+        "provenance": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skil"
+      }
+    ],
+    "education_requirement": {
+      "minimum_degree": "none",
+      "field_of_study": null,
+      "is_mandatory": false,
+      "provenance": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skil"
+    },
+    "visa_requirement": {
+      "requirement_type": "unknown",
+      "target_region": null,
+      "provenance": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skil"
+    },
+    "experience_requirement": {
+      "minimum_years": 3
+    }
+  },
+  "raw_llm_response": {
+    "note": "Rule-based parser with LLM-ready preprocessed payload",
+    "preprocessed_for_llm": {
+      "sections": {
+        "must": [
+          "s:",
+          "3+ years of experience with python and fastapi",
+          "strong sql and postgresql skills",
+          "docker"
+        ],
+        "preferred": [
+          "aws, kubernetes, redis",
+          "experience with distributed systems"
+        ],
+        "responsibility": [
+          "ies:",
+          "design and maintain rest apis",
+          "optimize database queries"
+        ]
+      },
+      "candidate_skills": [
+        {
+          "skill": "docker",
+          "must_score": 2,
+          "preferred_score": 0,
+          "suggested_bucket": "must",
+          "evidence": [
+            "docker"
+          ]
+        },
+        {
+          "skill": "fastapi",
+          "must_score": 2,
+          "preferred_score": 0,
+          "suggested_bucket": "must",
+          "evidence": [
+            "3+ years of experience with python and fastapi"
+          ]
+        },
+        {
+          "skill": "postgresql",
+          "must_score": 2,
+          "preferred_score": 0,
+          "suggested_bucket": "must",
+          "evidence": [
+            "strong sql and postgresql skills"
+          ]
+        },
+        {
+          "skill": "python",
+          "must_score": 2,
+          "preferred_score": 0,
+          "suggested_bucket": "must",
+          "evidence": [
+            "3+ years of experience with python and fastapi"
+          ]
+        },
+        {
+          "skill": "sql",
+          "must_score": 2,
+          "preferred_score": 0,
+          "suggested_bucket": "must",
+          "evidence": [
+            "strong sql and postgresql skills"
+          ]
+        },
+        {
+          "skill": "aws",
+          "must_score": 0,
+          "preferred_score": 1,
+          "suggested_bucket": "preferred",
+          "evidence": [
+            "aws, kubernetes, redis"
+          ]
+        },
+        {
+          "skill": "distributed systems",
+          "must_score": 0,
+          "preferred_score": 1,
+          "suggested_bucket": "preferred",
+          "evidence": [
+            "experience with distributed systems"
+          ]
+        },
+        {
+          "skill": "kubernetes",
+          "must_score": 0,
+          "preferred_score": 1,
+          "suggested_bucket": "preferred",
+          "evidence": [
+            "aws, kubernetes, redis"
+          ]
+        }
+      ],
+      "compressed_text": "s:\n3+ years of experience with python and fastapi\nstrong sql and postgresql skills\ndocker\naws, kubernetes, redis\nexperience with distributed systems\nies:\ndesign and maintain rest apis\noptimize database queries",
+      "char_count_before": 332,
+      "char_count_after": 209
+    },
+    "llm_refine_request": {
+      "system_prompt": "You are a Job Description skill normalizer.\n\nTask:\n- Read only the provided preprocessed JD payload.\n- Produce final `must_skills` and `preferred_skills`.\n- Keep output concise and deterministic.\n\nRules:\n- Return ONE valid JSON object only, no markdown.\n- Use explicit evidence in payload, do not invent facts.\n- Keep each skill as lowercase canonical label.\n- Prefer concrete technical skills over generic soft skills.\n- `must_skills` and `preferred_skills` must not overlap.\n- Max 5 skills per bucket.\n- If confidence is low, return fewer items instead of guessing.\n",
+      "user_prompt": "Refine the JD skills from this preprocessed payload.\n\nReturn JSON with keys:\n- must_skills: string[]\n- preferred_skills: string[]\n- reasoning_trace: {skill, bucket, evidence, confidence}[]\n\nConstraints:\n- bucket must be \"must\" or \"preferred\"\n- confidence is 0~1\n- max 8 reasoning_trace items\n\nPreprocessed payload JSON:\n{\"sections\": {\"must\": [\"s:\", \"3+ years of experience with python and fastapi\", \"strong sql and postgresql skills\", \"docker\"], \"preferred\": [\"aws, kubernetes, redis\", \"experience with distributed systems\"], \"responsibility\": [\"ies:\", \"design and maintain rest apis\", \"optimize database queries\"]}, \"candidate_skills\": [{\"skill\": \"docker\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"docker\"]}, {\"skill\": \"fastapi\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"3+ years of experience with python and fastapi\"]}, {\"skill\": \"postgresql\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"strong sql and postgresql skills\"]}, {\"skill\": \"python\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"3+ years of experience with python and fastapi\"]}, {\"skill\": \"sql\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"strong sql and postgresql skills\"]}, {\"skill\": \"aws\", \"must_score\": 0, \"preferred_score\": 1, \"suggested_bucket\": \"preferred\", \"evidence\": [\"aws, kubernetes, redis\"]}, {\"skill\": \"distributed systems\", \"must_score\": 0, \"preferred_score\": 1, \"suggested_bucket\": \"preferred\", \"evidence\": [\"experience with distributed systems\"]}, {\"skill\": \"kubernetes\", \"must_score\": 0, \"preferred_score\": 1, \"suggested_bucket\": \"preferred\", \"evidence\": [\"aws, kubernetes, redis\"]}], \"compressed_text\": \"s:\\n3+ years of experience with python and fastapi\\nstrong sql and postgresql skills\\ndocker\\naws, kubernetes, redis\\nexperience with distributed systems\\nies:\\ndesign and maintain rest apis\\noptimize database queries\", \"char_count_before\": 332, \"char_count_after\": 209}\n",
+      "response_format": {
+        "type": "json_object"
+      },
+      "expected_output_example": {
+        "must_skills": [
+          "python",
+          "sql"
+        ],
+        "preferred_skills": [
+          "docker",
+          "aws"
+        ],
+        "reasoning_trace": [
+          {
+            "skill": "python",
+            "bucket": "must",
+            "evidence": "experience with python and fastapi",
+            "confidence": 0.92
+          }
+        ]
+      },
+      "input_preview": "{\"sections\": {\"must\": [\"s:\", \"3+ years of experience with python and fastapi\", \"strong sql and postgresql skills\", \"docker\"], \"preferred\": [\"aws, kubernetes, redis\", \"experience with distributed systems\"], \"responsibility\": [\"ies:\", \"design and maintain rest apis\", \"optimize database queries\"]}, \"candidate_skills\": [{\"skill\": \"docker\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"docker\"]}, {\"skill\": \"fastapi\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"3+ years of experience with python and fastapi\"]}, {\"skill\": \"postgresql\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"strong sql and postgresql skills\"]}, {\"skill\": \"python\", \"must_score\": 2, \"preferred_score\": 0, \"suggested_bucket\": \"must\", \"evidence\": [\"3+ years of experience with python and fastapi\"]}, {\"skill\": \"sql\", \"must_"
+    }
+  }
+}
