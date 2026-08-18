@@ -1,6 +1,8 @@
+// Editable JD textarea with Parse and Save actions.
 import { useState } from "react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
 
 interface JDPasteAreaProps {
   value: string;
@@ -10,6 +12,7 @@ interface JDPasteAreaProps {
   saving?: boolean;
 }
 
+// Renders the JD textarea, an edit toggle, and Parse/Save buttons with spinners.
 export function JDPasteArea({
   value,
   onParse,
@@ -54,7 +57,14 @@ export function JDPasteArea({
           onClick={() => onParse(editable ? draftValue : value)}
           disabled={parsing || saving}
         >
-          {parsing ? "Parsing..." : "Parse JD"}
+          {parsing ? (
+            <>
+              <Spinner className="mr-2" />
+              Parsing...
+            </>
+          ) : (
+            "Parse JD"
+          )}
         </Button>
         {editable ? (
           <Button
@@ -62,7 +72,14 @@ export function JDPasteArea({
             onClick={() => onSave(draftValue)}
             disabled={saving}
           >
-            {saving ? "Saving..." : "Save JD"}
+            {saving ? (
+              <>
+                <Spinner className="mr-2" />
+                Saving...
+              </>
+            ) : (
+              "Save JD"
+            )}
           </Button>
         ) : null}
       </div>

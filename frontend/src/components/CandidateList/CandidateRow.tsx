@@ -10,7 +10,8 @@ interface CandidateRowProps {
 
 export function CandidateRow({ candidate }: CandidateRowProps) {
   const [expanded, setExpanded] = useState(false);
-  const progressWidth = `${Math.max(0, Math.min(100, candidate.matchScore))}%`;
+  const matchScore = candidate.matchScore ?? 0;
+  const progressWidth = `${Math.max(0, Math.min(100, matchScore))}%`;
 
   return (
     <div className="rounded-md border border-slate-200 p-3">
@@ -21,18 +22,18 @@ export function CandidateRow({ candidate }: CandidateRowProps) {
         </div>
         <div className="flex items-center gap-3">
           <div className="w-40">
-            <p className="mb-1 text-xs text-slate-600">Score: {candidate.matchScore}</p>
+            <p className="mb-1 text-xs text-slate-600">Score: {matchScore}</p>
             <div className="h-2 rounded-full bg-slate-100">
               <div className="h-2 rounded-full bg-sky-500" style={{ width: progressWidth }} />
             </div>
           </div>
-          <FitLevelBadge fitLevel={candidate.fitLevel} />
+          {candidate.fitLevel ? <FitLevelBadge fitLevel={candidate.fitLevel} /> : null}
           <Button size="sm" variant="outline" onClick={() => setExpanded((prev) => !prev)}>
             {expanded ? "Hide" : "Breakdown"}
           </Button>
         </div>
       </div>
-      {expanded ? (
+      {expanded && candidate.scoreBreakdown ? (
         <div className="mt-3 border-t border-slate-100 pt-3">
           <ScoreBreakdown breakdown={candidate.scoreBreakdown} />
         </div>

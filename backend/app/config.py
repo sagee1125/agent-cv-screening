@@ -1,3 +1,4 @@
+# Application settings loaded from environment variables.
 from typing import List
 
 from pydantic import AliasChoices, Field
@@ -38,6 +39,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://localhost:8000",
     ]
+
+    # PolyU public jobs board used by the one-click sync button.
+    polyu_jobs_base_url: str = "https://jobs.polyu.edu.hk"
+    polyu_jobs_list_url: str = "https://jobs.polyu.edu.hk/general.php"
 
     # Ignore unrelated .env keys so loading never fails on extra input
     # (pydantic-settings defaults to extra="forbid", which breaks when the

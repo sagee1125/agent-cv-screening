@@ -1,3 +1,4 @@
+# SQLAlchemy models for job posts, candidates, scoring, and related records.
 import enum
 import uuid
 
@@ -63,10 +64,12 @@ class JobPost(Base):
     jd_parsed_json = Column(JSONB, nullable=False, default=dict)
     weight_config_json = Column(JSONB, nullable=False, default=dict)
     deleted_at = Column(DateTime, nullable=True)
+    source = Column(String(50), nullable=True)
+    external_ref = Column(String(64), nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    job_candidates = relationship("JobCandidate", back_populates="job_post", cascade="all, delete-orphan")
+    resumes = relationship("Resume", back_populates="job_post", cascade="all, delete-orphan")
     jd_parser_histories = relationship(
         "JDParserHistory",
         back_populates="job_post",
@@ -79,6 +82,7 @@ class JobPost(Base):
         Index("idx_job_posts_deleted_at", "deleted_at"),
         Index("idx_job_posts_jd_parsed_json", "jd_parsed_json", postgresql_using="gin"),
         Index("idx_job_posts_weight_config_json", "weight_config_json", postgresql_using="gin"),
+        Index("uq_job_posts_source_external_ref", "source", "external_ref", unique=True),
     )
 
 
@@ -92,22 +96,32 @@ class Candidate(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     resumes = relationship("Resume", back_populates="candidate")
-    job_candidates = relationship("JobCandidate", back_populates="candidate")
 
 
+## job scoped
 class Resume(Base):
     __tablename__ = "resumes"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), nullable=False, index=True)
+    job_post_id = Column(UUID(as_uuid=True), ForeignKey("job_posts.id"), nullable=False, index=True)
+    
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
-    file_hash = Column(String(64), unique=True, nullable=False)
+    file_hash = Column(String(64), nullable=False)
+    source_channel = Column(String(64), nullable=False, default="manual_upload")
     uploaded_at = Column(DateTime, server_default=func.now())
 
     candidate = relationship("Candidate", back_populates="resumes")
+    job_post = relationship("JobPost", back_populates="resumes")
     extracted_data = relationship("ExtractedData", back_populates="resume", uselist=False)
     scoring_results = relationship("ScoringResult", back_populates="resume")
+
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "file_hash", name="uq_resumes_candidate_file_hash"),
+        Index("idx_resumes_candidate_job", "candidate_id", "job_post_id"),
+        Index("idx_resumes_job_uploaded", "job_post_id", "uploaded_at"),
+    )
 
 
 class ExtractedData(Base):
@@ -176,43 +190,6 @@ class FeedbackLog(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     scoring_result = relationship("ScoringResult", back_populates="feedback_logs")
-
-
-class JobCandidate(Base):
-    __tablename__ = "job_candidates"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_post_id = Column(UUID(as_uuid=True), ForeignKey("job_posts.id"), nullable=False)
-    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), nullable=False)
-    match_score = Column(DECIMAL(5, 2), nullable=False, default=0)
-    score_breakdown_json = Column(JSONB, nullable=False, default=dict)
-    source_channel = Column(String(64), nullable=False)
-    fit_level = Column(
-        SQLEnum(FitLevel, name="fit_level_type", **ENUM_VALUE_OPTIONS),
-        nullable=False,
-        default=FitLevel.LOW,
-    )
-    cv_parse_status = Column(
-        SQLEnum(CVParseStatus, name="cv_parse_status_type", **ENUM_VALUE_OPTIONS),
-        nullable=False,
-        default=CVParseStatus.PENDING,
-    )
-    imported_at = Column(DateTime, server_default=func.now(), nullable=False)
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    job_post = relationship("JobPost", back_populates="job_candidates")
-    candidate = relationship("Candidate", back_populates="job_candidates")
-
-    __table_args__ = (
-        UniqueConstraint("job_post_id", "candidate_id", name="uq_job_candidates_job_post_candidate"),
-        CheckConstraint("match_score >= 0 AND match_score <= 100", name="ck_job_candidates_match_score_range"),
-        Index("idx_job_candidates_job_post_score", "job_post_id", "match_score"),
-        Index("idx_job_candidates_candidate_imported", "candidate_id", "imported_at"),
-        Index("idx_job_candidates_job_post_source_channel", "job_post_id", "source_channel"),
-        Index("idx_job_candidates_fit_level", "fit_level"),
-        Index("idx_job_candidates_score_breakdown_json", "score_breakdown_json", postgresql_using="gin"),
-    )
 
 
 class JDParserHistory(Base):

@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import get_cv_parser_service, get_db_session
 from app.config import settings
-from app.models.database import Candidate, ExtractedData, Resume
+from app.models.database import Candidate, ExtractedData, JobPost, Resume
 from app.models.schemas import (
     CandidateDetailResponse,
     CandidateListItem,
@@ -34,14 +34,14 @@ logger = logging.getLogger(__name__)
 @router.post("/upload", response_model=CandidateUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_candidate_cv(
     file: UploadFile = File(...),
-    job_id: UUID | None = Form(default=None),
+    job_id: UUID = Form(...),
     email: str | None = Form(default=None),
     name: str | None = Form(default=None),
     phone: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db_session),
     parser: CVParserService = Depends(get_cv_parser_service),
 ) -> CandidateUploadResponse:
-    del job_id  # kept for API compatibility
+    # Persist the uploaded PDF, parse it, and link the resulting resume to the given job.
     extracted: ExtractedData | None = None
     try:
         upload_dir = Path(settings.upload_dir)
@@ -53,101 +53,129 @@ async def upload_candidate_cv(
         logger.info(f"Uploading candidate CV: {file.filename}")
         content = await file.read()
         initial_hash = hashlib.md5(content).hexdigest()
-        existing_resume_stmt = (
-            select(Resume)
-            .where(Resume.file_hash == initial_hash)
-            .options(selectinload(Resume.extracted_data))
-        )
-        existing_resume = (await db.execute(existing_resume_stmt)).scalar_one_or_none()
-        if existing_resume and existing_resume.extracted_data:
-            logger.info(f"Candidate CV already exists: {existing_resume.candidate_id}")
-            return CandidateUploadResponse(
-                version=settings.app_version,
-                id=existing_resume.candidate_id,
-                status=existing_resume.extracted_data.status or "processing",
-                extracted_id=existing_resume.extracted_data.id,
-            )
 
-        logger.info(f"Candidate CV does not exist, storing: {file.filename}")
         stored_name = f"{uuid4().hex}{ext}"
         saved_path = upload_dir / stored_name
         await asyncio.to_thread(saved_path.write_bytes, content)
 
-        logger.info(f"Candidate CV stored: {saved_path}")
-        candidate_email = email or f"unknown-{uuid4().hex[:8]}@example.com"
-        candidate_name = name or "Unknown Candidate"
-        candidate_phone = phone
-
-        logger.info(f"Candidate created: {candidate_email}, {candidate_name}, {candidate_phone}")
-        candidate = Candidate(email=candidate_email, name=candidate_name, phone=candidate_phone)
-        db.add(candidate)
-        await db.flush()
-
-        logger.info(f"Resume created: {candidate.id}")
-        resume = Resume(
-            candidate_id=candidate.id,
-            original_filename=file.filename or "uploaded.pdf",
-            file_path=str(saved_path),
-            file_hash=initial_hash,
-        )
-        db.add(resume)
-        await db.flush()
-
-        logger.info(f"Extracted data created: {resume.id}")
-        extracted = ExtractedData(
-            resume_id=resume.id,
-            structured_data={},
-            raw_llm_response=None,
-            extraction_model=settings.llm_model,
-            extraction_seed=42,
-            status="pending",
-        )
-        db.add(extracted)
-        await db.flush()
-
         logger.info(f"Parsing candidate CV: {saved_path}")
+        structured: dict = {}
+        parse_status = "pending"
+        parse_error_message: str | None = None
+        parse_result: dict | None = None
         try:
             parse_result = await parse_cv_skill(str(saved_path), parser=parser)
             structured = parse_result["structured_data"]
-
-            # Backfill candidate profile with parsed fields when available.
-            if not email and structured.get("email"):
-                parsed_email = str(structured["email"])
-                email_owner_stmt = select(Candidate.id).where(
-                    Candidate.email == parsed_email,
-                    Candidate.id != candidate.id,
-                )
-                existing_owner = (await db.execute(email_owner_stmt)).scalar_one_or_none()
-                if existing_owner:
-                    logger.info("Parsed email already exists; keeping generated email for candidate %s", candidate.id)
-                else:
-                    candidate.email = parsed_email
-            if not name and structured.get("name"):
-                candidate.name = str(structured["name"])
-            if not phone and structured.get("phone"):
-                candidate.phone = str(structured["phone"])
-
-            resume.file_hash = parse_result["file_hash"]
-            extracted.structured_data = structured
-            extracted.raw_llm_response = parse_result.get("raw_llm_response")
-            extracted.extraction_model = parse_result.get("extraction_model", settings.llm_model)
-            extracted.extraction_seed = 42
-            extracted.status = parse_result.get("status", "success")
-            extracted.error_message = parse_result.get("error_message")
-            response_status = "processing" if extracted.status == "success" else extracted.status
+            parse_status = parse_result.get("status", "success")
+            parse_error_message = parse_result.get("error_message")
         except Exception as parse_exc:
             logger.exception("CV parsing failed; persisting failed extracted status.")
-            extracted.status = "failed"
-            extracted.error_message = str(parse_exc)
-            response_status = "failed"
+            parse_status = "failed"
+            parse_error_message = str(parse_exc)
+
+        parse_ok = parse_status != "failed"
+        final_hash = parse_result["file_hash"] if parse_ok and parse_result else initial_hash
+        raw_llm = parse_result.get("raw_llm_response") if parse_ok and parse_result else None
+        extraction_model = (
+            parse_result.get("extraction_model", settings.llm_model)
+            if parse_ok and parse_result
+            else settings.llm_model
+        )
+        final_structured = structured if parse_ok else {}
+
+        # Resolve the parsed email/name/phone, falling back to form values, to identify the candidate.
+        parsed_email = (
+            email
+            or (str(structured.get("email")).strip() if isinstance(structured, dict) and structured.get("email") else None)
+            or f"unknown-{uuid4().hex[:8]}@example.com"
+        )
+        parsed_name = (
+            name
+            or (str(structured.get("name")).strip() if isinstance(structured, dict) and structured.get("name") else None)
+            or "Unknown Candidate"
+        )
+        parsed_phone = phone or (
+            str(structured.get("phone")).strip() if isinstance(structured, dict) and structured.get("phone") else None
+        )
+
+        # Upsert the candidate by email so the same person's CVs converge to one record.
+        candidate_stmt = select(Candidate).where(Candidate.email == parsed_email)
+        candidate = (await db.execute(candidate_stmt)).scalar_one_or_none()
+        if candidate is None:
+            candidate = Candidate(email=parsed_email, name=parsed_name, phone=parsed_phone)
+            db.add(candidate)
+            await db.flush()
+        else:
+            if name and structured.get("name"):
+                candidate.name = parsed_name
+            if parsed_phone:
+                candidate.phone = parsed_phone
+
+        def _build_extracted(resume_id: UUID) -> ExtractedData:
+            # Create a fresh ExtractedData row for a resume with the current parse outcome.
+            return ExtractedData(
+                resume_id=resume_id,
+                structured_data=final_structured,
+                raw_llm_response=raw_llm,
+                extraction_model=extraction_model,
+                extraction_seed=42,
+                status=parse_status,
+                error_message=parse_error_message,
+            )
+
+        def _sync_extracted(existing: ExtractedData) -> None:
+            # Overwrite an existing ExtractedData row with the latest parse outcome.
+            existing.structured_data = final_structured
+            existing.raw_llm_response = raw_llm
+            existing.extraction_model = extraction_model
+            existing.status = parse_status
+            existing.error_message = parse_error_message
+
+        # Override the existing (candidate, job) resume in place, inheriting its UUID.
+        job_stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+        job = (await db.execute(job_stmt)).scalar_one_or_none()
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found.")
+
+        existing_for_job_stmt = (
+            select(Resume)
+            .where(Resume.candidate_id == candidate.id, Resume.job_post_id == job_id)
+            .options(selectinload(Resume.extracted_data))
+        )
+        resume = (await db.execute(existing_for_job_stmt)).scalar_one_or_none()
+        if resume is not None:
+            resume.original_filename = file.filename or "uploaded.pdf"
+            resume.file_path = str(saved_path)
+            resume.file_hash = final_hash
+            resume.source_channel = "manual_upload"
+            if resume.extracted_data is None:
+                extracted = _build_extracted(resume.id)
+                db.add(extracted)
+            else:
+                extracted = resume.extracted_data
+                _sync_extracted(extracted)
+        else:
+            resume = Resume(
+                candidate_id=candidate.id,
+                job_post_id=job_id,
+                original_filename=file.filename or "uploaded.pdf",
+                file_path=str(saved_path),
+                file_hash=final_hash,
+                source_channel="manual_upload",
+            )
+            db.add(resume)
+            await db.flush()
+            extracted = _build_extracted(resume.id)
+            db.add(extracted)
 
         await db.commit()
 
+        response_status = "processing" if parse_status == "success" else parse_status
         return CandidateUploadResponse(
             version=settings.app_version,
             id=candidate.id,
             status=response_status,
-            extracted_id=extracted.id,
+            extracted_id=extracted.id if extracted is not None else uuid4(),
         )
     except HTTPException:
         raise

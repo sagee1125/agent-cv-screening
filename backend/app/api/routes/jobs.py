@@ -9,13 +9,16 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import get_db_session, get_jd_parser_service
 from app.config import settings
-from app.models.database import JobCandidate, JobPost, JobPostStatus
+from app.models.database import JobPost, JobPostStatus, Resume
 from app.models.schemas import (
     JDParseRequest,
     JDParseResponse,
@@ -33,9 +36,20 @@ from app.models.schemas import (
     JobPostMutationResponse,
     JobPostStatusUpdateRequest,
     JobPostUpdateRequest,
+    PolyUCatalogItem,
+    PolyUCatalogResponse,
+    PolyUImportRequest,
+    PolyUImportResponse,
 )
 from app.skills.jd_parse import parse_jd_skill
 from app.services.jd_parser import JDParserService
+from app.services.polyu_jobs import (
+    POLYU_SOURCE,
+    PolyUListing,
+    build_job_description,
+    fetch_polyu_detail,
+    fetch_polyu_listings,
+)
 
 router = APIRouter(prefix="/jobs")
 logger = logging.getLogger(__name__)
@@ -152,6 +166,130 @@ async def create_job(
         raise HTTPException(status_code=500, detail=detail) from exc
 
 
+@router.get("/sync-polyu/catalog", response_model=PolyUCatalogResponse)
+async def list_polyu_catalog(db: AsyncSession = Depends(get_db_session)) -> PolyUCatalogResponse:
+    """Fetch the PolyU general jobs table and mark rows already imported."""
+    try:
+        listings = await fetch_polyu_listings()
+    except httpx.HTTPError as exc:
+        logger.exception("Failed to fetch PolyU job catalog.")
+        raise HTTPException(status_code=502, detail="Failed to fetch PolyU job listings.") from exc
+
+    refs = [item.external_ref for item in listings]
+    existing: set[str] = set()
+    if refs:
+        existing_stmt = select(JobPost.external_ref).where(
+            JobPost.source == POLYU_SOURCE,
+            JobPost.external_ref.in_(refs),
+        )
+        existing = {row[0] for row in (await db.execute(existing_stmt)).all() if row[0]}
+
+    items = [
+        PolyUCatalogItem(
+            job_code=item.job_code,
+            external_ref=item.external_ref,
+            title=item.title,
+            department=item.department,
+            closing_date=item.closing_date,
+            detail_url=item.detail_url,
+            already_imported=item.external_ref in existing,
+        )
+        for item in listings
+    ]
+    return PolyUCatalogResponse(
+        version=settings.app_version,
+        items=items,
+        total=len(items),
+        new_count=sum(1 for item in items if not item.already_imported),
+    )
+
+
+@router.post("/sync-polyu/import", response_model=PolyUImportResponse)
+async def import_polyu_job(
+    payload: PolyUImportRequest,
+    db: AsyncSession = Depends(get_db_session),
+    parser: JDParserService = Depends(get_jd_parser_service),
+) -> PolyUImportResponse:
+    """Import one PolyU job, parse its JD, and persist it as a draft Job Post."""
+    existing_stmt = select(JobPost).where(
+        JobPost.source == POLYU_SOURCE,
+        JobPost.external_ref == payload.external_ref.strip(),
+    )
+    existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+    if existing:
+        return PolyUImportResponse(
+            version=settings.app_version,
+            action="skipped",
+            job=_serialize_job(existing),
+        )
+
+    listing = PolyUListing(
+        job_code=payload.job_code.strip(),
+        external_ref=payload.external_ref.strip(),
+        title=payload.title.strip(),
+        department=payload.department.strip(),
+        closing_date=payload.closing_date,
+        detail_url=payload.detail_url.strip(),
+    )
+    try:
+        detail_text, posting_date = await fetch_polyu_detail(listing)
+    except httpx.HTTPError as exc:
+        logger.exception("Failed to fetch PolyU job detail for %s.", listing.external_ref)
+        raise HTTPException(status_code=502, detail="Failed to fetch PolyU job detail.") from exc
+
+    description = _normalize_description(build_job_description(listing, detail_text))
+    parsed: dict[str, Any] = {}
+    parse_error: str | None = None
+    try:
+        parse_result = await parse_jd_skill(description, parser=parser)
+        structured = parse_result.get("structured_data")
+        if isinstance(structured, dict):
+            parsed = structured
+        else:
+            parse_error = str(parse_result.get("error_message") or "Failed to parse JD.")
+    except Exception as exc:
+        logger.exception("Failed to parse imported PolyU JD %s.", listing.external_ref)
+        parse_error = str(exc)
+
+    job = JobPost(
+        title=listing.title,
+        description=description,
+        head_count=1,
+        status=JobPostStatus.DRAFT,
+        start_date=posting_date or _utcnow(),
+        closed_date=listing.closing_date,
+        jd_parsed_json=parsed,
+        weight_config_json=_default_weight_config(parsed) if parsed else {},
+        source=POLYU_SOURCE,
+        external_ref=listing.external_ref,
+    )
+    db.add(job)
+    try:
+        await db.commit()
+        await db.refresh(job)
+    except IntegrityError:
+        await db.rollback()
+        existing_after_conflict = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing_after_conflict:
+            return PolyUImportResponse(
+                version=settings.app_version,
+                action="skipped",
+                job=_serialize_job(existing_after_conflict),
+            )
+        raise HTTPException(status_code=500, detail="Failed to save imported PolyU job.")
+    except Exception as exc:
+        logger.exception("Failed to save imported PolyU job %s.", listing.external_ref)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to save imported PolyU job.") from exc
+
+    return PolyUImportResponse(
+        version=settings.app_version,
+        action="created",
+        job=_serialize_job(job),
+        parse_error=parse_error,
+    )
+
+
 @router.get("/{job_id}", response_model=JobPostDetailResponse)
 async def get_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) -> JobPostDetailResponse:
     stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
@@ -159,19 +297,30 @@ async def get_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) -> J
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    candidates_stmt = select(JobCandidate).where(JobCandidate.job_post_id == job_id).order_by(JobCandidate.match_score.desc())
-    candidate_rows = (await db.execute(candidates_stmt)).scalars().all()
+    candidates_stmt = (
+        select(Resume)
+        .where(Resume.job_post_id == job_id)
+        .options(
+            selectinload(Resume.candidate),
+            selectinload(Resume.extracted_data),
+        )
+        .order_by(Resume.uploaded_at.desc())
+    )
+    resume_rows = (await db.execute(candidates_stmt)).scalars().all()
 
     candidates = [
         {
             "candidate_id": row.candidate_id,
-            "match_score": float(row.match_score),
-            "fit_level": row.fit_level.value,
+            "resume_id": row.id,
+            "candidate_name": row.candidate.name if row.candidate else None,
+            "candidate_email": row.candidate.email if row.candidate else None,
+            "original_filename": row.original_filename,
             "source_channel": row.source_channel,
-            "cv_parse_status": row.cv_parse_status.value,
-            "score_breakdown": row.score_breakdown_json,
+            "cv_parse_status": (row.extracted_data.status if row.extracted_data else "pending"),
+            "extracted_data": (row.extracted_data.structured_data if row.extracted_data else None),
+            "uploaded_at": row.uploaded_at,
         }
-        for row in candidate_rows
+        for row in resume_rows
     ]
 
     return JobPostDetailResponse(
@@ -193,13 +342,17 @@ async def list_job_candidates(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    total_stmt = select(func.count(JobCandidate.id)).where(JobCandidate.job_post_id == job_id)
+    total_stmt = select(func.count(Resume.id)).where(Resume.job_post_id == job_id)
     total = (await db.execute(total_stmt)).scalar_one()
     offset = (page - 1) * limit
     rows_stmt = (
-        select(JobCandidate)
-        .where(JobCandidate.job_post_id == job_id)
-        .order_by(JobCandidate.match_score.desc())
+        select(Resume)
+        .where(Resume.job_post_id == job_id)
+        .options(
+            selectinload(Resume.candidate),
+            selectinload(Resume.extracted_data),
+        )
+        .order_by(Resume.uploaded_at.desc())
         .offset(offset)
         .limit(limit)
     )
@@ -210,11 +363,14 @@ async def list_job_candidates(
         items=[
             JobCandidateSummaryItem(
                 candidate_id=row.candidate_id,
-                match_score=float(row.match_score),
-                fit_level=row.fit_level.value,
+                resume_id=row.id,
+                candidate_name=row.candidate.name if row.candidate else None,
+                candidate_email=row.candidate.email if row.candidate else None,
+                original_filename=row.original_filename,
                 source_channel=row.source_channel,
-                cv_parse_status=row.cv_parse_status.value,
-                score_breakdown=row.score_breakdown_json,
+                cv_parse_status=(row.extracted_data.status if row.extracted_data else "pending"),
+                extracted_data=(row.extracted_data.structured_data if row.extracted_data else None),
+                uploaded_at=row.uploaded_at,
             )
             for row in rows
         ],
@@ -236,20 +392,19 @@ async def job_candidate_channel_stats(
 
     stats_stmt = (
         select(
-            JobCandidate.source_channel,
-            func.count(JobCandidate.id).label("candidate_count"),
-            func.coalesce(func.avg(JobCandidate.match_score), 0).label("avg_match_score"),
+            Resume.source_channel,
+            func.count(Resume.id).label("candidate_count"),
         )
-        .where(JobCandidate.job_post_id == job_id)
-        .group_by(JobCandidate.source_channel)
-        .order_by(func.count(JobCandidate.id).desc())
+        .where(Resume.job_post_id == job_id)
+        .group_by(Resume.source_channel)
+        .order_by(func.count(Resume.id).desc())
     )
     rows = (await db.execute(stats_stmt)).all()
     by_channel = [
         JobChannelStatItem(
             source_channel=row.source_channel,
             candidate_count=int(row.candidate_count),
-            avg_match_score=float(row.avg_match_score),
+            avg_match_score=0.0,
         )
         for row in rows
     ]
@@ -271,18 +426,14 @@ async def job_diagnosis(
     if isinstance(job.jd_parsed_json, dict):
         must_skills = job.jd_parsed_json.get("must_skills", []) or []
 
-    rows_stmt = select(JobCandidate).where(JobCandidate.job_post_id == job_id)
+    rows_stmt = select(Resume).where(Resume.job_post_id == job_id)
     rows = (await db.execute(rows_stmt)).scalars().all()
     total = len(rows)
     if total == 0 or len(must_skills) == 0:
         return JobDiagnosisResponse(version=settings.app_version, job_post_id=job_id, must_skill_satisfaction=[])
 
-    skill_scores = []
-    for row in rows:
-        breakdown = row.score_breakdown_json if isinstance(row.score_breakdown_json, dict) else {}
-        skill_scores.append(float(breakdown.get("skill", 0)))
-    base_rate = sum(1 for score in skill_scores if score >= 60) / total if total else 0.0
-
+    # Scoring is not yet wired to resumes, so satisfaction is unknown until scores are populated.
+    base_rate = 0.0
     diagnosis = []
     for idx, skill in enumerate(must_skills):
         skill_name = skill.get("display_name") or skill.get("canonical_skill") or f"must_skill_{idx + 1}"

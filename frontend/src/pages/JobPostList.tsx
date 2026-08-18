@@ -1,34 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
-import { JDPasteArea } from "../components/JDParser/JDPasteArea";
-import { SkillTagList } from "../components/JDParser/SkillTagList";
-import { SkillWeightDrag } from "../components/JDParser/SkillWeightDrag";
-import { JobCard } from "../components/JobCard";
-import { JobPostCreate } from "../components/JobPostCreate";
+// Job Post list page: container that wires list, JD parser, PolyU sync, and create modal.
+import { useCallback, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "../components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
+import { Spinner } from "../components/ui/spinner";
+import { JobListPanel } from "../components/JobBoard/JobListPanel";
+import { JDParserPanel } from "../components/JobBoard/JDParserPanel";
+import { JobPostCreate } from "../components/JobPostCreate";
+import { useConfirm } from "../components/Common/ConfirmProvider";
 import { useJobPosts } from "../hooks/useJobPosts";
+import { usePolyUSync } from "../hooks/usePolyUSync";
 import {
   deleteJobPost,
   duplicateJobPost,
-  parseJobJD,
   patchJobStatus,
-  updateJobPost,
 } from "../services/jobService";
-import type { JDParsedPayload, JobPostStatus, SkillItem } from "../types";
-import { formatDate } from "../utils";
+import type { JobPostStatus } from "../types";
 
-const statusOptions: Array<{ label: string; value: JobPostStatus | "all" }> = [
-  { label: "All", value: "all" },
-  { label: "Draft", value: "draft" },
-  { label: "Active", value: "active" },
-  { label: "Closed", value: "closed" },
-];
-
+// Top-level page that lists Job Posts and orchestrates create/parse/sync actions.
 export function JobPostList() {
   const {
     items,
@@ -42,288 +30,146 @@ export function JobPostList() {
     setPage,
     refresh,
   } = useJobPosts("all");
+
   const [workingJobId, setWorkingJobId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [jdText, setJdText] = useState("");
-  const [parsing, setParsing] = useState(false);
-  const [savingJD, setSavingJD] = useState(false);
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [parsedJD, setParsedJD] = useState<JDParsedPayload | null>(null);
-  const [weightedSkills, setWeightedSkills] = useState<SkillItem[]>([]);
+  const confirm = useConfirm();
+
+  // Derive the selected job from items; fall back to the first item when the
+  // selection is missing or stale. No useEffect needed for selection sync.
+  const selectedJob = useMemo(() => {
+    if (selectedJobId && items.some((job) => job.id === selectedJobId)) {
+      return items.find((job) => job.id === selectedJobId) ?? null;
+    }
+    return items[0] ?? null;
+  }, [items, selectedJobId]);
+
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / limit)),
     [limit, total]
   );
-  const selectedJob = useMemo(
-    () => items.find((job) => job.id === selectedJobId) ?? null,
-    [items, selectedJobId]
+
+  // PolyU sync: refresh silently after each import, then a final refresh.
+  const { syncing, progress, sync } = usePolyUSync({
+    confirm,
+    onJobImported: (jobId) => {
+      setSelectedJobId(jobId);
+      // fire-and-forget: don't wait for the refresh to complete
+      void refresh({ silent: true, page: 1, status: "all" });
+    },
+    onSyncComplete: (nextStatus, nextPage) => {
+      // fire-and-forget: don't wait for the refresh to complete
+      void refresh({ silent: true, page: nextPage, status: nextStatus });
+    },
+  });
+
+  const runWithWorking = useCallback(
+    async (jobId: string, action: () => Promise<unknown>) => {
+      setWorkingJobId(jobId);
+      try {
+        await action();
+        await refresh();
+      } catch (actionError) {
+        toast.error(
+          actionError instanceof Error ? actionError.message : "Action failed.",
+          {
+            position: "top-center",
+          }
+        );
+      } finally {
+        setWorkingJobId(null);
+      }
+    },
+    [refresh]
   );
 
-  useEffect(() => {
-    if (items.length === 0) {
-      setSelectedJobId(null);
-      return;
-    }
-    const selectedStillExists = selectedJobId
-      ? items.some((job) => job.id === selectedJobId)
-      : false;
-    if (!selectedStillExists) {
-      setSelectedJobId(items[0].id);
-    }
-  }, [items, selectedJobId]);
+  const handleDuplicate = useCallback(
+    (jobId: string) => {
+      void runWithWorking(jobId, () => duplicateJobPost(jobId));
+    },
+    [runWithWorking]
+  );
 
-  useEffect(() => {
-    if (!selectedJob) {
-      setJdText("");
-      setParseError(null);
-      setParsedJD(null);
-      setWeightedSkills([]);
-      return;
-    }
-    setJdText(selectedJob.description);
-    setParseError(null);
-    setParsedJD(selectedJob.jdParsedJson);
-    const initialSkills = selectedJob.jdParsedJson
-      ? [
-          ...selectedJob.jdParsedJson.mustSkills,
-          ...selectedJob.jdParsedJson.preferredSkills,
-        ]
-      : [];
-    setWeightedSkills(initialSkills);
-  }, [selectedJob]);
+  const handleArchive = useCallback(
+    (jobId: string) => {
+      void runWithWorking(jobId, () => deleteJobPost(jobId));
+    },
+    [runWithWorking]
+  );
 
-  const handleDuplicate = async (jobId: string) => {
-    setWorkingJobId(jobId);
-    try {
-      await duplicateJobPost(jobId);
-      refresh();
-    } catch (duplicateError) {
-      window.alert(
-        duplicateError instanceof Error
-          ? duplicateError.message
-          : "Failed to duplicate"
+  const handleToggleStatus = useCallback(
+    (jobId: string, nextStatus: JobPostStatus) => {
+      void runWithWorking(jobId, () =>
+        patchJobStatus(jobId, { status: nextStatus })
       );
-    } finally {
-      setWorkingJobId(null);
-    }
-  };
-
-  const handleArchive = async (jobId: string) => {
-    setWorkingJobId(jobId);
-    try {
-      await deleteJobPost(jobId);
-      refresh();
-    } catch (archiveError) {
-      window.alert(
-        archiveError instanceof Error
-          ? archiveError.message
-          : "Failed to archive"
-      );
-    } finally {
-      setWorkingJobId(null);
-    }
-  };
-
-  const handleToggleStatus = async (
-    jobId: string,
-    statusValue: JobPostStatus
-  ) => {
-    setWorkingJobId(jobId);
-    try {
-      await patchJobStatus(jobId, { status: statusValue });
-      refresh();
-    } catch (statusError) {
-      window.alert(
-        statusError instanceof Error
-          ? statusError.message
-          : "Failed to update status"
-      );
-    } finally {
-      setWorkingJobId(null);
-    }
-  };
-
-  const handleParseJD = async (nextJDText: string) => {
-    if (!selectedJob) return;
-    setParsing(true);
-    setParseError(null);
-    setJdText(nextJDText);
-    try {
-      const response = await parseJobJD(selectedJob.id, nextJDText);
-      setParsedJD(response.jdParsedJson);
-      setWeightedSkills([
-        ...response.jdParsedJson.mustSkills,
-        ...response.jdParsedJson.preferredSkills,
-      ]);
-      refresh();
-    } catch (parseJDError) {
-      const message =
-        parseJDError instanceof Error
-          ? parseJDError.message
-          : "Failed to parse JD.";
-      setParseError(message);
-    } finally {
-      setParsing(false);
-    }
-  };
-
-  const handleSaveJD = async (nextJDText: string) => {
-    if (!selectedJob) return;
-    setSavingJD(true);
-    setJdText(nextJDText);
-    try {
-      await updateJobPost(selectedJob.id, {
-        description: nextJDText,
-      });
-      refresh();
-    } catch (saveError) {
-      window.alert(
-        saveError instanceof Error ? saveError.message : "Failed to save JD."
-      );
-    } finally {
-      setSavingJD(false);
-    }
-  };
+    },
+    [runWithWorking]
+  );
 
   return (
     <main className="min-h-screen bg-slate-50 py-6">
       <div className="mx-auto w-full max-w-7xl space-y-5 px-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold text-slate-900">Job Posts</h1>
-          <Button onClick={() => setCreateOpen(true)}>New Job Post</Button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void sync()}
+                disabled={syncing}
+              >
+                {syncing ? (
+                  <>
+                    <Spinner className="mr-2" />
+                    Syncing PolyU...
+                  </>
+                ) : (
+                  "Sync PolyU Jobs"
+                )}
+              </Button>
+              <Button onClick={() => setCreateOpen(true)} disabled={syncing}>
+                New Job Post
+              </Button>
+            </div>
+            {progress ? (
+              <p className="max-w-md truncate text-xs text-slate-500">
+                {progress}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-          <Card className="h-[calc(100vh-160px)]">
-            <CardHeader className="space-y-4">
-              <CardTitle className="text-base">Job List</CardTitle>
-              <div className="flex flex-wrap gap-2">
-                {statusOptions.map((option) => (
-                  <Button
-                    key={option.value}
-                    size="sm"
-                    variant={status === option.value ? "default" : "outline"}
-                    onClick={() => setStatus(option.value)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-            </CardHeader>
-            <CardContent className="flex h-[calc(100%-120px)] flex-col gap-4">
-              {loading ? (
-                <p className="text-sm text-slate-500">Loading job posts...</p>
-              ) : null}
-              {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          <JobListPanel
+            items={items}
+            total={total}
+            page={page}
+            totalPages={totalPages}
+            status={status}
+            loading={loading}
+            error={error}
+            selectedJobId={selectedJob?.id ?? null}
+            workingJobId={workingJobId}
+            onSelect={setSelectedJobId}
+            onStatusChange={setStatus}
+            onPageChange={setPage}
+            onDuplicate={handleDuplicate}
+            onArchive={handleArchive}
+            onToggleStatus={handleToggleStatus}
+          />
 
-              {!loading && !error ? (
-                <div className="space-y-3 overflow-y-auto pr-1">
-                  {items.map((job) => (
-                    <div
-                      key={job.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedJobId(job.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setSelectedJobId(job.id);
-                        }
-                      }}
-                      className={`cursor-pointer rounded-xl transition ${
-                        selectedJobId === job.id
-                          ? "ring-2 ring-slate-500"
-                          : "hover:ring-2 hover:ring-slate-300"
-                      } ${workingJobId === job.id ? "opacity-60" : ""}`}
-                    >
-                      <JobCard
-                        job={job}
-                        onViewDetail={setSelectedJobId}
-                        onDuplicate={handleDuplicate}
-                        onArchive={handleArchive}
-                        onToggleStatus={handleToggleStatus}
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
-                <p className="text-xs text-slate-500">
-                  Page {page} / {totalPages} · Total {total}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPage(Math.max(1, page - 1))}
-                    disabled={page <= 1}
-                  >
-                    Prev
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPage(Math.min(totalPages, page + 1))}
-                    disabled={page >= totalPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="h-[calc(100vh-160px)]">
-            <CardHeader>
-              <CardTitle className="text-base">
-                {selectedJob ? `JD Parser · ${selectedJob.title}` : "JD Parser"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100%-88px)] overflow-y-auto space-y-5">
-              {!selectedJob ? (
-                <p className="text-sm text-slate-500">
-                  Select a job card from the left list to view JD parser
-                  details.
-                </p>
-              ) : (
-                <>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    <p>Status: {selectedJob.status}</p>
-                    <p>Headcount: {selectedJob.headCount}</p>
-                    <p>
-                      Start Date: {formatDate(new Date(selectedJob.startDate))}
-                    </p>
-                  </div>
-
-                  <JDPasteArea
-                    key={selectedJob.id}
-                    value={jdText}
-                    onParse={handleParseJD}
-                    onSave={handleSaveJD}
-                    parsing={parsing}
-                    saving={savingJD}
-                  />
-                  {parseError ? (
-                    <p className="text-sm text-rose-600">{parseError}</p>
-                  ) : null}
-
-                  <section className="space-y-2">
-                    <h3 className="text-base font-semibold text-slate-900">
-                      Skill Tags
-                    </h3>
-                    <SkillTagList jdParsed={parsedJD} />
-                  </section>
-
-                  <SkillWeightDrag
-                    skills={weightedSkills}
-                    onChange={setWeightedSkills}
-                  />
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {selectedJob ? (
+            <JDParserPanel
+              key={selectedJob.id}
+              job={selectedJob}
+              onSaved={refresh}
+            />
+          ) : (
+            <div className="flex h-[calc(100vh-160px)] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
+              Select a job card from the left list to view JD parser details.
+            </div>
+          )}
         </div>
       </div>
       {createOpen && (
