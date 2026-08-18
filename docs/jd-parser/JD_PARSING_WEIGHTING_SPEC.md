@@ -1,3 +1,26 @@
+---
+prd_id: SPEC-JD-WEIGHTING-001
+feature_name: JD Parsing and Skill Weighting Contract (Engineering Appendix)
+version: 1.1.0
+status: Draft
+owner: HR Product Team
+api_version: v1
+related_docs:
+  - docs/jd-parser/PRD-JD_Management_v1.0.md
+  - docs/PRD-Overall-v1.0.md
+---
+
+> **Engineering contract appendix** to `docs/jd-parser/PRD-JD_Management_v1.0.md` (JD Management, Parsing, and Candidate Matching MVP). This document is the code-aligned single source of truth for `jd_parsed_json` and `weight_config_json`; product behavior lives in the main PRD.
+
+## Change Log
+
+| Version | Date       | Author        | Change Summary |
+| ------- | ---------- | ------------- | -------------- |
+| 1.1.0   | 2026-08-18 | HR Product Team | Marked as engineering contract appendix of PRD-JD_Management_v1.0; KPI table added Measured By. |
+| 1.0.0   | -          | HR Product Team | Baseline implementation-aligned contract. |
+
+---
+
 # Product Requirements Document (PRD)
 
 **Feature Name:** JD Parsing and Skill Weighting Contract  
@@ -7,6 +30,19 @@
 **Target Users:** Recruiters, Hiring Managers, Recruiting Ops
 
 ---
+
+
+## Template Applicability
+
+This document is the **engineering contract appendix** to `docs/jd-parser/PRD-JD_Management_v1.0.md`; it intentionally omits some template sections that live in the main PRD:
+
+- RTM (Section 2.6): N/A in this appendix - see main PRD.
+- Mermaid diagrams: N/A in this appendix - see main PRD Section 4.2.
+- Config / Environment: N/A in this appendix - see main PRD Section 4.4.
+- Definition of Done: N/A in this appendix - see main PRD Section 11.1.
+- Glossary: N/A in this appendix - see main PRD Glossary.
+
+Sections retained here (contract, NFR, risks, boundary, KPIs) are the code-aligned source of truth.
 
 ## 1. Executive Summary
 
@@ -203,13 +239,13 @@ CRITICAL correction: frontend type definitions should accept backend snake_case 
 
 ## 9. Success Metrics (KPIs)
 
-| Metric | Target |
-|---|---|
-| Parse success rate (`/parse-jd`) | >= 98% for valid non-empty JD payloads |
-| Schema validity rate | 100% responses conform to Section 5 contract |
-| Frontend parse-render failures | 0 critical runtime errors from payload shape mismatch |
-| Median parse response time | <= 1.5s in local/staging baseline |
-| Provenance presence | >= 95% of parsed skills include non-empty provenance text |
+| Metric | Target | Measured By |
+|---|---|---|
+| Parse success rate (`/parse-jd`) | >= 98% for valid non-empty JD payloads | API logs / DB query over parse responses |
+| Schema validity rate | 100% responses conform to Section 5 contract | CI contract assertion |
+| Frontend parse-render failures | 0 critical runtime errors from payload shape mismatch | Frontend error monitoring |
+| Median parse response time | <= 1.5s in local/staging baseline | API latency telemetry |
+| Provenance presence | >= 95% of parsed skills include non-empty provenance text | DB query on `jd_parsed_json` |
 
 ---
 

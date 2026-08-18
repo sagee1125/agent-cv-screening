@@ -1,0 +1,4 @@
+interface:
+  display_name: "PRD Writer"
+  short_description: "Write structured PRDs with a fixed template"
+  default_prompt: "Use $skill-write-prd to draft a PRD for: <feature>"
