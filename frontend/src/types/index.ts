@@ -1,3 +1,4 @@
+// Shared frontend TypeScript types for job posts, candidates, and JD parsing.
 export type JobPostStatus = "draft" | "active" | "closed";
 export type FitLevel = "high" | "medium" | "low";
 export type CVParseStatus = "success" | "failed" | "pending";
@@ -68,6 +69,28 @@ export interface JobPostListResponse {
   limit: number;
 }
 
+export interface PolyUCatalogItem {
+  jobCode: string;
+  externalRef: string;
+  title: string;
+  department: string;
+  closingDate: string | null;
+  detailUrl: string;
+  alreadyImported: boolean;
+}
+
+export interface PolyUCatalogResponse {
+  items: PolyUCatalogItem[];
+  total: number;
+  newCount: number;
+}
+
+export interface PolyUImportResponse {
+  action: "created" | "skipped";
+  job: JobPost;
+  parseError: string | null;
+}
+
 export interface CandidateScoreBreakdown {
   skill: number;
   experience: number;
@@ -78,11 +101,16 @@ export interface CandidateScoreBreakdown {
 export interface CandidateSummary {
   candidateId: string;
   candidateName: string;
-  matchScore: number;
-  fitLevel: FitLevel;
+  resumeId?: string;
+  candidateEmail?: string;
+  originalFilename?: string;
   sourceChannel: string;
   cvParseStatus: CVParseStatus;
-  scoreBreakdown: CandidateScoreBreakdown;
+  extractedData?: Record<string, unknown> | null;
+  uploadedAt?: string;
+  matchScore?: number;
+  fitLevel?: FitLevel;
+  scoreBreakdown?: CandidateScoreBreakdown;
 }
 
 export interface CandidateListResponse {

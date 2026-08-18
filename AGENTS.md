@@ -8,7 +8,7 @@ Every code file and every function must include a short English comment explaini
 
 1. **File header comment** Each source file (backend `.py`, frontend `.ts` / `.tsx` components, scripts, configs, etc.) must start with a brief one-line English comment describing the purpose of the file.
 
-2. **Function comment** Every function, method, and React component function must have a short English comment (1�2 lines) directly above its definition explaining what it does.
+2. **Function comment** Every function, method, and React component function must have a short English comment (1-2 lines) directly above its definition explaining what it does.
 
 3. **Language & length** Comments must be written in English and kept concise: state the _purpose_, not the implementation details.
 

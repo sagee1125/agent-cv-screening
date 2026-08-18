@@ -1,3 +1,4 @@
+# Pydantic request and response schemas for the REST API.
 from __future__ import annotations
 
 from datetime import datetime
@@ -145,6 +146,31 @@ class JobPostCreateRequest(BaseModel):
     closed_date: datetime | None = None
 
 
+class PolyUCatalogItem(BaseModel):
+    job_code: str
+    external_ref: str
+    title: str
+    department: str
+    closing_date: datetime | None = None
+    detail_url: str
+    already_imported: bool = False
+
+
+class PolyUCatalogResponse(VersionedResponse):
+    items: list[PolyUCatalogItem]
+    total: int
+    new_count: int
+
+
+class PolyUImportRequest(BaseModel):
+    job_code: str
+    external_ref: str
+    title: str
+    department: str = ""
+    closing_date: datetime | None = None
+    detail_url: str
+
+
 class JobPostUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -175,6 +201,12 @@ class JobPostItemResponse(BaseModel):
     weight_config_json: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
+
+
+class PolyUImportResponse(VersionedResponse):
+    action: str
+    job: JobPostItemResponse
+    parse_error: str | None = None
 
 
 class JobPostListResponse(VersionedResponse):
@@ -208,11 +240,14 @@ class JDParseResponse(VersionedResponse):
 
 class JobCandidateSummaryItem(BaseModel):
     candidate_id: UUID
-    match_score: float
-    fit_level: str
+    resume_id: UUID
+    candidate_name: str | None = None
+    candidate_email: str | None = None
+    original_filename: str
     source_channel: str
     cv_parse_status: str
-    score_breakdown: dict[str, Any]
+    extracted_data: dict[str, Any] | None = None
+    uploaded_at: datetime | None = None
 
 
 class JobCandidateListResponse(VersionedResponse):

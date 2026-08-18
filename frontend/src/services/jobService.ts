@@ -1,3 +1,4 @@
+// Job Post REST client, including PolyU catalog fetch and one-by-one import.
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./api";
 import type {
   CandidateListResponse,
@@ -12,6 +13,9 @@ import type {
   JobPostListResponse,
   JobPostStatusPatchInput,
   JobPostUpdateInput,
+  PolyUCatalogItem,
+  PolyUCatalogResponse,
+  PolyUImportResponse,
   WeightConfig,
 } from "../types";
 
@@ -30,6 +34,22 @@ type BackendJob = {
   updated_at: string;
 };
 
+// Response returned by POST /candidates/upload after a CV is stored and parsed.
+type CandidateUploadResponse = {
+  id: string;
+  status: string;
+  extractedId: string;
+};
+
+// Parsed candidate detail returned by GET /candidates/{id}.
+type CandidateDetail = {
+  id: string;
+  email: string;
+  name: string;
+  phone: string;
+  extractedData: Record<string, unknown> | null;
+};
+
 type BackendJobListResponse = {
   items: BackendJob[];
   total: number;
@@ -41,11 +61,17 @@ type BackendJobDetailResponse = {
   job: BackendJob;
   candidates: Array<{
     candidate_id: string;
-    match_score: number;
-    fit_level: "high" | "medium" | "low";
+    resume_id?: string;
+    candidate_name?: string;
+    candidate_email?: string;
+    original_filename?: string;
     source_channel: string;
     cv_parse_status: "success" | "failed" | "pending";
-    score_breakdown: { skill: number; experience: number; education: number; language: number };
+    extracted_data?: Record<string, unknown> | null;
+    uploaded_at?: string;
+    match_score?: number;
+    fit_level?: "high" | "medium" | "low";
+    score_breakdown?: { skill: number; experience: number; education: number; language: number };
   }>;
 };
 
@@ -188,11 +214,16 @@ function normalizeJDParsedPayload(value: unknown): JDParsedPayload | null {
 
 const toCandidateSummary = (item: BackendJobDetailResponse["candidates"][number]): CandidateSummary => ({
   candidateId: item.candidate_id,
-  candidateName: item.candidate_id,
-  matchScore: item.match_score,
-  fitLevel: item.fit_level,
+  candidateName: item.candidate_name ?? item.candidate_id,
+  resumeId: item.resume_id,
+  candidateEmail: item.candidate_email,
+  originalFilename: item.original_filename,
   sourceChannel: item.source_channel,
   cvParseStatus: item.cv_parse_status,
+  extractedData: item.extracted_data ?? null,
+  uploadedAt: item.uploaded_at,
+  matchScore: item.match_score,
+  fitLevel: item.fit_level,
   scoreBreakdown: item.score_breakdown,
 });
 
@@ -351,5 +382,96 @@ export async function getJDDiagnosis(jobId: string): Promise<JDDiagnosisResponse
       satisfactionRate: item.satisfaction_rate,
       flagLow: item.flag_low,
     })),
+  };
+}
+
+type BackendPolyUCatalogItem = {
+  job_code: string;
+  external_ref: string;
+  title: string;
+  department: string;
+  closing_date: string | null;
+  detail_url: string;
+  already_imported: boolean;
+};
+
+// Fetch the PolyU general jobs catalog and import flags.
+export async function getPolyUJobCatalog(): Promise<PolyUCatalogResponse> {
+  const response = await apiGet<{
+    items: BackendPolyUCatalogItem[];
+    total: number;
+    new_count: number;
+  }>("/jobs/sync-polyu/catalog");
+  return {
+    items: response.items.map((item) => ({
+      jobCode: item.job_code,
+      externalRef: item.external_ref,
+      title: item.title,
+      department: item.department,
+      closingDate: item.closing_date,
+      detailUrl: item.detail_url,
+      alreadyImported: item.already_imported,
+    })),
+    total: response.total,
+    newCount: response.new_count,
+  };
+}
+
+// Import one PolyU listing, parse its JD, and return the saved Job Post.
+export async function importPolyUJob(item: PolyUCatalogItem): Promise<PolyUImportResponse> {
+  const response = await apiPost<{
+    action: "created" | "skipped";
+    job: BackendJob;
+    parse_error: string | null;
+  }>("/jobs/sync-polyu/import", {
+    job_code: item.jobCode,
+    external_ref: item.externalRef,
+    title: item.title,
+    department: item.department,
+    closing_date: item.closingDate,
+    detail_url: item.detailUrl,
+  });
+  return {
+    action: response.action,
+    job: toJobPost(response.job),
+    parseError: response.parse_error,
+  };
+}
+
+// Uploads a single PDF CV to the backend parsing endpoint, linked to the given job.
+export async function uploadCandidateCV(
+  file: File,
+  jobId: string
+): Promise<CandidateUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("job_id", jobId);
+  const response = await apiPost<{
+    id: string;
+    status: string;
+    extracted_id: string;
+  }>("/candidates/upload", formData);
+  return {
+    id: response.id,
+    status: response.status,
+    extractedId: response.extracted_id,
+  };
+}
+
+// Fetches the parsed structured data for a stored candidate by id.
+export async function getCandidateDetail(candidateId: string): Promise<CandidateDetail> {
+  const response = await apiGet<{
+    id: string;
+    email: string;
+    name: string;
+    phone: string;
+    extracted_data: unknown;
+  }>(`/candidates/${candidateId}`);
+  return {
+    id: response.id,
+    email: response.email,
+    name: response.name,
+    phone: response.phone,
+    extractedData: response.extracted_data as Record<string, unknown> | null,
   };
 }
