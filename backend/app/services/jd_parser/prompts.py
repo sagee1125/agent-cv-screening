@@ -1,3 +1,4 @@
+# LLM prompts for JD skill refinement.
 from __future__ import annotations
 
 import json
@@ -15,6 +16,7 @@ Rules:
 - Use explicit evidence in payload, do not invent facts.
 - Keep each skill as lowercase canonical label.
 - Prefer concrete technical skills over generic soft skills.
+- Do not include spoken or written languages (English, Chinese, Cantonese, etc.).
 - `must_skills` and `preferred_skills` must not overlap.
 - Max 5 skills per bucket.
 - If confidence is low, return fewer items instead of guessing.
