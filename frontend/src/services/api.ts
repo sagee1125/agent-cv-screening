@@ -1,8 +1,10 @@
+// Thin fetch wrappers for JSON and FormData REST calls.
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
 type QueryParams = Record<string, string | number | undefined>;
 
+/** Builds an absolute API URL with optional query parameters. */
 function buildUrl(path: string, params?: QueryParams): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const url = new URL(`${API_BASE_URL}${normalizedPath}`);
@@ -15,6 +17,7 @@ function buildUrl(path: string, params?: QueryParams): string {
   return url.toString();
 }
 
+/** Sends an HTTP request and returns parsed JSON, or throws on non-OK status. */
 async function request<T>(
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
@@ -64,10 +67,12 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+/** Performs a GET request against the API. */
 export function apiGet<T>(path: string, params?: QueryParams): Promise<T> {
   return request<T>("GET", path, undefined, params);
 }
 
+/** Performs a POST request against the API. */
 export function apiPost<T>(
   path: string,
   body?: unknown,
@@ -76,6 +81,7 @@ export function apiPost<T>(
   return request<T>("POST", path, body, params);
 }
 
+/** Performs a PUT request against the API. */
 export function apiPut<T>(
   path: string,
   body?: unknown,
@@ -84,6 +90,7 @@ export function apiPut<T>(
   return request<T>("PUT", path, body, params);
 }
 
+/** Performs a PATCH request against the API. */
 export function apiPatch<T>(
   path: string,
   body?: unknown,
@@ -92,6 +99,7 @@ export function apiPatch<T>(
   return request<T>("PATCH", path, body, params);
 }
 
+/** Performs a DELETE request against the API. */
 export function apiDelete<T>(path: string, params?: QueryParams): Promise<T> {
   return request<T>("DELETE", path, undefined, params);
 }

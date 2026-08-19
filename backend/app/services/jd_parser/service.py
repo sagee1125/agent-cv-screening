@@ -1,21 +1,61 @@
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
 import json
 import re
 from typing import Any
 
 from app.config import settings
+from app.core.taxonomy import SkillTaxonomyLoader
 from app.services.jd_parser.prompts import (
     JD_SKILL_REFINER_OUTPUT_SCHEMA,
     JD_SKILL_REFINER_SYSTEM_PROMPT,
     build_jd_skill_refiner_user_prompt,
+)
+from app.services.jd_parser.provenance import (
+    empty_skill_provenance,
+    find_cue_excerpt,
+    find_source_excerpt,
 )
 from app.services.jd_parser.providers import (
     JDEnrichmentProvider,
     build_enrichment_provider,
     normalize_mode,
 )
+
+
+# Path to the curated all-industry skill taxonomy used by the rule parser.
+_TAXONOMY_PATH = "data/taxonomy/skill_taxonomy.yaml"
+
+
+@lru_cache(maxsize=1)
+def _default_taxonomy_loader() -> SkillTaxonomyLoader:
+    """Load and cache the standard all-industry taxonomy loader."""
+    loader = SkillTaxonomyLoader(_TAXONOMY_PATH)
+    loader.load()
+    return loader
+
+
+# Maps Chinese digit characters to their integer values.
+_CN_DIGITS = {
+    "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "兩": 2, "两": 2,
+}
+
+
+def _cn_numeral_to_int(raw: str) -> int | None:
+    """Convert a Chinese numeral phrase (1-99) to an integer, or None if invalid."""
+    if raw == "十":
+        return 10
+    if raw.startswith("十"):
+        return 10 + _CN_DIGITS.get(raw[1:], 0)
+    if "十" in raw:
+        head, _, tail = raw.partition("十")
+        tens = _CN_DIGITS.get(head, 0) * 10
+        units = _CN_DIGITS.get(tail, 0) if tail else 0
+        return tens + units
+    return _CN_DIGITS.get(raw)
 
 
 class JDParserService:
@@ -27,38 +67,22 @@ class JDParserService:
     - qwen: rule parsing + local Qwen3-0.6B overview extraction.
     """
 
-    COMMON_SKILLS = [
-        "python",
-        "java",
-        "javascript",
-        "typescript",
-        "react",
-        "node.js",
-        "node",
-        "sql",
-        "postgresql",
-        "docker",
-        "kubernetes",
-        "aws",
-        "gcp",
-        "azure",
-        "rest api",
-        "fastapi",
-        "django",
-        "flask",
-        "git",
-    ]
-
-    SKILL_SYNONYMS: dict[str, list[str]] = {
-        "javascript": ["javascript", "js"],
-        "typescript": ["typescript", "ts"],
-        "node.js": ["node.js", "nodejs", "node"],
-        "react": ["react", "reactjs", "react.js"],
-        "postgresql": ["postgresql", "postgres", "psql"],
-        "rest api": ["rest api", "restful api", "restful"],
-        "c#": ["c#", "csharp"],
-        "c++": ["c++", "cpp"],
-    }
+    def __init__(self, taxonomy_loader: SkillTaxonomyLoader | None = None) -> None:
+        """Initialize taxonomy-driven skill lists and a compiled token matcher."""
+        loader = taxonomy_loader or _default_taxonomy_loader()
+        self.skill_synonyms = {
+            node.skill.casefold(): [syn.casefold() for syn in node.synonyms]
+            for node in loader.nodes.values()
+        }
+        self.common_skills = sorted(self.skill_synonyms)
+        self._token_to_canonical: dict[str, str] = {}
+        for canonical in self.common_skills:
+            self._token_to_canonical[canonical] = canonical
+            for alias in self.skill_synonyms.get(canonical, []):
+                self._token_to_canonical[alias] = canonical
+        tokens = sorted(self._token_to_canonical, key=len, reverse=True)
+        pattern = r"(?<![a-z0-9])(?:" + "|".join(re.escape(token) for token in tokens) + r")(?![a-z0-9])"
+        self._skill_token_re = re.compile(pattern)
 
     MUST_SECTION_MARKERS = (
         "requirement",
@@ -68,6 +92,8 @@ class JDParserService:
         "what you need",
     )
     PREFERRED_SECTION_MARKERS = ("preferred", "nice to have", "plus", "bonus")
+    # Matches ASCII digits or short Chinese numerals used in year requirements.
+    _NUMBER_PATTERN = r"(?:\d{1,2}|[一二三四五六七八九十兩两]{1,3})"
     RESPONSIBILITY_SECTION_MARKERS = ("responsibilit", "what you will do", "you will")
 
     MUST_CUES = ("must", "required", "mandatory", "need to", "at least")
@@ -192,14 +218,9 @@ class JDParserService:
 
     def _extract_candidates_from_line(self, line: str) -> list[str]:
         candidates: set[str] = set()
-        alias_to_canonical = self._alias_to_canonical()
-
-        for canonical in self.COMMON_SKILLS:
-            if re.search(rf"\b{re.escape(canonical)}\b", line):
-                candidates.add(canonical)
-
-        for alias, canonical in alias_to_canonical.items():
-            if re.search(rf"\b{re.escape(alias)}\b", line):
+        for matched in self._skill_token_re.finditer(line):
+            canonical = self._token_to_canonical.get(matched.group(0))
+            if canonical:
                 candidates.add(canonical)
 
         for pattern in self.SKILL_INTRO_PATTERNS:
@@ -208,7 +229,7 @@ class JDParserService:
                 continue
             fragment = matched.group(1)[:100]
             for part in self.CONNECTOR_SPLIT_RE.split(fragment):
-                normalized = self._normalize_skill(part, alias_to_canonical)
+                normalized = self._normalize_skill(part, self._token_to_canonical)
                 if normalized:
                     candidates.add(normalized)
 
@@ -234,22 +255,56 @@ class JDParserService:
         )
         return [skill for skill, _ in ranked[:limit]]
 
-    def _alias_to_canonical(self) -> dict[str, str]:
-        mapping: dict[str, str] = {}
-        for canonical, aliases in self.SKILL_SYNONYMS.items():
-            mapping[canonical] = canonical
-            for alias in aliases:
-                mapping[alias] = canonical
-        return mapping
+    def _extract_experience_requirement(self, text: str) -> dict[str, Any]:
+        """Parse the experience requirement into min/max years plus the raw phrase."""
+        normalized = self._clean_text(text)
+        number = self._NUMBER_PATTERN
+        units = r"(?:\u5e74|years?|yrs?)"
 
-    def _extract_years(self, text: str) -> int | None:
-        matched = re.search(r"(\d+)\+?\s+years?", text, flags=re.IGNORECASE)
-        if not matched:
-            return None
-        try:
-            return int(matched.group(1))
-        except ValueError:
-            return None
+        range_match = re.search(rf"({number})\s*[-\u2013\u2014~\u81f3]\s*({number})\s*{units}", normalized)
+        if range_match:
+            low, high = self._to_int_or_none(range_match.group(1)), self._to_int_or_none(range_match.group(2))
+            if low is not None and high is not None:
+                return {"minimum_years": low, "maximum_years": high, "raw_text": range_match.group(0)}
+
+        plus_match = re.search(rf"({number})\s*\+\s*{units}", normalized)
+        if plus_match:
+            count = self._to_int_or_none(plus_match.group(1))
+            if count is not None:
+                return {"minimum_years": count, "maximum_years": None, "raw_text": plus_match.group(0)}
+
+        lower_prefix = re.search(
+            rf"(?:不少於|不少于|至少|最少|不低於|不低于|超過|超过|at least)\s*({number})\s*{units}",
+            normalized,
+        )
+        if lower_prefix:
+            count = self._to_int_or_none(lower_prefix.group(1))
+            if count is not None:
+                return {"minimum_years": count, "maximum_years": None, "raw_text": lower_prefix.group(0)}
+
+        lower_suffix = re.search(
+            rf"({number})\s*(?:\u5e74\u4ee5\u4e0a|\u5e74\u6216\u4ee5\u4e0a|\u5e74\u6216\u66f4\u591a)",
+            normalized,
+        )
+        if lower_suffix:
+            count = self._to_int_or_none(lower_suffix.group(1))
+            if count is not None:
+                return {"minimum_years": count, "maximum_years": None, "raw_text": lower_suffix.group(0)}
+
+        plain_match = re.search(rf"({number})\s*{units}", normalized)
+        if plain_match:
+            count = self._to_int_or_none(plain_match.group(1))
+            if count is not None:
+                return {"minimum_years": count, "maximum_years": count, "raw_text": plain_match.group(0)}
+
+        return {"minimum_years": None, "maximum_years": None, "raw_text": None}
+
+    @staticmethod
+    def _to_int_or_none(value: str) -> int | None:
+        """Convert an ASCII or Chinese numeral token to an int, or None."""
+        if value.isdigit():
+            return int(value)
+        return _cn_numeral_to_int(value)
 
     def _build_preprocessed_payload(self, text: str) -> dict[str, Any]:
         normalized = self._clean_text(text)
@@ -336,6 +391,78 @@ class JDParserService:
             "input_preview": json.dumps(llm_input, ensure_ascii=False)[:900],
         }
 
+    def _needles_for_skill(self, item: dict[str, Any]) -> list[str]:
+        """Collect canonical names, aliases, and the pre-map phrase used to locate a JD line."""
+        needles: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: str | None) -> None:
+            text = (value or "").strip()
+            if len(text) < 2:
+                return
+            key = text.casefold()
+            if key in seen:
+                return
+            seen.add(key)
+            needles.append(text)
+
+        extracted = str(item.get("extracted_name") or "").strip()
+        display = str(item.get("display_name") or "").strip()
+        canonical = str(item.get("canonical_skill") or "").strip()
+        add(extracted)
+        add(display)
+        add(canonical.replace("_", " "))
+        add(canonical.replace("_", "-"))
+        add(canonical)
+
+        lookup_keys = {value.casefold() for value in (extracted, display, canonical, canonical.replace("_", " ")) if value}
+        mapped: set[str] = set()
+        for key in lookup_keys:
+            mapped_name = self._token_to_canonical.get(key)
+            if mapped_name:
+                mapped.add(mapped_name)
+                add(mapped_name)
+        for token, canon in self._token_to_canonical.items():
+            if canon in mapped or canon in lookup_keys:
+                add(token)
+        return needles
+
+    def _apply_source_excerpts(self, structured_data: dict[str, Any], jd_text: str) -> None:
+        """Attach original JD excerpts to skills and requirement fields."""
+        for bucket in ("must_skills", "preferred_skills"):
+            for item in structured_data.get(bucket, []) or []:
+                if not isinstance(item, dict):
+                    continue
+                previous = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
+                excerpt = find_source_excerpt(jd_text, self._needles_for_skill(item))
+                excerpt["confidence"] = previous.get("confidence", 0.75)
+                item["provenance"] = excerpt
+                item.pop("extracted_name", None)
+
+        language_items = structured_data.get("language_requirements") or []
+        for item in language_items:
+            if not isinstance(item, dict):
+                continue
+            language = str(item.get("language") or "").strip()
+            item["provenance"] = find_cue_excerpt(jd_text, [language] if language else [])
+
+        education = structured_data.get("education_requirement")
+        if isinstance(education, dict):
+            degree = str(education.get("minimum_degree") or "")
+            degree_cues = {
+                "bachelor": ["bachelor", "学士"],
+                "master": ["master", "硕士"],
+                "phd": ["phd", "doctorate", "博士"],
+            }
+            education["provenance"] = find_cue_excerpt(jd_text, degree_cues.get(degree, []))
+
+        visa = structured_data.get("visa_requirement")
+        if isinstance(visa, dict):
+            if visa.get("requirement_type") == "required":
+                visa["provenance"] = find_cue_excerpt(jd_text, ["visa", "work permit", "sponsorship"])
+            else:
+                visa["provenance"] = ""
+
     async def parse_jd(
         self,
         jd_text: str,
@@ -343,6 +470,7 @@ class JDParserService:
         mode: str | None = None,
         enrichment_provider: JDEnrichmentProvider | None = None,
     ) -> dict[str, Any]:
+        """Parse JD text into structured requirements and attach original source excerpts."""
         cleaned_input = (jd_text or "").strip()
         if not cleaned_input:
             return {
@@ -356,24 +484,21 @@ class JDParserService:
         provider = enrichment_provider or build_enrichment_provider(mode)
 
         must_skills, preferred_skills = self._extract_skills(cleaned_input)
-        years = self._extract_years(cleaned_input)
+        experience_requirement = self._extract_experience_requirement(cleaned_input)
         normalized_cleaned = self._clean_text(cleaned_input)
         preprocessed_payload = self._build_preprocessed_payload(cleaned_input)
         llm_refine_request = self._build_llm_refine_request(preprocessed_payload)
 
         def build_skill_item(skill_name: str, order: int, weight: float) -> dict[str, Any]:
+            """Build a skill item; source excerpt is attached after enrichment."""
             return {
                 "skill_id": f"{skill_name.replace(' ', '_')}_{order}",
                 "display_name": skill_name.title(),
                 "canonical_skill": skill_name.lower().replace(" ", "_"),
                 "priority_order": order,
                 "weight": weight,
-                "provenance": {
-                    "source_sentence": cleaned_input[:240],
-                    "source_char_start": 0,
-                    "source_char_end": min(len(cleaned_input), 240),
-                    "confidence": 0.75,
-                },
+                "extracted_name": skill_name,
+                "provenance": empty_skill_provenance(),
             }
 
         structured_data: dict[str, Any] = {
@@ -386,21 +511,21 @@ class JDParserService:
                     "language": "English",
                     "level": "business",
                     "is_mandatory": "english" in normalized_cleaned,
-                    "provenance": cleaned_input[:120],
+                    "provenance": "",
                 }
             ],
             "education_requirement": {
                 "minimum_degree": "bachelor" if "bachelor" in normalized_cleaned else "none",
                 "field_of_study": None,
                 "is_mandatory": "bachelor" in normalized_cleaned,
-                "provenance": cleaned_input[:120],
+                "provenance": "",
             },
             "visa_requirement": {
                 "requirement_type": "required" if "visa" in normalized_cleaned else "unknown",
                 "target_region": None,
-                "provenance": cleaned_input[:120],
+                "provenance": "",
             },
-            "experience_requirement": {"minimum_years": years},
+            "experience_requirement": experience_requirement,
         }
 
         raw_llm_response: dict[str, Any] = {
@@ -430,6 +555,8 @@ class JDParserService:
             else:
                 parse_path = f"jd_{provider.name}_fallback_rule_parser"
 
+        self._apply_source_excerpts(structured_data, cleaned_input)
+
         return {
             "status": "success",
             "parse_path": parse_path,
@@ -439,5 +566,6 @@ class JDParserService:
         }
 
 
-def build_jd_parser_service() -> JDParserService:
-    return JDParserService()
+def build_jd_parser_service(taxonomy_loader: SkillTaxonomyLoader | None = None) -> JDParserService:
+    """Build a JD parser service, optionally with an injected taxonomy loader."""
+    return JDParserService(taxonomy_loader=taxonomy_loader)

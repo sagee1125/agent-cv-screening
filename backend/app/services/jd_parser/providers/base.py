@@ -46,49 +46,38 @@ def build_refined_skill_items(
     reasoning_trace: list[dict[str, Any]],
     rule_structured: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Convert refined skill names plus trace evidence into standard skill items."""
+    """Convert refined skill names into standard skill items; excerpts are filled later."""
+    _ = rule_structured
     trace_by_name: dict[str, dict[str, Any]] = {}
     for item in reasoning_trace:
         skill = str(item.get("skill", "")).strip().lower()
         if skill:
             trace_by_name[skill] = item
 
-    rule_items: dict[str, dict[str, Any]] = {}
-    for item in rule_structured.get("must_skills", []) + rule_structured.get("preferred_skills", []):
-        canonical = str(item.get("canonical_skill", "")).strip().lower()
-        if canonical:
-            rule_items[canonical] = item
-
     def build_item(name: str, order: int, weight: float) -> dict[str, Any]:
-        """Build one standard skill item with best-effort evidence."""
+        """Build one standard skill item, keeping the pre-map name for excerpt lookup."""
         name = name.strip()
         canonical = name.lower().replace(" ", "_")
         trace_item = trace_by_name.get(name.lower())
-        rule_item = rule_items.get(canonical)
-        evidence = ""
-        if trace_item:
-            evidence = str(trace_item.get("evidence") or "").strip()
-        if not evidence and rule_item:
-            evidence = str((rule_item.get("provenance") or {}).get("source_sentence") or "").strip()
         confidence = 0.75
         if trace_item and trace_item.get("confidence") is not None:
             try:
                 confidence = float(trace_item["confidence"])
             except (TypeError, ValueError):
                 confidence = 0.75
-        provenance = {
-            "source_sentence": evidence[:240],
-            "source_char_start": 0,
-            "source_char_end": min(len(evidence), 240),
-            "confidence": confidence,
-        }
         return {
             "skill_id": f"{canonical}_{order}",
             "display_name": name.title(),
             "canonical_skill": canonical,
             "priority_order": order,
             "weight": weight,
-            "provenance": provenance,
+            "extracted_name": name,
+            "provenance": {
+                "source_sentence": "",
+                "source_char_start": 0,
+                "source_char_end": 0,
+                "confidence": confidence,
+            },
         }
 
     must_items = [build_item(name, idx + 1, 1.0) for idx, name in enumerate(must_names[:5])]

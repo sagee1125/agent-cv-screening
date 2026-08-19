@@ -9,10 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.dependencies import engine
+from app.api.dependencies import AsyncSessionFactory, engine
 from app.api.routes import candidates, feedback, jobs, reports, scoring
 from app.config import settings
 from app.models.database import Base
+from app.services.taxonomy_sync import sync_taxonomy_to_db
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -51,6 +52,11 @@ async def startup_event() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_polyu_sync_columns(conn)
         await _ensure_resume_job_columns(conn)
+
+    # Keep the skill_taxonomy table in sync with the curated YAML (idempotent upsert).
+    async with AsyncSessionFactory() as session:
+        counts = await sync_taxonomy_to_db(session)
+        logger.info("Skill taxonomy synced: %s", counts)
     logger.info("Application startup complete.")
 
 

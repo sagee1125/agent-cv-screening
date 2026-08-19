@@ -601,7 +601,9 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ### 11.3 `data/taxonomy/skill_taxonomy.yaml`
 
-**What:** Hand-curated skill taxonomy with synonyms and parent-child relationships.
+**What:** Hand-curated all-industry skill taxonomy (708 skills, 31 categories) with synonyms
+and parent-child relationships. Used by the JD rule parser for extraction and by the skill
+matcher for normalization, and mirrored into the `skill_taxonomy` database table.
 **Format:**
 
 ```yaml
@@ -610,6 +612,10 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
   synonyms: ["python", "py"]
   parent: null
 ```
+
+**DB sync:** `backend/app/services/taxonomy_sync.py` upserts this YAML into the
+`skill_taxonomy` table on every backend startup (idempotent) and via the CLI:
+`python backend/scripts/seed_skill_taxonomy.py`.
 
 ---
 

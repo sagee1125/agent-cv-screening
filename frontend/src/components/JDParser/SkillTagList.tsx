@@ -1,10 +1,24 @@
+﻿// Renders parsed JD skill tags with hover cards that show each skill's source sentence.
+import type { ComponentProps } from "react";
 import { Badge } from "../ui/badge";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "../ui/hover-card";
 import type { JDParsedPayload } from "../../types";
 
 interface SkillTagListProps {
   jdParsed: JDParsedPayload | null;
 }
 
+interface SourceBadgeProps {
+  variant: ComponentProps<typeof Badge>["variant"];
+  label: string;
+  sourceSentence?: string | null;
+}
+
+// Renders the parsed JD skill sections (must, preferred, language) as tag badges.
 export function SkillTagList({ jdParsed }: SkillTagListProps) {
   const mustSkills = jdParsed?.mustSkills ?? [];
   const preferredSkills = jdParsed?.preferredSkills ?? [];
@@ -24,13 +38,12 @@ export function SkillTagList({ jdParsed }: SkillTagListProps) {
         Must Skills:
         <div className="flex flex-wrap gap-2">
           {mustSkills.map((skill) => (
-            <Badge
+            <SourceBadge
+              key={skill.id}
               variant="success"
-              title={skill.sourceSentence}
-              className="cursor-help"
-            >
-              {skill.name}
-            </Badge>
+              label={skill.name}
+              sourceSentence={skill.sourceSentence}
+            />
           ))}
         </div>
       </section>
@@ -39,13 +52,12 @@ export function SkillTagList({ jdParsed }: SkillTagListProps) {
         Preferred Skills:
         <div className="flex flex-wrap gap-2">
           {preferredSkills.map((skill) => (
-            <Badge
+            <SourceBadge
+              key={skill.id}
               variant="info"
-              title={skill.sourceSentence}
-              className="cursor-help"
-            >
-              {skill.name}
-            </Badge>
+              label={skill.name}
+              sourceSentence={skill.sourceSentence}
+            />
           ))}
         </div>
       </section>
@@ -53,13 +65,12 @@ export function SkillTagList({ jdParsed }: SkillTagListProps) {
         Language Requirements
         <div className="flex flex-wrap gap-2">
           {languageRequirements.map((language) => (
-            <Badge
+            <SourceBadge
+              key={language.language}
               variant="language"
-              title={language.sourceSentence}
-              className="cursor-help"
-            >
-              {language.language}
-            </Badge>
+              label={language.language}
+              sourceSentence={language.sourceSentence}
+            />
           ))}
         </div>
       </section>
@@ -67,12 +78,38 @@ export function SkillTagList({ jdParsed }: SkillTagListProps) {
         <h4 className="text-sm font-semibold">Other Preferences</h4>
         <div className="flex flex-wrap gap-2">
           {otherPreferences.map((preference) => (
-            <Badge variant="language" title={preference?.sourceSentence ?? ""} className="cursor-help">
-              {preference?. ?? ""}
-            </Badge>
+            <SourceBadge variant="language" label={preference?. ?? ""} sourceSentence={preference?.sourceSentence ?? ""} />
           ))}
         </div>
       </section> */}
     </div>
+  );
+}
+
+// Renders a badge that reveals its source sentence in a hover card when available.
+function SourceBadge({ variant, label, sourceSentence }: SourceBadgeProps) {
+  if (!sourceSentence) {
+    return <Badge variant={variant}>{label}</Badge>;
+  }
+
+  return (
+    <HoverCard openDelay={200} closeDelay={200}>
+      <HoverCardTrigger
+        tabIndex={0}
+        className="rounded-full no-underline outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+      >
+        <Badge variant={variant} className="cursor-help">
+          {label}
+        </Badge>
+      </HoverCardTrigger>
+      <HoverCardContent
+        side="bottom"
+        align="start"
+        sideOffset={12}
+        className="w-96 text-xs leading-relaxed"
+      >
+        <p>{sourceSentence}</p>
+      </HoverCardContent>
+    </HoverCard>
   );
 }

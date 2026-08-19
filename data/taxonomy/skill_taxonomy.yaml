@@ -1,76 +1,2836 @@
-# Skill Taxonomy for Agent-CV-Screening
-
-- skill: "Python"
-  category: "Programming Language"
-  synonyms: ["python", "py", "PYTHON"]
+# All-industry skill taxonomy for Agent-CV-Screening (v0.2).
+# Canonical skills, synonyms, and parent-child relations used for JD/CV skill
+# normalization and deterministic extraction. English-only scope; extend per
+# industry by adding entries under an existing or new category.
+- skill: Python
+  category: Programming Language
+  synonyms: [python, py, python3, python programming]
   parent: null
-
-- skill: "Java"
-  category: "Programming Language"
-  synonyms: ["java", "JAVA"]
+- skill: Java
+  category: Programming Language
+  synonyms: [java, jdk, java programming]
   parent: null
-
-- skill: "SQL"
-  category: "Database"
-  synonyms: ["sql", "postgresql", "mysql", "structured query language"]
+- skill: JavaScript
+  category: Programming Language
+  synonyms: [javascript, js, es6, ecmascript]
   parent: null
-
-- skill: "Machine Learning"
-  category: "AI"
-  synonyms: ["ML", "机器学习", "machine learning"]
+- skill: TypeScript
+  category: Programming Language
+  synonyms: [typescript, ts]
   parent: null
-
-- skill: "Deep Learning"
-  category: "AI"
-  synonyms: ["DL", "深度學習", "deep learning"]
-  parent: "Machine Learning"
-
-- skill: "PyTorch"
-  category: "AI"
-  synonyms: ["pytorch", "Pytorch", "torch"]
-  parent: "Deep Learning"
-
-- skill: "TensorFlow"
-  category: "AI"
-  synonyms: ["tensorflow", "Tensorflow", "tf"]
-  parent: "Deep Learning"
-
-- skill: "Natural Language Processing"
-  category: "AI"
-  synonyms: ["NLP", "自然語言處理", "natural language processing"]
-  parent: "Machine Learning"
-
-- skill: "Computer Vision"
-  category: "AI"
-  synonyms: ["CV", "電腦視覺", "computer vision"]
-  parent: "Deep Learning"
-
-- skill: "R"
-  category: "Programming Language"
-  synonyms: ["r", "R语言"]
+- skill: C++
+  category: Programming Language
+  synonyms: [c++, cpp, c plus plus]
   parent: null
-
-- skill: "Docker"
-  category: "DevOps"
-  synonyms: ["docker", "container"]
+- skill: C#
+  category: Programming Language
+  synonyms: [c#, csharp]
   parent: null
-
-- skill: "Kubernetes"
-  category: "DevOps"
-  synonyms: ["k8s", "kubernetes"]
+- skill: Golang
+  category: Programming Language
+  synonyms: [golang, go language, go programming]
   parent: null
-
-- skill: "AWS"
-  category: "Cloud"
-  synonyms: ["aws", "Amazon Web Services"]
+- skill: Rust
+  category: Programming Language
+  synonyms: [rust, rust programming, rust lang]
   parent: null
-
-- skill: "GCP"
-  category: "Cloud"
-  synonyms: ["gcp", "Google Cloud Platform"]
+- skill: Swift
+  category: Programming Language
+  synonyms: [swift, swift programming]
   parent: null
-
-- skill: "Azure"
-  category: "Cloud"
-  synonyms: ["azure", "Microsoft Azure"]
+- skill: Kotlin
+  category: Programming Language
+  synonyms: [kotlin, kotlin programming]
+  parent: null
+- skill: Ruby
+  category: Programming Language
+  synonyms: [ruby, ruby programming]
+  parent: null
+- skill: PHP
+  category: Programming Language
+  synonyms: [php, php programming]
+  parent: null
+- skill: Perl
+  category: Programming Language
+  synonyms: [perl, perl programming]
+  parent: null
+- skill: Scala
+  category: Programming Language
+  synonyms: [scala, scala programming]
+  parent: null
+- skill: R
+  category: Programming Language
+  synonyms: [r language, r programming, rstudio]
+  parent: null
+- skill: MATLAB
+  category: Programming Language
+  synonyms: [matlab, matlab programming]
+  parent: null
+- skill: Visual Basic
+  category: Programming Language
+  synonyms: [visual basic, vb, vb.net, vba]
+  parent: null
+- skill: COBOL
+  category: Programming Language
+  synonyms: [cobol, cobol programming]
+  parent: null
+- skill: Shell Scripting
+  category: Programming Language
+  synonyms: [shell scripting, bash, unix shell, shell script]
+  parent: null
+- skill: PowerShell
+  category: Programming Language
+  synonyms: [powershell, powershell scripting, ps1]
+  parent: null
+- skill: ABAP
+  category: Programming Language
+  synonyms: [abap, sap abap]
+  parent: null
+- skill: Git
+  category: Software Development
+  synonyms: [git, version control, github, gitlab, bitbucket]
+  parent: null
+- skill: Agile
+  category: Software Development
+  synonyms: [agile, agile methodology, agile development]
+  parent: null
+- skill: Scrum
+  category: Software Development
+  synonyms: [scrum, scrum master, sprint planning]
+  parent: null
+- skill: Kanban
+  category: Software Development
+  synonyms: [kanban, kanban board]
+  parent: null
+- skill: DevOps
+  category: Software Development
+  synonyms: [devops, devops practices]
+  parent: null
+- skill: CI/CD
+  category: Software Development
+  synonyms: [ci/cd, cicd, continuous integration, continuous delivery, continuous deployment]
+  parent: null
+- skill: Test Automation
+  category: Software Development
+  synonyms: [test automation, automated testing, qa automation]
+  parent: null
+- skill: Unit Testing
+  category: Software Development
+  synonyms: [unit testing, unit test, junit, pytest]
+  parent: null
+- skill: Test-Driven Development
+  category: Software Development
+  synonyms: [tdd, test-driven development]
+  parent: null
+- skill: Behavior-Driven Development
+  category: Software Development
+  synonyms: [bdd, behavior-driven development]
+  parent: null
+- skill: Code Review
+  category: Software Development
+  synonyms: [code review, code reviews]
+  parent: null
+- skill: Microservices
+  category: Software Development
+  synonyms: [microservices, microservice, microservices architecture]
+  parent: null
+- skill: REST API
+  category: Software Development
+  synonyms: [rest api, restful api, restful, rest]
+  parent: null
+- skill: GraphQL
+  category: Software Development
+  synonyms: [graphql, graphql api]
+  parent: null
+- skill: gRPC
+  category: Software Development
+  synonyms: [grpc, grpc api]
+  parent: null
+- skill: API Development
+  category: Software Development
+  synonyms: [api development, api design, api integration]
+  parent: null
+- skill: Software Architecture
+  category: Software Development
+  synonyms: [software architecture, system architecture, architecture design]
+  parent: null
+- skill: Design Patterns
+  category: Software Development
+  synonyms: [design patterns, software design patterns]
+  parent: null
+- skill: Object-Oriented Programming
+  category: Software Development
+  synonyms: [oop, object-oriented programming, object oriented]
+  parent: null
+- skill: Functional Programming
+  category: Software Development
+  synonyms: [functional programming, fp]
+  parent: null
+- skill: Low-Code Development
+  category: Software Development
+  synonyms: [low-code, low code, lowcode, no-code]
+  parent: null
+- skill: Technical Documentation
+  category: Software Development
+  synonyms: [technical documentation, api documentation, code documentation]
+  parent: null
+- skill: React
+  category: Web & Mobile Development
+  synonyms: [react, reactjs, react.js]
+  parent: null
+- skill: Angular
+  category: Web & Mobile Development
+  synonyms: [angular, angularjs]
+  parent: null
+- skill: Vue.js
+  category: Web & Mobile Development
+  synonyms: [vue, vuejs, vue.js]
+  parent: null
+- skill: Next.js
+  category: Web & Mobile Development
+  synonyms: [next.js, nextjs]
+  parent: null
+- skill: Node.js
+  category: Web & Mobile Development
+  synonyms: [node.js, nodejs, node]
+  parent: null
+- skill: Express.js
+  category: Web & Mobile Development
+  synonyms: [express.js, expressjs, express]
+  parent: null
+- skill: Django
+  category: Web & Mobile Development
+  synonyms: [django, django framework]
+  parent: null
+- skill: Flask
+  category: Web & Mobile Development
+  synonyms: [flask, flask framework]
+  parent: null
+- skill: FastAPI
+  category: Web & Mobile Development
+  synonyms: [fastapi, fast api]
+  parent: null
+- skill: Spring Boot
+  category: Web & Mobile Development
+  synonyms: [spring boot, spring, spring framework, spring mvc]
+  parent: null
+- skill: .NET
+  category: Web & Mobile Development
+  synonyms: [.net, dotnet, .net core, dotnet core]
+  parent: null
+- skill: ASP.NET
+  category: Web & Mobile Development
+  synonyms: [asp.net, aspnet]
+  parent: null
+- skill: Laravel
+  category: Web & Mobile Development
+  synonyms: [laravel, laravel php]
+  parent: null
+- skill: Ruby on Rails
+  category: Web & Mobile Development
+  synonyms: [ruby on rails, rails, ror]
+  parent: null
+- skill: HTML
+  category: Web & Mobile Development
+  synonyms: [html, html5]
+  parent: null
+- skill: CSS
+  category: Web & Mobile Development
+  synonyms: [css, css3]
+  parent: null
+- skill: Sass
+  category: Web & Mobile Development
+  synonyms: [sass, scss]
+  parent: null
+- skill: Tailwind CSS
+  category: Web & Mobile Development
+  synonyms: [tailwind, tailwindcss, tailwind css]
+  parent: null
+- skill: Bootstrap
+  category: Web & Mobile Development
+  synonyms: [bootstrap, bootstrap framework]
+  parent: null
+- skill: jQuery
+  category: Web & Mobile Development
+  synonyms: [jquery, jquery library]
+  parent: null
+- skill: Android Development
+  category: Web & Mobile Development
+  synonyms: [android, android development, android sdk]
+  parent: null
+- skill: iOS Development
+  category: Web & Mobile Development
+  synonyms: [ios, ios development]
+  parent: null
+- skill: React Native
+  category: Web & Mobile Development
+  synonyms: [react native, reactnative]
+  parent: null
+- skill: Flutter
+  category: Web & Mobile Development
+  synonyms: [flutter, flutter sdk]
+  parent: null
+- skill: Progressive Web Apps
+  category: Web & Mobile Development
+  synonyms: [pwa, progressive web app, progressive web apps]
+  parent: null
+- skill: Responsive Design
+  category: Web & Mobile Development
+  synonyms: [responsive design, responsive web design]
+  parent: null
+- skill: SQL
+  category: Database & Data Engineering
+  synonyms: [sql, structured query language, t-sql, pl/sql]
+  parent: null
+- skill: PostgreSQL
+  category: Database & Data Engineering
+  synonyms: [postgresql, postgres, psql]
+  parent: null
+- skill: MySQL
+  category: Database & Data Engineering
+  synonyms: [mysql]
+  parent: null
+- skill: MariaDB
+  category: Database & Data Engineering
+  synonyms: [mariadb]
+  parent: null
+- skill: MongoDB
+  category: Database & Data Engineering
+  synonyms: [mongodb, mongo]
+  parent: null
+- skill: Redis
+  category: Database & Data Engineering
+  synonyms: [redis, redis cache]
+  parent: null
+- skill: Elasticsearch
+  category: Database & Data Engineering
+  synonyms: [elasticsearch, elastic search, elastic]
+  parent: null
+- skill: Cassandra
+  category: Database & Data Engineering
+  synonyms: [cassandra, apache cassandra]
+  parent: null
+- skill: Oracle Database
+  category: Database & Data Engineering
+  synonyms: [oracle, oracle database, oracle db]
+  parent: null
+- skill: SQL Server
+  category: Database & Data Engineering
+  synonyms: [sql server, mssql, ms sql]
+  parent: null
+- skill: SQLite
+  category: Database & Data Engineering
+  synonyms: [sqlite]
+  parent: null
+- skill: DynamoDB
+  category: Database & Data Engineering
+  synonyms: [dynamodb, aws dynamodb]
+  parent: null
+- skill: Snowflake
+  category: Database & Data Engineering
+  synonyms: [snowflake, snowflake data warehouse]
+  parent: null
+- skill: BigQuery
+  category: Database & Data Engineering
+  synonyms: [bigquery, google bigquery]
+  parent: null
+- skill: Redshift
+  category: Database & Data Engineering
+  synonyms: [redshift, amazon redshift]
+  parent: null
+- skill: Data Warehouse
+  category: Database & Data Engineering
+  synonyms: [data warehouse, data warehousing, data warehousing design]
+  parent: null
+- skill: ETL
+  category: Database & Data Engineering
+  synonyms: [etl, extract transform load, etl pipelines]
+  parent: null
+- skill: Data Pipeline
+  category: Database & Data Engineering
+  synonyms: [data pipeline, data pipelines, pipeline engineering]
+  parent: null
+- skill: Apache Spark
+  category: Database & Data Engineering
+  synonyms: [apache spark, spark, pyspark]
+  parent: null
+- skill: Apache Kafka
+  category: Database & Data Engineering
+  synonyms: [apache kafka, kafka]
+  parent: null
+- skill: Airflow
+  category: Database & Data Engineering
+  synonyms: [airflow, apache airflow]
+  parent: null
+- skill: Databricks
+  category: Database & Data Engineering
+  synonyms: [databricks]
+  parent: null
+- skill: dbt
+  category: Database & Data Engineering
+  synonyms: [dbt, data build tool]
+  parent: null
+- skill: Data Modeling
+  category: Database & Data Engineering
+  synonyms: [data modeling, data model, dimensional modeling]
+  parent: null
+- skill: Database Administration
+  category: Database & Data Engineering
+  synonyms: [database administration, dba, database administrator]
+  parent: null
+- skill: NoSQL
+  category: Database & Data Engineering
+  synonyms: [nosql, non-relational database]
+  parent: null
+- skill: Machine Learning
+  category: AI & Machine Learning
+  synonyms: [machine learning, ml]
+  parent: null
+- skill: Deep Learning
+  category: AI & Machine Learning
+  synonyms: [deep learning, dl]
+  parent: Machine Learning
+- skill: Natural Language Processing
+  category: AI & Machine Learning
+  synonyms: [nlp, natural language processing]
+  parent: Machine Learning
+- skill: Computer Vision
+  category: AI & Machine Learning
+  synonyms: [computer vision, cv]
+  parent: Deep Learning
+- skill: Large Language Models
+  category: AI & Machine Learning
+  synonyms: [large language model, large language models, llm, llms]
+  parent: Machine Learning
+- skill: Generative AI
+  category: AI & Machine Learning
+  synonyms: [generative ai, genai, generative artificial intelligence]
+  parent: Large Language Models
+- skill: Prompt Engineering
+  category: AI & Machine Learning
+  synonyms: [prompt engineering, prompt design]
+  parent: Large Language Models
+- skill: RAG
+  category: AI & Machine Learning
+  synonyms: [rag, retrieval augmented generation]
+  parent: Large Language Models
+- skill: Reinforcement Learning
+  category: AI & Machine Learning
+  synonyms: [reinforcement learning, rl]
+  parent: Machine Learning
+- skill: Supervised Learning
+  category: AI & Machine Learning
+  synonyms: [supervised learning]
+  parent: Machine Learning
+- skill: Unsupervised Learning
+  category: AI & Machine Learning
+  synonyms: [unsupervised learning]
+  parent: Machine Learning
+- skill: PyTorch
+  category: AI & Machine Learning
+  synonyms: [pytorch, torch]
+  parent: Deep Learning
+- skill: TensorFlow
+  category: AI & Machine Learning
+  synonyms: [tensorflow, tf]
+  parent: Deep Learning
+- skill: Keras
+  category: AI & Machine Learning
+  synonyms: [keras]
+  parent: Deep Learning
+- skill: Scikit-learn
+  category: AI & Machine Learning
+  synonyms: [scikit-learn, scikit learn, sklearn]
+  parent: Machine Learning
+- skill: XGBoost
+  category: AI & Machine Learning
+  synonyms: [xgboost]
+  parent: Machine Learning
+- skill: Hugging Face
+  category: AI & Machine Learning
+  synonyms: [hugging face, huggingface, transformers]
+  parent: Large Language Models
+- skill: LangChain
+  category: AI & Machine Learning
+  synonyms: [langchain]
+  parent: Large Language Models
+- skill: OpenAI API
+  category: AI & Machine Learning
+  synonyms: [openai, openai api, gpt, chatgpt]
+  parent: Large Language Models
+- skill: Fine-Tuning
+  category: AI & Machine Learning
+  synonyms: [fine-tuning, fine tuning, model fine-tuning]
+  parent: Large Language Models
+- skill: Data Science
+  category: AI & Machine Learning
+  synonyms: [data science]
+  parent: null
+- skill: Statistics
+  category: AI & Machine Learning
+  synonyms: [statistics, statistical analysis, statistical modeling]
+  parent: null
+- skill: Regression Analysis
+  category: AI & Machine Learning
+  synonyms: [regression, regression analysis, linear regression, logistic regression]
+  parent: null
+- skill: Classification
+  category: AI & Machine Learning
+  synonyms: [classification, classification models]
+  parent: null
+- skill: Clustering
+  category: AI & Machine Learning
+  synonyms: [clustering, cluster analysis, k-means]
+  parent: null
+- skill: Feature Engineering
+  category: AI & Machine Learning
+  synonyms: [feature engineering, feature selection]
+  parent: null
+- skill: Model Evaluation
+  category: AI & Machine Learning
+  synonyms: [model evaluation, model validation, cross-validation]
+  parent: null
+- skill: MLOps
+  category: AI & Machine Learning
+  synonyms: [mlops, ml model deployment, model deployment]
+  parent: null
+- skill: AWS
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [aws, amazon web services]
+  parent: null
+- skill: GCP
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [gcp, google cloud, google cloud platform]
+  parent: null
+- skill: Azure
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [azure, microsoft azure]
+  parent: null
+- skill: Docker
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [docker, container, containers, containerization]
+  parent: null
+- skill: Kubernetes
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [kubernetes, k8s]
+  parent: null
+- skill: Terraform
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [terraform]
+  parent: null
+- skill: Ansible
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [ansible, ansible playbook]
+  parent: null
+- skill: Jenkins
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [jenkins, jenkins ci]
+  parent: null
+- skill: GitHub Actions
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [github actions, gh actions]
+  parent: null
+- skill: GitLab CI
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [gitlab ci, gitlab ci/cd]
+  parent: null
+- skill: Linux
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [linux, linux administration, unix]
+  parent: null
+- skill: Windows Server
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [windows server, windows administration]
+  parent: null
+- skill: Networking
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [networking, network administration, tcp/ip, dns, vpn]
+  parent: null
+- skill: Nginx
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [nginx]
+  parent: null
+- skill: Load Balancing
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [load balancing, load balancer, haproxy]
+  parent: null
+- skill: Monitoring
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [monitoring, observability, datadog]
+  parent: null
+- skill: Prometheus
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [prometheus]
+  parent: null
+- skill: Grafana
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [grafana]
+  parent: null
+- skill: Elastic Stack
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [elastic stack, elk stack, kibana, logstash]
+  parent: null
+- skill: Infrastructure as Code
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [infrastructure as code, iac]
+  parent: null
+- skill: Cloud Architecture
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [cloud architecture, cloud computing, cloud-native]
+  parent: null
+- skill: Serverless
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [serverless, serverless computing, aws lambda]
+  parent: null
+- skill: Virtualization
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [virtualization, vmware, hypervisor]
+  parent: null
+- skill: Site Reliability
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [site reliability engineering, sre]
+  parent: null
+- skill: Incident Management
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [incident management, incident response, on-call]
+  parent: null
+- skill: Configuration Management
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [configuration management]
+  parent: null
+- skill: Release Management
+  category: Cloud, DevOps & Infrastructure
+  synonyms: [release management, release engineering]
+  parent: null
+- skill: Cybersecurity
+  category: Cybersecurity
+  synonyms: [cybersecurity, cyber security, information security, infosec]
+  parent: null
+- skill: Network Security
+  category: Cybersecurity
+  synonyms: [network security, firewall, ids, ips]
+  parent: null
+- skill: Penetration Testing
+  category: Cybersecurity
+  synonyms: [penetration testing, penetration test, pentest, ethical hacking]
+  parent: null
+- skill: Vulnerability Assessment
+  category: Cybersecurity
+  synonyms: [vulnerability assessment, vulnerability scanning, vulnerability management]
+  parent: null
+- skill: SIEM
+  category: Cybersecurity
+  synonyms: [siem, security information and event management]
+  parent: null
+- skill: Splunk
+  category: Cybersecurity
+  synonyms: [splunk]
+  parent: null
+- skill: Identity and Access Management
+  category: Cybersecurity
+  synonyms: [identity and access management, iam, access control]
+  parent: null
+- skill: OAuth
+  category: Cybersecurity
+  synonyms: [oauth, oauth2, oidc, single sign-on, sso]
+  parent: null
+- skill: Encryption
+  category: Cybersecurity
+  synonyms: [encryption, cryptography, cryptographic]
+  parent: null
+- skill: Security Operations
+  category: Cybersecurity
+  synonyms: [security operations, soc, security monitoring]
+  parent: null
+- skill: Threat Intelligence
+  category: Cybersecurity
+  synonyms: [threat intelligence, threat hunting]
+  parent: null
+- skill: ISO 27001
+  category: Cybersecurity
+  synonyms: [iso 27001, iso27001, information security management]
+  parent: null
+- skill: GDPR
+  category: Cybersecurity
+  synonyms: [gdpr, general data protection regulation]
+  parent: null
+- skill: Data Privacy
+  category: Cybersecurity
+  synonyms: [data privacy, privacy protection, privacy]
+  parent: null
+- skill: Application Security
+  category: Cybersecurity
+  synonyms: [application security, appsec, secure coding]
+  parent: null
+- skill: DevSecOps
+  category: Cybersecurity
+  synonyms: [devsecops, secure devops]
+  parent: null
+- skill: Digital Forensics
+  category: Cybersecurity
+  synonyms: [digital forensics, computer forensics]
+  parent: null
+- skill: Malware Analysis
+  category: Cybersecurity
+  synonyms: [malware analysis, reverse engineering]
+  parent: null
+- skill: Excel
+  category: Data Analysis & BI
+  synonyms: [excel, microsoft excel, spreadsheets, pivot table]
+  parent: null
+- skill: Google Sheets
+  category: Data Analysis & BI
+  synonyms: [google sheets]
+  parent: null
+- skill: Tableau
+  category: Data Analysis & BI
+  synonyms: [tableau, tableau desktop]
+  parent: null
+- skill: Power BI
+  category: Data Analysis & BI
+  synonyms: [power bi, powerbi]
+  parent: null
+- skill: Looker
+  category: Data Analysis & BI
+  synonyms: [looker, looker studio]
+  parent: null
+- skill: Data Visualization
+  category: Data Analysis & BI
+  synonyms: [data visualization, data viz, dashboarding]
+  parent: null
+- skill: Business Intelligence
+  category: Data Analysis & BI
+  synonyms: [business intelligence, bi reporting]
+  parent: null
+- skill: Data Analysis
+  category: Data Analysis & BI
+  synonyms: [data analysis, data analytics, analytics]
+  parent: null
+- skill: Data Governance
+  category: Data Analysis & BI
+  synonyms: [data governance, data quality, master data management]
+  parent: null
+- skill: A/B Testing
+  category: Data Analysis & BI
+  synonyms: [a/b testing, ab testing]
+  parent: null
+- skill: Quantitative Analysis
+  category: Data Analysis & BI
+  synonyms: [quantitative analysis, quant analysis]
+  parent: null
+- skill: Econometrics
+  category: Data Analysis & BI
+  synonyms: [econometrics, econometric analysis]
+  parent: null
+- skill: SAS
+  category: Data Analysis & BI
+  synonyms: [sas, sas programming]
+  parent: null
+- skill: SPSS
+  category: Data Analysis & BI
+  synonyms: [spss]
+  parent: null
+- skill: Stata
+  category: Data Analysis & BI
+  synonyms: [stata]
+  parent: null
+- skill: Alteryx
+  category: Data Analysis & BI
+  synonyms: [alteryx]
+  parent: null
+- skill: Financial Analysis
+  category: Finance & Accounting
+  synonyms: [financial analysis, financial analyst]
+  parent: null
+- skill: Financial Modeling
+  category: Finance & Accounting
+  synonyms: [financial modeling, financial model, 3-statement model]
+  parent: null
+- skill: Accounting
+  category: Finance & Accounting
+  synonyms: [accounting, general ledger]
+  parent: null
+- skill: Bookkeeping
+  category: Finance & Accounting
+  synonyms: [bookkeeping, double-entry bookkeeping]
+  parent: null
+- skill: Financial Reporting
+  category: Finance & Accounting
+  synonyms: [financial reporting, management reporting, annual report]
+  parent: null
+- skill: Financial Statements
+  category: Finance & Accounting
+  synonyms: [financial statements, balance sheet, income statement, cash flow statement]
+  parent: null
+- skill: Auditing
+  category: Finance & Accounting
+  synonyms: [auditing, audit, internal audit, external audit]
+  parent: null
+- skill: Tax
+  category: Finance & Accounting
+  synonyms: [tax, taxation, tax compliance, corporate tax]
+  parent: null
+- skill: Corporate Finance
+  category: Finance & Accounting
+  synonyms: [corporate finance, capital structure]
+  parent: null
+- skill: M&A
+  category: Finance & Accounting
+  synonyms: [mergers and acquisitions, m&a, ma, deal execution]
+  parent: null
+- skill: Valuation
+  category: Finance & Accounting
+  synonyms: [valuation, dcf, discounted cash flow, comparable analysis]
+  parent: null
+- skill: Budgeting
+  category: Finance & Accounting
+  synonyms: [budgeting, budget]
+  parent: null
+- skill: Forecasting
+  category: Finance & Accounting
+  synonyms: [forecasting, financial forecasting]
+  parent: null
+- skill: Cost Accounting
+  category: Finance & Accounting
+  synonyms: [cost accounting, cost control]
+  parent: null
+- skill: Management Accounting
+  category: Finance & Accounting
+  synonyms: [management accounting, management accountant]
+  parent: null
+- skill: Accounts Payable
+  category: Finance & Accounting
+  synonyms: [accounts payable, ap]
+  parent: null
+- skill: Accounts Receivable
+  category: Finance & Accounting
+  synonyms: [accounts receivable, ar]
+  parent: null
+- skill: Payroll
+  category: Finance & Accounting
+  synonyms: [payroll, payroll processing, payroll administration]
+  parent: null
+- skill: Treasury
+  category: Finance & Accounting
+  synonyms: [treasury, treasury management, cash management]
+  parent: null
+- skill: Financial Planning & Analysis
+  category: Finance & Accounting
+  synonyms: [fp&a, financial planning and analysis]
+  parent: null
+- skill: Internal Controls
+  category: Finance & Accounting
+  synonyms: [internal controls, sox, sarbanes-oxley]
+  parent: null
+- skill: IFRS
+  category: Finance & Accounting
+  synonyms: [ifrs, international financial reporting standards]
+  parent: null
+- skill: GAAP
+  category: Finance & Accounting
+  synonyms: [gaap, us gaap, generally accepted accounting principles]
+  parent: null
+- skill: QuickBooks
+  category: Finance & Accounting
+  synonyms: [quickbooks]
+  parent: null
+- skill: Xero
+  category: Finance & Accounting
+  synonyms: [xero]
+  parent: null
+- skill: SAP
+  category: Finance & Accounting
+  synonyms: [sap, sap erp, sap fi, sap fico]
+  parent: null
+- skill: Credit Analysis
+  category: Banking & Insurance
+  synonyms: [credit analysis, credit assessment]
+  parent: null
+- skill: Credit Risk
+  category: Banking & Insurance
+  synonyms: [credit risk, credit risk management]
+  parent: null
+- skill: Market Risk
+  category: Banking & Insurance
+  synonyms: [market risk, market risk management]
+  parent: null
+- skill: Operational Risk
+  category: Banking & Insurance
+  synonyms: [operational risk, op risk]
+  parent: null
+- skill: Compliance
+  category: Banking & Insurance
+  synonyms: [compliance]
+  parent: null
+- skill: AML
+  category: Banking & Insurance
+  synonyms: [aml, anti-money laundering, anti money laundering]
+  parent: null
+- skill: KYC
+  category: Banking & Insurance
+  synonyms: [kyc, know your customer]
+  parent: null
+- skill: Investment Banking
+  category: Banking & Insurance
+  synonyms: [investment banking, ibd]
+  parent: null
+- skill: Private Equity
+  category: Banking & Insurance
+  synonyms: [private equity, pe]
+  parent: null
+- skill: Asset Management
+  category: Banking & Insurance
+  synonyms: [asset management, fund management]
+  parent: null
+- skill: Portfolio Management
+  category: Banking & Insurance
+  synonyms: [portfolio management, portfolio manager]
+  parent: null
+- skill: Wealth Management
+  category: Banking & Insurance
+  synonyms: [wealth management, private banking]
+  parent: null
+- skill: Trading
+  category: Banking & Insurance
+  synonyms: [trading, equity trading]
+  parent: null
+- skill: Algorithmic Trading
+  category: Banking & Insurance
+  synonyms: [algorithmic trading, algo trading, quant trading]
+  parent: null
+- skill: Risk Management
+  category: Banking & Insurance
+  synonyms: [risk management, enterprise risk management]
+  parent: null
+- skill: Actuarial Science
+  category: Banking & Insurance
+  synonyms: [actuarial, actuarial science, actuarial analysis]
+  parent: null
+- skill: Underwriting
+  category: Banking & Insurance
+  synonyms: [underwriting, insurance underwriting, credit underwriting]
+  parent: null
+- skill: Claims Management
+  category: Banking & Insurance
+  synonyms: [claims management, claims processing, claims]
+  parent: null
+- skill: Insurance
+  category: Banking & Insurance
+  synonyms: [insurance, general insurance, life insurance]
+  parent: null
+- skill: Derivatives
+  category: Banking & Insurance
+  synonyms: [derivatives, options, futures, swaps]
+  parent: null
+- skill: Fixed Income
+  category: Banking & Insurance
+  synonyms: [fixed income, bonds]
+  parent: null
+- skill: FX
+  category: Banking & Insurance
+  synonyms: [fx, foreign exchange, forex]
+  parent: null
+- skill: Basel
+  category: Banking & Insurance
+  synonyms: [basel, basel iii, basel iv]
+  parent: null
+- skill: RegTech
+  category: Banking & Insurance
+  synonyms: [regtech, regulatory technology]
+  parent: null
+- skill: Digital Marketing
+  category: Marketing & Advertising
+  synonyms: [digital marketing, online marketing]
+  parent: null
+- skill: SEO
+  category: Marketing & Advertising
+  synonyms: [seo, search engine optimization]
+  parent: null
+- skill: SEM
+  category: Marketing & Advertising
+  synonyms: [sem, search engine marketing, ppc, google ads]
+  parent: null
+- skill: Content Marketing
+  category: Marketing & Advertising
+  synonyms: [content marketing, content strategy]
+  parent: null
+- skill: Social Media Marketing
+  category: Marketing & Advertising
+  synonyms: [social media marketing, smm]
+  parent: null
+- skill: Email Marketing
+  category: Marketing & Advertising
+  synonyms: [email marketing, email campaigns]
+  parent: null
+- skill: Marketing Automation
+  category: Marketing & Advertising
+  synonyms: [marketing automation, hubspot, marketo, pardot]
+  parent: null
+- skill: Brand Management
+  category: Marketing & Advertising
+  synonyms: [brand management, branding]
+  parent: null
+- skill: Brand Strategy
+  category: Marketing & Advertising
+  synonyms: [brand strategy, brand positioning]
+  parent: null
+- skill: Market Research
+  category: Marketing & Advertising
+  synonyms: [market research, market intelligence]
+  parent: null
+- skill: Consumer Insights
+  category: Marketing & Advertising
+  synonyms: [consumer insights, customer insights]
+  parent: null
+- skill: Product Marketing
+  category: Marketing & Advertising
+  synonyms: [product marketing, go-to-market]
+  parent: null
+- skill: Growth Marketing
+  category: Marketing & Advertising
+  synonyms: [growth marketing, growth hacking]
+  parent: null
+- skill: Influencer Marketing
+  category: Marketing & Advertising
+  synonyms: [influencer marketing, influencer outreach]
+  parent: null
+- skill: Advertising
+  category: Marketing & Advertising
+  synonyms: [advertising, ad campaigns]
+  parent: null
+- skill: Media Planning
+  category: Marketing & Advertising
+  synonyms: [media planning, media buying]
+  parent: null
+- skill: Public Relations
+  category: Marketing & Advertising
+  synonyms: [public relations, pr]
+  parent: null
+- skill: Copywriting
+  category: Marketing & Advertising
+  synonyms: [copywriting, ad copy]
+  parent: null
+- skill: Marketing Analytics
+  category: Marketing & Advertising
+  synonyms: [marketing analytics, campaign analytics, marketing metrics]
+  parent: null
+- skill: Google Analytics
+  category: Marketing & Advertising
+  synonyms: [google analytics, ga4]
+  parent: null
+- skill: Customer Acquisition
+  category: Marketing & Advertising
+  synonyms: [customer acquisition, user acquisition]
+  parent: null
+- skill: Retention Marketing
+  category: Marketing & Advertising
+  synonyms: [retention marketing, churn reduction]
+  parent: null
+- skill: Event Marketing
+  category: Marketing & Advertising
+  synonyms: [event marketing]
+  parent: null
+- skill: Affiliate Marketing
+  category: Marketing & Advertising
+  synonyms: [affiliate marketing, affiliate program]
+  parent: null
+- skill: Sales
+  category: Sales & Business Development
+  synonyms: [sales, selling, consultative selling]
+  parent: null
+- skill: Business Development
+  category: Sales & Business Development
+  synonyms: [business development, biz dev, bd]
+  parent: null
+- skill: Account Management
+  category: Sales & Business Development
+  synonyms: [account management]
+  parent: null
+- skill: Key Account Management
+  category: Sales & Business Development
+  synonyms: [key account management, kam, strategic account management]
+  parent: null
+- skill: Sales Strategy
+  category: Sales & Business Development
+  synonyms: [sales strategy, go-to-market strategy, gtm]
+  parent: null
+- skill: Sales Operations
+  category: Sales & Business Development
+  synonyms: [sales operations, sales ops]
+  parent: null
+- skill: CRM
+  category: Sales & Business Development
+  synonyms: [crm, customer relationship management]
+  parent: null
+- skill: Salesforce
+  category: Sales & Business Development
+  synonyms: [salesforce, sfdc, salesforce crm]
+  parent: null
+- skill: Lead Generation
+  category: Sales & Business Development
+  synonyms: [lead generation, lead gen]
+  parent: null
+- skill: Prospecting
+  category: Sales & Business Development
+  synonyms: [prospecting, outbound sales]
+  parent: null
+- skill: Cold Calling
+  category: Sales & Business Development
+  synonyms: [cold calling, cold outreach]
+  parent: null
+- skill: Negotiation
+  category: Sales & Business Development
+  synonyms: [negotiation, negotiation skills, deal negotiation]
+  parent: null
+- skill: Closing
+  category: Sales & Business Development
+  synonyms: [closing, deal closing, sales closing]
+  parent: null
+- skill: Pipeline Management
+  category: Sales & Business Development
+  synonyms: [sales pipeline, pipeline management]
+  parent: null
+- skill: Territory Management
+  category: Sales & Business Development
+  synonyms: [territory management, territory planning]
+  parent: null
+- skill: Channel Sales
+  category: Sales & Business Development
+  synonyms: [channel sales, channel partners]
+  parent: null
+- skill: Partner Management
+  category: Sales & Business Development
+  synonyms: [partner management, alliance management, partnerships]
+  parent: null
+- skill: Inside Sales
+  category: Sales & Business Development
+  synonyms: [inside sales]
+  parent: null
+- skill: Field Sales
+  category: Sales & Business Development
+  synonyms: [field sales, outside sales]
+  parent: null
+- skill: B2B Sales
+  category: Sales & Business Development
+  synonyms: [b2b sales, business-to-business sales]
+  parent: null
+- skill: B2C Sales
+  category: Sales & Business Development
+  synonyms: [b2c sales, business-to-consumer sales]
+  parent: null
+- skill: SaaS Sales
+  category: Sales & Business Development
+  synonyms: [saas sales, software sales]
+  parent: null
+- skill: Pricing Strategy
+  category: Sales & Business Development
+  synonyms: [pricing strategy, pricing analysis, pricing]
+  parent: null
+- skill: Proposal Writing
+  category: Sales & Business Development
+  synonyms: [proposal writing, proposals, rfp, request for proposal]
+  parent: null
+- skill: Customer Success
+  category: Sales & Business Development
+  synonyms: [customer success, client success]
+  parent: null
+- skill: Recruitment
+  category: Human Resources
+  synonyms: [recruitment, recruiting]
+  parent: null
+- skill: Talent Acquisition
+  category: Human Resources
+  synonyms: [talent acquisition, ta, headhunting]
+  parent: null
+- skill: Candidate Sourcing
+  category: Human Resources
+  synonyms: [candidate sourcing, talent sourcing]
+  parent: null
+- skill: Interviewing
+  category: Human Resources
+  synonyms: [interviewing, behavioral interviewing, interview skills]
+  parent: null
+- skill: Onboarding
+  category: Human Resources
+  synonyms: [onboarding, employee onboarding, new hire onboarding]
+  parent: null
+- skill: Performance Management
+  category: Human Resources
+  synonyms: [performance management, performance review, performance appraisal]
+  parent: null
+- skill: Employee Relations
+  category: Human Resources
+  synonyms: [employee relations, labor relations]
+  parent: null
+- skill: HR Operations
+  category: Human Resources
+  synonyms: [hr operations, hr ops]
+  parent: null
+- skill: HRIS
+  category: Human Resources
+  synonyms: [hris, hr information system]
+  parent: null
+- skill: Workday
+  category: Human Resources
+  synonyms: [workday]
+  parent: null
+- skill: Compensation & Benefits
+  category: Human Resources
+  synonyms: [compensation and benefits, comp & ben, total rewards]
+  parent: null
+- skill: Training & Development
+  category: Human Resources
+  synonyms: [training and development, training]
+  parent: null
+- skill: Learning & Development
+  category: Human Resources
+  synonyms: [learning and development, l&d]
+  parent: null
+- skill: Employee Engagement
+  category: Human Resources
+  synonyms: [employee engagement, engagement survey]
+  parent: null
+- skill: Diversity & Inclusion
+  category: Human Resources
+  synonyms: [diversity and inclusion, dei, diversity]
+  parent: null
+- skill: HR Analytics
+  category: Human Resources
+  synonyms: [hr analytics, people analytics]
+  parent: null
+- skill: Workforce Planning
+  category: Human Resources
+  synonyms: [workforce planning, headcount planning]
+  parent: null
+- skill: Labor Law
+  category: Human Resources
+  synonyms: [labor law, hk employment ordinance]
+  parent: null
+- skill: Organization Development
+  category: Human Resources
+  synonyms: [organization development, organizational development, od]
+  parent: null
+- skill: Talent Management
+  category: Human Resources
+  synonyms: [talent management, succession planning]
+  parent: null
+- skill: Employer Branding
+  category: Human Resources
+  synonyms: [employer branding]
+  parent: null
+- skill: HR Policies
+  category: Human Resources
+  synonyms: [hr policies, employee handbook, policy development]
+  parent: null
+- skill: Contract Law
+  category: Legal & Compliance
+  synonyms: [contract law, contracts, contract review]
+  parent: null
+- skill: Contract Drafting
+  category: Legal & Compliance
+  synonyms: [contract drafting, legal drafting]
+  parent: null
+- skill: Corporate Law
+  category: Legal & Compliance
+  synonyms: [corporate law, company law]
+  parent: null
+- skill: Corporate Governance
+  category: Legal & Compliance
+  synonyms: [corporate governance, board governance]
+  parent: null
+- skill: Litigation
+  category: Legal & Compliance
+  synonyms: [litigation, legal proceedings]
+  parent: null
+- skill: Dispute Resolution
+  category: Legal & Compliance
+  synonyms: [dispute resolution, arbitration, mediation]
+  parent: null
+- skill: Intellectual Property
+  category: Legal & Compliance
+  synonyms: [intellectual property, ip, patent, copyright]
+  parent: null
+- skill: Patents
+  category: Legal & Compliance
+  synonyms: [patents, patent law, patent drafting]
+  parent: null
+- skill: Trademark
+  category: Legal & Compliance
+  synonyms: [trademark, trademark law]
+  parent: null
+- skill: Employment Law
+  category: Legal & Compliance
+  synonyms: [employment law]
+  parent: null
+- skill: Regulatory Compliance
+  category: Legal & Compliance
+  synonyms: [regulatory compliance]
+  parent: null
+- skill: Data Protection
+  category: Legal & Compliance
+  synonyms: [data protection, pdpo, personal data privacy ordinance]
+  parent: null
+- skill: Legal Research
+  category: Legal & Compliance
+  synonyms: [legal research, case research]
+  parent: null
+- skill: Legal Advisory
+  category: Legal & Compliance
+  synonyms: [legal advisory, legal counsel, legal advice]
+  parent: null
+- skill: Due Diligence
+  category: Legal & Compliance
+  synonyms: [due diligence, legal due diligence]
+  parent: null
+- skill: Compliance Testing
+  category: Legal & Compliance
+  synonyms: [compliance testing, compliance monitoring]
+  parent: null
+- skill: Policy Drafting
+  category: Legal & Compliance
+  synonyms: [policy drafting, policy writing]
+  parent: null
+- skill: GRC
+  category: Legal & Compliance
+  synonyms: [grc, governance risk and compliance]
+  parent: null
+- skill: Operations Management
+  category: Operations & Administration
+  synonyms: [operations management, operations, ops management]
+  parent: null
+- skill: Business Operations
+  category: Operations & Administration
+  synonyms: [business operations, bizops]
+  parent: null
+- skill: Process Improvement
+  category: Operations & Administration
+  synonyms: [process improvement, process optimization]
+  parent: null
+- skill: Continuous Improvement
+  category: Operations & Administration
+  synonyms: [continuous improvement, kaizen]
+  parent: null
+- skill: Lean
+  category: Operations & Administration
+  synonyms: [lean, lean methodology, lean six sigma]
+  parent: null
+- skill: Six Sigma
+  category: Operations & Administration
+  synonyms: [six sigma, six sigma black belt, six sigma green belt]
+  parent: null
+- skill: SOP
+  category: Operations & Administration
+  synonyms: [sop, standard operating procedure, standard operating procedures]
+  parent: null
+- skill: Vendor Management
+  category: Operations & Administration
+  synonyms: [vendor management, third-party management, supplier management]
+  parent: null
+- skill: Facilities Management
+  category: Operations & Administration
+  synonyms: [facilities management, facility management]
+  parent: null
+- skill: Office Administration
+  category: Operations & Administration
+  synonyms: [office administration, admin]
+  parent: null
+- skill: Executive Assistant
+  category: Operations & Administration
+  synonyms: [executive assistant, ea, executive support]
+  parent: null
+- skill: Scheduling
+  category: Operations & Administration
+  synonyms: [scheduling, calendar management, meeting coordination]
+  parent: null
+- skill: Document Management
+  category: Operations & Administration
+  synonyms: [document management, document control]
+  parent: null
+- skill: Records Management
+  category: Operations & Administration
+  synonyms: [records management, record keeping, filing]
+  parent: null
+- skill: Data Entry
+  category: Operations & Administration
+  synonyms: [data entry]
+  parent: null
+- skill: Administrative Support
+  category: Operations & Administration
+  synonyms: [administrative support, admin support]
+  parent: null
+- skill: Microsoft Office
+  category: Operations & Administration
+  synonyms: [microsoft office, ms office, office suite]
+  parent: null
+- skill: Microsoft Word
+  category: Operations & Administration
+  synonyms: [microsoft word, ms word, word]
+  parent: null
+- skill: Microsoft PowerPoint
+  category: Operations & Administration
+  synonyms: [microsoft powerpoint, powerpoint, ppt]
+  parent: null
+- skill: Microsoft Outlook
+  category: Operations & Administration
+  synonyms: [microsoft outlook, outlook]
+  parent: null
+- skill: Microsoft Teams
+  category: Operations & Administration
+  synonyms: [microsoft teams, ms teams, teams]
+  parent: null
+- skill: Google Workspace
+  category: Operations & Administration
+  synonyms: [google workspace, g suite, google docs]
+  parent: null
+- skill: Project Management
+  category: Project & Program Management
+  synonyms: [project management, pm, pmp]
+  parent: null
+- skill: Program Management
+  category: Project & Program Management
+  synonyms: [program management, pgm]
+  parent: null
+- skill: Project Portfolio Management
+  category: Project & Program Management
+  synonyms: [project portfolio management, ppm]
+  parent: null
+- skill: PMO
+  category: Project & Program Management
+  synonyms: [pmo, project management office]
+  parent: null
+- skill: Agile Project Management
+  category: Project & Program Management
+  synonyms: [agile project management, agile pm]
+  parent: null
+- skill: Waterfall
+  category: Project & Program Management
+  synonyms: [waterfall, waterfall methodology]
+  parent: null
+- skill: Project Risk Management
+  category: Project & Program Management
+  synonyms: [project risk management, risk register, project risk]
+  parent: null
+- skill: Stakeholder Management
+  category: Project & Program Management
+  synonyms: [stakeholder management, stakeholder engagement]
+  parent: null
+- skill: Resource Planning
+  category: Project & Program Management
+  synonyms: [resource planning, resource allocation, resource management]
+  parent: null
+- skill: Budget Management
+  category: Project & Program Management
+  synonyms: [budget management, project budget]
+  parent: null
+- skill: Project Planning
+  category: Project & Program Management
+  synonyms: [project planning, project scheduling, gantt chart]
+  parent: null
+- skill: Critical Path Method
+  category: Project & Program Management
+  synonyms: [critical path method, cpm, critical path]
+  parent: null
+- skill: Project Coordination
+  category: Project & Program Management
+  synonyms: [project coordination, project coordinator]
+  parent: null
+- skill: Change Management
+  category: Project & Program Management
+  synonyms: [change management, change control]
+  parent: null
+- skill: Issue Management
+  category: Project & Program Management
+  synonyms: [issue management, issue tracking, escalation management]
+  parent: null
+- skill: Requirements Gathering
+  category: Project & Program Management
+  synonyms: [requirements gathering, requirements analysis, requirement elicitation]
+  parent: null
+- skill: Business Analysis
+  category: Project & Program Management
+  synonyms: [business analysis, business analyst, ba]
+  parent: null
+- skill: Process Mapping
+  category: Project & Program Management
+  synonyms: [process mapping, process flow, bpmn]
+  parent: null
+- skill: OKR
+  category: Project & Program Management
+  synonyms: [okr, objectives and key results]
+  parent: null
+- skill: KPI Development
+  category: Project & Program Management
+  synonyms: [kpi, key performance indicators, kpi tracking]
+  parent: null
+- skill: Reporting
+  category: Project & Program Management
+  synonyms: [status reporting, progress reporting]
+  parent: null
+- skill: Strategy
+  category: Consulting & Strategy
+  synonyms: [strategy, corporate strategy]
+  parent: null
+- skill: Strategic Planning
+  category: Consulting & Strategy
+  synonyms: [strategic planning, long-term planning]
+  parent: null
+- skill: Business Strategy
+  category: Consulting & Strategy
+  synonyms: [business strategy, growth strategy]
+  parent: null
+- skill: Market Analysis
+  category: Consulting & Strategy
+  synonyms: [market analysis, market sizing, market entry]
+  parent: null
+- skill: Competitive Analysis
+  category: Consulting & Strategy
+  synonyms: [competitive analysis, competitor analysis, competitive intelligence]
+  parent: null
+- skill: Business Case
+  category: Consulting & Strategy
+  synonyms: [business case, business case development, feasibility study]
+  parent: null
+- skill: Management Consulting
+  category: Consulting & Strategy
+  synonyms: [management consulting, consulting]
+  parent: null
+- skill: Digital Transformation
+  category: Consulting & Strategy
+  synonyms: [digital transformation, digital strategy]
+  parent: null
+- skill: Operational Excellence
+  category: Consulting & Strategy
+  synonyms: [operational excellence]
+  parent: null
+- skill: Cost Reduction
+  category: Consulting & Strategy
+  synonyms: [cost reduction, cost optimization, cost saving]
+  parent: null
+- skill: Benchmarking
+  category: Consulting & Strategy
+  synonyms: [benchmarking, industry benchmarking]
+  parent: null
+- skill: SWOT Analysis
+  category: Consulting & Strategy
+  synonyms: [swot, swot analysis]
+  parent: null
+- skill: PESTLE
+  category: Consulting & Strategy
+  synonyms: [pestle, pest analysis]
+  parent: null
+- skill: Design Thinking
+  category: Consulting & Strategy
+  synonyms: [design thinking, design sprint]
+  parent: null
+- skill: Workshop Facilitation
+  category: Consulting & Strategy
+  synonyms: [workshop facilitation, facilitation, focus group facilitation]
+  parent: null
+- skill: Business Model Innovation
+  category: Consulting & Strategy
+  synonyms: [business model innovation, business model canvas, bmc]
+  parent: null
+- skill: Turnaround Management
+  category: Consulting & Strategy
+  synonyms: [turnaround management, turnaround]
+  parent: null
+- skill: Supply Chain Management
+  category: Supply Chain & Logistics
+  synonyms: [supply chain management, supply chain, scm]
+  parent: null
+- skill: Logistics
+  category: Supply Chain & Logistics
+  synonyms: [logistics, logistics management]
+  parent: null
+- skill: Procurement
+  category: Supply Chain & Logistics
+  synonyms: [procurement, purchasing]
+  parent: null
+- skill: Strategic Sourcing
+  category: Supply Chain & Logistics
+  synonyms: [strategic sourcing, supplier sourcing]
+  parent: null
+- skill: Inventory Management
+  category: Supply Chain & Logistics
+  synonyms: [inventory management, stock management, inventory control]
+  parent: null
+- skill: Demand Planning
+  category: Supply Chain & Logistics
+  synonyms: [demand planning, demand forecasting]
+  parent: null
+- skill: Supply Planning
+  category: Supply Chain & Logistics
+  synonyms: [supply planning, supply chain planning]
+  parent: null
+- skill: Warehouse Management
+  category: Supply Chain & Logistics
+  synonyms: [warehouse management, warehousing, wms]
+  parent: null
+- skill: Distribution
+  category: Supply Chain & Logistics
+  synonyms: [distribution, distribution management, distribution network]
+  parent: null
+- skill: Transportation Management
+  category: Supply Chain & Logistics
+  synonyms: [transportation management, transportation, tms]
+  parent: null
+- skill: Freight Forwarding
+  category: Supply Chain & Logistics
+  synonyms: [freight forwarding, freight]
+  parent: null
+- skill: Customs
+  category: Supply Chain & Logistics
+  synonyms: [customs, customs clearance]
+  parent: null
+- skill: Import/Export
+  category: Supply Chain & Logistics
+  synonyms: [import/export, import and export, international trade]
+  parent: null
+- skill: Trade Compliance
+  category: Supply Chain & Logistics
+  synonyms: [trade compliance, export control]
+  parent: null
+- skill: Last-Mile Delivery
+  category: Supply Chain & Logistics
+  synonyms: [last-mile delivery, last mile, delivery operations]
+  parent: null
+- skill: Order Fulfillment
+  category: Supply Chain & Logistics
+  synonyms: [order fulfillment, fulfillment, ecommerce fulfillment]
+  parent: null
+- skill: Returns Management
+  category: Supply Chain & Logistics
+  synonyms: [returns management, returns, reverse logistics]
+  parent: null
+- skill: 3PL
+  category: Supply Chain & Logistics
+  synonyms: [3pl, third-party logistics, third party logistics]
+  parent: null
+- skill: Fleet Management
+  category: Supply Chain & Logistics
+  synonyms: [fleet management, fleet operations]
+  parent: null
+- skill: Route Optimization
+  category: Supply Chain & Logistics
+  synonyms: [route optimization, route planning]
+  parent: null
+- skill: Manufacturing
+  category: Manufacturing & Quality
+  synonyms: [manufacturing, manufacturing operations, production]
+  parent: null
+- skill: Production Planning
+  category: Manufacturing & Quality
+  synonyms: [production planning, production scheduling, mrp]
+  parent: null
+- skill: Lean Manufacturing
+  category: Manufacturing & Quality
+  synonyms: [lean manufacturing, lean production]
+  parent: null
+- skill: Quality Assurance
+  category: Manufacturing & Quality
+  synonyms: [quality assurance, qa, quality management]
+  parent: null
+- skill: Quality Control
+  category: Manufacturing & Quality
+  synonyms: [quality control, qc, inspection]
+  parent: null
+- skill: Quality Management System
+  category: Manufacturing & Quality
+  synonyms: [quality management system, qms]
+  parent: null
+- skill: ISO 9001
+  category: Manufacturing & Quality
+  synonyms: [iso 9001, iso9001]
+  parent: null
+- skill: Total Quality Management
+  category: Manufacturing & Quality
+  synonyms: [total quality management, tqm]
+  parent: null
+- skill: Process Engineering
+  category: Manufacturing & Quality
+  synonyms: [process engineering, process design]
+  parent: null
+- skill: Industrial Engineering
+  category: Manufacturing & Quality
+  synonyms: [industrial engineering]
+  parent: null
+- skill: Automation
+  category: Manufacturing & Quality
+  synonyms: [automation, industrial automation, process automation]
+  parent: null
+- skill: Robotics
+  category: Manufacturing & Quality
+  synonyms: [robotics, industrial robotics]
+  parent: null
+- skill: RPA
+  category: Manufacturing & Quality
+  synonyms: [rpa, robotic process automation, ui path, automation anywhere]
+  parent: null
+- skill: PLC Programming
+  category: Manufacturing & Quality
+  synonyms: [plc, plc programming, programmable logic controller]
+  parent: null
+- skill: SCADA
+  category: Manufacturing & Quality
+  synonyms: [scada]
+  parent: null
+- skill: CAD
+  category: Manufacturing & Quality
+  synonyms: [cad, computer-aided design]
+  parent: null
+- skill: CAM
+  category: Manufacturing & Quality
+  synonyms: [cam, computer-aided manufacturing]
+  parent: null
+- skill: CNC
+  category: Manufacturing & Quality
+  synonyms: [cnc, cnc machining, computer numerical control]
+  parent: null
+- skill: Preventive Maintenance
+  category: Manufacturing & Quality
+  synonyms: [preventive maintenance, maintenance planning, cmms]
+  parent: null
+- skill: EHS
+  category: Manufacturing & Quality
+  synonyms: [ehs, environmental health and safety, hse]
+  parent: null
+- skill: Sustainability
+  category: Manufacturing & Quality
+  synonyms: [sustainability, sustainable development]
+  parent: null
+- skill: ESG
+  category: Manufacturing & Quality
+  synonyms: [esg, environmental social governance]
+  parent: null
+- skill: Mechanical Engineering
+  category: Engineering
+  synonyms: [mechanical engineering, mechanical design]
+  parent: null
+- skill: Electrical Engineering
+  category: Engineering
+  synonyms: [electrical engineering, ee]
+  parent: null
+- skill: Civil Engineering
+  category: Engineering
+  synonyms: [civil engineering]
+  parent: null
+- skill: Structural Engineering
+  category: Engineering
+  synonyms: [structural engineering, structural analysis]
+  parent: null
+- skill: Chemical Engineering
+  category: Engineering
+  synonyms: [chemical engineering]
+  parent: null
+- skill: Control Systems
+  category: Engineering
+  synonyms: [control systems, control engineering]
+  parent: null
+- skill: Instrumentation
+  category: Engineering
+  synonyms: [instrumentation, instrumentation engineering]
+  parent: null
+- skill: Finite Element Analysis
+  category: Engineering
+  synonyms: [finite element analysis, fea, ansys]
+  parent: null
+- skill: Simulink
+  category: Engineering
+  synonyms: [simulink, matlab simulink]
+  parent: null
+- skill: AutoCAD
+  category: Engineering
+  synonyms: [autocad, auto cad]
+  parent: null
+- skill: Revit
+  category: Engineering
+  synonyms: [revit, revit bim]
+  parent: null
+- skill: BIM
+  category: Engineering
+  synonyms: [bim, building information modeling]
+  parent: null
+- skill: HVAC
+  category: Engineering
+  synonyms: [hvac, hvac design]
+  parent: null
+- skill: Project Engineering
+  category: Engineering
+  synonyms: [project engineering]
+  parent: null
+- skill: Engineering Design
+  category: Engineering
+  synonyms: [engineering design]
+  parent: null
+- skill: Technical Drawing
+  category: Engineering
+  synonyms: [technical drawing, drafting]
+  parent: null
+- skill: Environmental Engineering
+  category: Engineering
+  synonyms: [environmental engineering]
+  parent: null
+- skill: Power Systems
+  category: Engineering
+  synonyms: [power systems, power engineering, electrical power]
+  parent: null
+- skill: Renewable Energy
+  category: Engineering
+  synonyms: [renewable energy, solar energy, wind energy]
+  parent: null
+- skill: Energy Management
+  category: Engineering
+  synonyms: [energy management, energy efficiency]
+  parent: null
+- skill: Construction Management
+  category: Construction & Real Estate
+  synonyms: [construction management, construction project management]
+  parent: null
+- skill: Site Management
+  category: Construction & Real Estate
+  synonyms: [site management, site supervision, construction site]
+  parent: null
+- skill: Quantity Surveying
+  category: Construction & Real Estate
+  synonyms: [quantity surveying, quantity surveyor, qs]
+  parent: null
+- skill: Cost Estimation
+  category: Construction & Real Estate
+  synonyms: [cost estimation, cost estimating, estimating]
+  parent: null
+- skill: Building Codes
+  category: Construction & Real Estate
+  synonyms: [building codes, building regulations, code compliance]
+  parent: null
+- skill: Construction Safety
+  category: Construction & Real Estate
+  synonyms: [construction safety, site safety]
+  parent: null
+- skill: Real Estate
+  category: Construction & Real Estate
+  synonyms: [real estate, property]
+  parent: null
+- skill: Property Management
+  category: Construction & Real Estate
+  synonyms: [property management]
+  parent: null
+- skill: Real Estate Investment
+  category: Construction & Real Estate
+  synonyms: [real estate investment, reit, property investment]
+  parent: null
+- skill: Real Estate Development
+  category: Construction & Real Estate
+  synonyms: [real estate development, property development]
+  parent: null
+- skill: Leasing
+  category: Construction & Real Estate
+  synonyms: [leasing, commercial leasing, retail leasing]
+  parent: null
+- skill: Property Valuation
+  category: Construction & Real Estate
+  synonyms: [property valuation, real estate valuation]
+  parent: null
+- skill: Urban Planning
+  category: Construction & Real Estate
+  synonyms: [urban planning, town planning]
+  parent: null
+- skill: Land Acquisition
+  category: Construction & Real Estate
+  synonyms: [land acquisition, land development]
+  parent: null
+- skill: Zoning
+  category: Construction & Real Estate
+  synonyms: [zoning, zoning regulations, planning permission]
+  parent: null
+- skill: Tendering
+  category: Construction & Real Estate
+  synonyms: [tendering, tender management, bid management]
+  parent: null
+- skill: Contract Administration
+  category: Construction & Real Estate
+  synonyms: [contract administration, construction contracts]
+  parent: null
+- skill: Project Controls
+  category: Construction & Real Estate
+  synonyms: [project controls, schedule control]
+  parent: null
+- skill: Nursing
+  category: Healthcare & Clinical
+  synonyms: [nursing, registered nurse, rn]
+  parent: null
+- skill: Patient Care
+  category: Healthcare & Clinical
+  synonyms: [patient care, patient care coordination]
+  parent: null
+- skill: Clinical Research
+  category: Healthcare & Clinical
+  synonyms: [clinical research, crc]
+  parent: null
+- skill: Clinical Trials
+  category: Healthcare & Clinical
+  synonyms: [clinical trials, trial management, clinical protocol]
+  parent: null
+- skill: Healthcare Management
+  category: Healthcare & Clinical
+  synonyms: [healthcare management, hospital administration, health administration]
+  parent: null
+- skill: Health Informatics
+  category: Healthcare & Clinical
+  synonyms: [health informatics, medical informatics]
+  parent: null
+- skill: Electronic Health Records
+  category: Healthcare & Clinical
+  synonyms: [electronic health records, ehr, emr]
+  parent: null
+- skill: Medical Coding
+  category: Healthcare & Clinical
+  synonyms: [medical coding, icd-10, cpt coding]
+  parent: null
+- skill: Medical Billing
+  category: Healthcare & Clinical
+  synonyms: [medical billing, claims billing]
+  parent: null
+- skill: Pharmacology
+  category: Healthcare & Clinical
+  synonyms: [pharmacology]
+  parent: null
+- skill: Pharmacy
+  category: Healthcare & Clinical
+  synonyms: [pharmacy, pharmaceutical care]
+  parent: null
+- skill: Epidemiology
+  category: Healthcare & Clinical
+  synonyms: [epidemiology]
+  parent: null
+- skill: Public Health
+  category: Healthcare & Clinical
+  synonyms: [public health, community health]
+  parent: null
+- skill: Healthcare Compliance
+  category: Healthcare & Clinical
+  synonyms: [healthcare compliance]
+  parent: null
+- skill: HIPAA
+  category: Healthcare & Clinical
+  synonyms: [hipaa, health insurance portability and accountability act]
+  parent: null
+- skill: Clinical Documentation
+  category: Healthcare & Clinical
+  synonyms: [clinical documentation, documentation improvement]
+  parent: null
+- skill: Physiotherapy
+  category: Healthcare & Clinical
+  synonyms: [physiotherapy, physical therapy, physio]
+  parent: null
+- skill: Occupational Therapy
+  category: Healthcare & Clinical
+  synonyms: [occupational therapy, ot]
+  parent: null
+- skill: First Aid
+  category: Healthcare & Clinical
+  synonyms: [first aid, basic life support, bls]
+  parent: null
+- skill: CPR
+  category: Healthcare & Clinical
+  synonyms: [cpr, cardiopulmonary resuscitation]
+  parent: null
+- skill: Infection Control
+  category: Healthcare & Clinical
+  synonyms: [infection control, infection prevention]
+  parent: null
+- skill: Mental Health
+  category: Healthcare & Clinical
+  synonyms: [mental health, psychological counseling]
+  parent: null
+- skill: Counseling
+  category: Healthcare & Clinical
+  synonyms: [counseling, counselling, therapy]
+  parent: null
+- skill: Social Work
+  category: Healthcare & Clinical
+  synonyms: [social work]
+  parent: null
+- skill: Case Management
+  category: Healthcare & Clinical
+  synonyms: [case management, care coordination]
+  parent: null
+- skill: Home Care
+  category: Healthcare & Clinical
+  synonyms: [home care]
+  parent: null
+- skill: Elderly Care
+  category: Healthcare & Clinical
+  synonyms: [elderly care, aged care, geriatric care]
+  parent: null
+- skill: Rehabilitation
+  category: Healthcare & Clinical
+  synonyms: [rehabilitation, rehab]
+  parent: null
+- skill: Medical Devices
+  category: Healthcare & Clinical
+  synonyms: [medical devices, medical device regulation]
+  parent: null
+- skill: Telemedicine
+  category: Healthcare & Clinical
+  synonyms: [telemedicine, telehealth]
+  parent: null
+- skill: Nutrition
+  category: Healthcare & Clinical
+  synonyms: [nutrition, dietetics, dietitian]
+  parent: null
+- skill: Biology
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [biology]
+  parent: null
+- skill: Molecular Biology
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [molecular biology]
+  parent: null
+- skill: Biochemistry
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [biochemistry]
+  parent: null
+- skill: Genetics
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [genetics]
+  parent: null
+- skill: Genomics
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [genomics, next-generation sequencing, ngs]
+  parent: null
+- skill: Bioinformatics
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [bioinformatics, computational biology]
+  parent: null
+- skill: Drug Discovery
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [drug discovery]
+  parent: null
+- skill: Drug Development
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [drug development, clinical development]
+  parent: null
+- skill: Regulatory Affairs
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [regulatory affairs, regulatory submissions, ra]
+  parent: null
+- skill: GMP
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [gmp, good manufacturing practice]
+  parent: null
+- skill: GLP
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [glp, good laboratory practice]
+  parent: null
+- skill: Pharmacovigilance
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [pharmacovigilance, drug safety, pv]
+  parent: null
+- skill: Laboratory Techniques
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [laboratory techniques, lab skills, wet lab]
+  parent: null
+- skill: PCR
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [pcr, polymerase chain reaction]
+  parent: null
+- skill: ELISA
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [elisa, immunoassay]
+  parent: null
+- skill: Chromatography
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [chromatography, gc]
+  parent: null
+- skill: HPLC
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [hplc, high-performance liquid chromatography]
+  parent: null
+- skill: Mass Spectrometry
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [mass spectrometry]
+  parent: null
+- skill: Microbiology
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [microbiology]
+  parent: null
+- skill: Cell Culture
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [cell culture, tissue culture]
+  parent: null
+- skill: Clinical Data Management
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [clinical data management, cdm, edc]
+  parent: null
+- skill: Biostatistics
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [biostatistics, biostatistical analysis]
+  parent: null
+- skill: Medical Writing
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [medical writing, clinical writing]
+  parent: null
+- skill: Scientific Writing
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [scientific writing, research writing]
+  parent: null
+- skill: Research
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [research, research methodology, research design]
+  parent: null
+- skill: Laboratory Management
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [laboratory management, lab management]
+  parent: null
+- skill: Experiment Design
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [experimental design, experiment design, study design]
+  parent: null
+- skill: Validation
+  category: Life Sciences & Pharmaceuticals
+  synonyms: [validation, process validation, method validation]
+  parent: null
+- skill: Teaching
+  category: Education & Training
+  synonyms: [teaching, classroom teaching, instruction]
+  parent: null
+- skill: Curriculum Development
+  category: Education & Training
+  synonyms: [curriculum development, curriculum design]
+  parent: null
+- skill: Lesson Planning
+  category: Education & Training
+  synonyms: [lesson planning]
+  parent: null
+- skill: Classroom Management
+  category: Education & Training
+  synonyms: [classroom management]
+  parent: null
+- skill: Tutoring
+  category: Education & Training
+  synonyms: [tutoring, one-on-one teaching]
+  parent: null
+- skill: Mentoring
+  category: Education & Training
+  synonyms: [mentoring, mentorship]
+  parent: null
+- skill: Training Delivery
+  category: Education & Training
+  synonyms: [training delivery, training facilitation, instructor-led training]
+  parent: null
+- skill: E-Learning
+  category: Education & Training
+  synonyms: [e-learning, elearning, online learning]
+  parent: null
+- skill: LMS
+  category: Education & Training
+  synonyms: [lms, learning management system, moodle]
+  parent: null
+- skill: Instructional Design
+  category: Education & Training
+  synonyms: [instructional design]
+  parent: null
+- skill: Educational Technology
+  category: Education & Training
+  synonyms: [educational technology, edtech]
+  parent: null
+- skill: Student Assessment
+  category: Education & Training
+  synonyms: [student assessment, assessment, grading]
+  parent: null
+- skill: Special Education
+  category: Education & Training
+  synonyms: [special education, sen, special educational needs]
+  parent: null
+- skill: Early Childhood Education
+  category: Education & Training
+  synonyms: [early childhood education, early childhood, ece]
+  parent: null
+- skill: Higher Education
+  category: Education & Training
+  synonyms: [higher education, university teaching, academic]
+  parent: null
+- skill: Academic Research
+  category: Education & Training
+  synonyms: [academic research, scholarly research]
+  parent: null
+- skill: Academic Writing
+  category: Education & Training
+  synonyms: [academic writing, scholarly writing]
+  parent: null
+- skill: Public Speaking
+  category: Education & Training
+  synonyms: [public speaking]
+  parent: null
+- skill: Education Administration
+  category: Education & Training
+  synonyms: [education administration, school administration]
+  parent: null
+- skill: Pedagogy
+  category: Education & Training
+  synonyms: [pedagogy, teaching methodology]
+  parent: null
+- skill: Assessment Design
+  category: Education & Training
+  synonyms: [assessment design, exam design]
+  parent: null
+- skill: Graphic Design
+  category: Design & Creative
+  synonyms: [graphic design, visual design]
+  parent: null
+- skill: UI Design
+  category: Design & Creative
+  synonyms: [ui design, user interface design]
+  parent: null
+- skill: UX Design
+  category: Design & Creative
+  synonyms: [ux design, user experience design]
+  parent: null
+- skill: User Research
+  category: Design & Creative
+  synonyms: [user research, user testing]
+  parent: null
+- skill: Usability Testing
+  category: Design & Creative
+  synonyms: [usability testing, ux testing]
+  parent: null
+- skill: Prototyping
+  category: Design & Creative
+  synonyms: [prototyping]
+  parent: null
+- skill: Wireframing
+  category: Design & Creative
+  synonyms: [wireframing, wireframes]
+  parent: null
+- skill: Figma
+  category: Design & Creative
+  synonyms: [figma]
+  parent: null
+- skill: Adobe Photoshop
+  category: Design & Creative
+  synonyms: [photoshop, adobe photoshop]
+  parent: null
+- skill: Adobe Illustrator
+  category: Design & Creative
+  synonyms: [illustrator, adobe illustrator]
+  parent: null
+- skill: Adobe InDesign
+  category: Design & Creative
+  synonyms: [indesign, adobe indesign]
+  parent: null
+- skill: Adobe XD
+  category: Design & Creative
+  synonyms: [adobe xd]
+  parent: null
+- skill: Sketch
+  category: Design & Creative
+  synonyms: [sketch app, sketch]
+  parent: null
+- skill: Canva
+  category: Design & Creative
+  synonyms: [canva]
+  parent: null
+- skill: Motion Graphics
+  category: Design & Creative
+  synonyms: [motion graphics]
+  parent: null
+- skill: After Effects
+  category: Design & Creative
+  synonyms: [after effects, adobe after effects]
+  parent: null
+- skill: Video Editing
+  category: Design & Creative
+  synonyms: [video editing, final cut]
+  parent: null
+- skill: Premiere Pro
+  category: Design & Creative
+  synonyms: [premiere pro, adobe premiere, premiere]
+  parent: null
+- skill: Photography
+  category: Design & Creative
+  synonyms: [photography, product photography]
+  parent: null
+- skill: Illustration
+  category: Design & Creative
+  synonyms: [illustration, digital illustration]
+  parent: null
+- skill: Brand Identity
+  category: Design & Creative
+  synonyms: [brand identity, visual identity]
+  parent: null
+- skill: Logo Design
+  category: Design & Creative
+  synonyms: [logo design, logo]
+  parent: null
+- skill: Typography
+  category: Design & Creative
+  synonyms: [typography, type design]
+  parent: null
+- skill: Creative Direction
+  category: Design & Creative
+  synonyms: [creative direction, creative strategy]
+  parent: null
+- skill: Art Direction
+  category: Design & Creative
+  synonyms: [art direction]
+  parent: null
+- skill: Interaction Design
+  category: Design & Creative
+  synonyms: [interaction design, ixd]
+  parent: null
+- skill: Design Systems
+  category: Design & Creative
+  synonyms: [design systems, design system]
+  parent: null
+- skill: Accessibility
+  category: Design & Creative
+  synonyms: [accessibility, a11y, web accessibility]
+  parent: null
+- skill: Storyboarding
+  category: Design & Creative
+  synonyms: [storyboarding, storyboard]
+  parent: null
+- skill: 3D Modeling
+  category: Design & Creative
+  synonyms: [3d modeling, 3d modelling, maya]
+  parent: null
+- skill: Blender
+  category: Design & Creative
+  synonyms: [blender]
+  parent: null
+- skill: Animation
+  category: Design & Creative
+  synonyms: [animation, 2d animation, 3d animation]
+  parent: null
+- skill: Game Design
+  category: Design & Creative
+  synonyms: [game design]
+  parent: null
+- skill: Game Development
+  category: Design & Creative
+  synonyms: [game development]
+  parent: null
+- skill: Unity
+  category: Design & Creative
+  synonyms: [unity, unity3d]
+  parent: null
+- skill: Unreal Engine
+  category: Design & Creative
+  synonyms: [unreal engine, unreal, ue5]
+  parent: null
+- skill: Print Design
+  category: Design & Creative
+  synonyms: [print design, print production]
+  parent: null
+- skill: Journalism
+  category: Media & Communications
+  synonyms: [journalism, reporting]
+  parent: null
+- skill: News Writing
+  category: Media & Communications
+  synonyms: [news writing, article writing]
+  parent: null
+- skill: Editing
+  category: Media & Communications
+  synonyms: [editing, editorial]
+  parent: null
+- skill: Copy Editing
+  category: Media & Communications
+  synonyms: [copy editing]
+  parent: null
+- skill: Proofreading
+  category: Media & Communications
+  synonyms: [proofreading]
+  parent: null
+- skill: Content Writing
+  category: Media & Communications
+  synonyms: [content writing, blog writing]
+  parent: null
+- skill: Technical Writing
+  category: Media & Communications
+  synonyms: [technical writing, technical writer]
+  parent: null
+- skill: Communications
+  category: Media & Communications
+  synonyms: [communications, comms]
+  parent: null
+- skill: Corporate Communications
+  category: Media & Communications
+  synonyms: [corporate communications]
+  parent: null
+- skill: Internal Communications
+  category: Media & Communications
+  synonyms: [internal communications, employee communications]
+  parent: null
+- skill: Media Relations
+  category: Media & Communications
+  synonyms: [media relations, press relations]
+  parent: null
+- skill: Press Releases
+  category: Media & Communications
+  synonyms: [press release, press releases]
+  parent: null
+- skill: Crisis Communications
+  category: Media & Communications
+  synonyms: [crisis communications, crisis communication]
+  parent: null
+- skill: Social Media Management
+  category: Media & Communications
+  synonyms: [social media management, community management]
+  parent: null
+- skill: Broadcasting
+  category: Media & Communications
+  synonyms: [broadcasting, broadcast]
+  parent: null
+- skill: Podcasting
+  category: Media & Communications
+  synonyms: [podcasting, podcast]
+  parent: null
+- skill: Public Affairs
+  category: Media & Communications
+  synonyms: [public affairs, government relations]
+  parent: null
+- skill: Public Policy
+  category: Media & Communications
+  synonyms: [public policy, policy analysis]
+  parent: null
+- skill: Storytelling
+  category: Media & Communications
+  synonyms: [storytelling, brand storytelling]
+  parent: null
+- skill: Video Production
+  category: Media & Communications
+  synonyms: [video production, video content]
+  parent: null
+- skill: Audio Production
+  category: Media & Communications
+  synonyms: [audio production, sound editing]
+  parent: null
+- skill: Scriptwriting
+  category: Media & Communications
+  synonyms: [scriptwriting, script writing]
+  parent: null
+- skill: Translation
+  category: Media & Communications
+  synonyms: [translation, chinese-english translation, zh-en translation]
+  parent: null
+- skill: Interpretation
+  category: Media & Communications
+  synonyms: [interpretation, interpreting, simultaneous interpretation]
+  parent: null
+- skill: Bilingual Communication
+  category: Media & Communications
+  synonyms: [bilingual communication, bilingual]
+  parent: null
+- skill: Customer Service
+  category: Customer Service & Support
+  synonyms: [customer service, customer services]
+  parent: null
+- skill: Customer Support
+  category: Customer Service & Support
+  synonyms: [customer support]
+  parent: null
+- skill: Helpdesk
+  category: Customer Service & Support
+  synonyms: [helpdesk, help desk, service desk]
+  parent: null
+- skill: IT Support
+  category: Customer Service & Support
+  synonyms: [it support, desktop support]
+  parent: null
+- skill: Technical Support
+  category: Customer Service & Support
+  synonyms: [technical support, tech support]
+  parent: null
+- skill: Call Center
+  category: Customer Service & Support
+  synonyms: [call center, contact center]
+  parent: null
+- skill: Live Chat
+  category: Customer Service & Support
+  synonyms: [live chat, chat support]
+  parent: null
+- skill: Complaint Handling
+  category: Customer Service & Support
+  synonyms: [complaint handling, complaint resolution, escalation handling]
+  parent: null
+- skill: Customer Satisfaction
+  category: Customer Service & Support
+  synonyms: [customer satisfaction, csat]
+  parent: null
+- skill: NPS
+  category: Customer Service & Support
+  synonyms: [nps, net promoter score]
+  parent: null
+- skill: Ticketing Systems
+  category: Customer Service & Support
+  synonyms: [ticketing systems, ticketing, freshdesk]
+  parent: null
+- skill: Zendesk
+  category: Customer Service & Support
+  synonyms: [zendesk]
+  parent: null
+- skill: Customer Retention
+  category: Customer Service & Support
+  synonyms: [customer retention, retention]
+  parent: null
+- skill: Troubleshooting
+  category: Customer Service & Support
+  synonyms: [troubleshooting, issue resolution]
+  parent: null
+- skill: Service Level Agreements
+  category: Customer Service & Support
+  synonyms: [service level agreement, service level agreements, sla, slas]
+  parent: null
+- skill: Knowledge Base
+  category: Customer Service & Support
+  synonyms: [knowledge base, kb]
+  parent: null
+- skill: Knowledge Management
+  category: Customer Service & Support
+  synonyms: [knowledge management, km]
+  parent: null
+- skill: First Call Resolution
+  category: Customer Service & Support
+  synonyms: [first call resolution, fcr]
+  parent: null
+- skill: Multichannel Support
+  category: Customer Service & Support
+  synonyms: [multichannel support, omnichannel support]
+  parent: null
+- skill: Omnichannel
+  category: Customer Service & Support
+  synonyms: [omnichannel, omni-channel]
+  parent: null
+- skill: Voice of Customer
+  category: Customer Service & Support
+  synonyms: [voice of customer, voc]
+  parent: null
+- skill: Customer Journey
+  category: Customer Service & Support
+  synonyms: [customer journey, customer journey mapping]
+  parent: null
+- skill: Hospitality
+  category: Hospitality & Tourism
+  synonyms: [hospitality, hospitality management]
+  parent: null
+- skill: Hotel Management
+  category: Hospitality & Tourism
+  synonyms: [hotel management]
+  parent: null
+- skill: Front Office
+  category: Hospitality & Tourism
+  synonyms: [front office, reception]
+  parent: null
+- skill: Guest Services
+  category: Hospitality & Tourism
+  synonyms: [guest services, guest relations]
+  parent: null
+- skill: Housekeeping
+  category: Hospitality & Tourism
+  synonyms: [housekeeping]
+  parent: null
+- skill: Food & Beverage
+  category: Hospitality & Tourism
+  synonyms: [food and beverage, food & beverage, f&b]
+  parent: null
+- skill: Catering
+  category: Hospitality & Tourism
+  synonyms: [catering, banquet]
+  parent: null
+- skill: Restaurant Management
+  category: Hospitality & Tourism
+  synonyms: [restaurant management, restaurant operations]
+  parent: null
+- skill: Tourism
+  category: Hospitality & Tourism
+  synonyms: [tourism, travel and tourism]
+  parent: null
+- skill: Travel Planning
+  category: Hospitality & Tourism
+  synonyms: [travel planning, itinerary planning]
+  parent: null
+- skill: Tour Guiding
+  category: Hospitality & Tourism
+  synonyms: [tour guiding, tour guide]
+  parent: null
+- skill: Event Management
+  category: Hospitality & Tourism
+  synonyms: [event management, events]
+  parent: null
+- skill: Event Planning
+  category: Hospitality & Tourism
+  synonyms: [event planning, event coordination]
+  parent: null
+- skill: Concierge
+  category: Hospitality & Tourism
+  synonyms: [concierge, concierge services]
+  parent: null
+- skill: Revenue Management
+  category: Hospitality & Tourism
+  synonyms: [revenue management, yield management, hotel revenue]
+  parent: null
+- skill: Reservations
+  category: Hospitality & Tourism
+  synonyms: [reservations, booking management]
+  parent: null
+- skill: Cultural Awareness
+  category: Hospitality & Tourism
+  synonyms: [cultural awareness, cultural sensitivity]
+  parent: null
+- skill: Retail
+  category: Retail & E-commerce
+  synonyms: [retail, retail operations]
+  parent: null
+- skill: Retail Management
+  category: Retail & E-commerce
+  synonyms: [retail management, store management]
+  parent: null
+- skill: Merchandising
+  category: Retail & E-commerce
+  synonyms: [merchandising, merchandise planning]
+  parent: null
+- skill: Visual Merchandising
+  category: Retail & E-commerce
+  synonyms: [visual merchandising, vm]
+  parent: null
+- skill: E-commerce
+  category: Retail & E-commerce
+  synonyms: [e-commerce, ecommerce, online retail]
+  parent: null
+- skill: E-commerce Operations
+  category: Retail & E-commerce
+  synonyms: [e-commerce operations, ecommerce operations, online store management]
+  parent: null
+- skill: Shopify
+  category: Retail & E-commerce
+  synonyms: [shopify, shopify store]
+  parent: null
+- skill: Magento
+  category: Retail & E-commerce
+  synonyms: [magento, adobe commerce]
+  parent: null
+- skill: WooCommerce
+  category: Retail & E-commerce
+  synonyms: [woocommerce]
+  parent: null
+- skill: Amazon
+  category: Retail & E-commerce
+  synonyms: [amazon, amazon seller, amazon fba]
+  parent: null
+- skill: Marketplace Management
+  category: Retail & E-commerce
+  synonyms: [marketplace management, marketplace selling]
+  parent: null
+- skill: Payment Processing
+  category: Retail & E-commerce
+  synonyms: [payment processing, payment gateway, payments]
+  parent: null
+- skill: Fraud Detection
+  category: Retail & E-commerce
+  synonyms: [fraud detection, fraud prevention, anti-fraud]
+  parent: null
+- skill: Store Operations
+  category: Retail & E-commerce
+  synonyms: [store operations, store ops]
+  parent: null
+- skill: Loss Prevention
+  category: Retail & E-commerce
+  synonyms: [loss prevention, shrinkage]
+  parent: null
+- skill: Customer Experience
+  category: Retail & E-commerce
+  synonyms: [customer experience, cx]
+  parent: null
+- skill: Point of Sale
+  category: Retail & E-commerce
+  synonyms: [point of sale, pos, point-of-sale]
+  parent: null
+- skill: Product Catalog
+  category: Retail & E-commerce
+  synonyms: [product catalog, catalog management]
+  parent: null
+- skill: Order Management
+  category: Retail & E-commerce
+  synonyms: [order management, order processing]
+  parent: null
+- skill: Omnichannel Retail
+  category: Retail & E-commerce
+  synonyms: [omnichannel retail, omni channel retail]
+  parent: null
+- skill: D2C
+  category: Retail & E-commerce
+  synonyms: [d2c, direct-to-consumer, dtc]
+  parent: null
+- skill: Customer Data Platform
+  category: Retail & E-commerce
+  synonyms: [customer data platform, cdp]
+  parent: null
+- skill: Personalization
+  category: Retail & E-commerce
+  synonyms: [personalization, personalized marketing]
+  parent: null
+- skill: Recommendation Systems
+  category: Retail & E-commerce
+  synonyms: [recommendation systems, recommendation engine, recommender]
+  parent: null
+- skill: English
+  category: Languages
+  synonyms: [english, english language]
+  parent: null
+- skill: Chinese
+  category: Languages
+  synonyms: [chinese, mandarin, putonghua, mandarin chinese]
+  parent: null
+- skill: Cantonese
+  category: Languages
+  synonyms: [cantonese]
+  parent: null
+- skill: Japanese
+  category: Languages
+  synonyms: [japanese, japanese language]
+  parent: null
+- skill: Korean
+  category: Languages
+  synonyms: [korean, korean language]
+  parent: null
+- skill: French
+  category: Languages
+  synonyms: [french, french language]
+  parent: null
+- skill: German
+  category: Languages
+  synonyms: [german, german language]
+  parent: null
+- skill: Spanish
+  category: Languages
+  synonyms: [spanish, spanish language]
+  parent: null
+- skill: Portuguese
+  category: Languages
+  synonyms: [portuguese, portuguese language]
+  parent: null
+- skill: Italian
+  category: Languages
+  synonyms: [italian, italian language]
+  parent: null
+- skill: Russian
+  category: Languages
+  synonyms: [russian, russian language]
+  parent: null
+- skill: Arabic
+  category: Languages
+  synonyms: [arabic, arabic language]
+  parent: null
+- skill: Hindi
+  category: Languages
+  synonyms: [hindi, hindi language]
+  parent: null
+- skill: Business English
+  category: Languages
+  synonyms: [business english]
+  parent: null
+- skill: Communication
+  category: Soft Skills & Leadership
+  synonyms: [communication, communication skills]
+  parent: null
+- skill: Written Communication
+  category: Soft Skills & Leadership
+  synonyms: [written communication, business writing]
+  parent: Communication
+- skill: Verbal Communication
+  category: Soft Skills & Leadership
+  synonyms: [verbal communication, oral communication]
+  parent: Communication
+- skill: Interpersonal Skills
+  category: Soft Skills & Leadership
+  synonyms: [interpersonal skills, interpersonal]
+  parent: null
+- skill: Teamwork
+  category: Soft Skills & Leadership
+  synonyms: [teamwork, team collaboration]
+  parent: null
+- skill: Collaboration
+  category: Soft Skills & Leadership
+  synonyms: [collaboration, cross-functional collaboration]
+  parent: null
+- skill: Leadership
+  category: Soft Skills & Leadership
+  synonyms: [leadership, leadership skills, people leadership]
+  parent: null
+- skill: Team Management
+  category: Soft Skills & Leadership
+  synonyms: [team management, team leadership]
+  parent: Leadership
+- skill: People Management
+  category: Soft Skills & Leadership
+  synonyms: [people management, managing teams]
+  parent: Leadership
+- skill: Problem Solving
+  category: Soft Skills & Leadership
+  synonyms: [problem solving, complex problem solving]
+  parent: null
+- skill: Critical Thinking
+  category: Soft Skills & Leadership
+  synonyms: [critical thinking]
+  parent: null
+- skill: Analytical Thinking
+  category: Soft Skills & Leadership
+  synonyms: [analytical thinking, analytical skills]
+  parent: null
+- skill: Decision Making
+  category: Soft Skills & Leadership
+  synonyms: [decision making, decision-making]
+  parent: null
+- skill: Time Management
+  category: Soft Skills & Leadership
+  synonyms: [time management, prioritization]
+  parent: null
+- skill: Adaptability
+  category: Soft Skills & Leadership
+  synonyms: [adaptability, flexibility, agile mindset]
+  parent: null
+- skill: Emotional Intelligence
+  category: Soft Skills & Leadership
+  synonyms: [emotional intelligence, eq]
+  parent: null
+- skill: Conflict Resolution
+  category: Soft Skills & Leadership
+  synonyms: [conflict resolution, conflict management]
+  parent: null
+- skill: Presentation Skills
+  category: Soft Skills & Leadership
+  synonyms: [presentation skills, presenting]
+  parent: null
+- skill: Attention to Detail
+  category: Soft Skills & Leadership
+  synonyms: [attention to detail, detail-oriented]
+  parent: null
+- skill: Organizational Skills
+  category: Soft Skills & Leadership
+  synonyms: [organizational skills, organization skills]
+  parent: null
+- skill: Creativity
+  category: Soft Skills & Leadership
+  synonyms: [creativity, creative thinking]
+  parent: null
+- skill: Strategic Thinking
+  category: Soft Skills & Leadership
+  synonyms: [strategic thinking]
+  parent: null
+- skill: Client Relations
+  category: Soft Skills & Leadership
+  synonyms: [client relations, client relationship management]
+  parent: null
+- skill: Resilience
+  category: Soft Skills & Leadership
+  synonyms: [resilience, stress management]
+  parent: null
+- skill: Self-Motivation
+  category: Soft Skills & Leadership
+  synonyms: [self-motivation, self motivated]
+  parent: null
+- skill: Multitasking
+  category: Soft Skills & Leadership
+  synonyms: [multitasking, managing multiple priorities]
   parent: null

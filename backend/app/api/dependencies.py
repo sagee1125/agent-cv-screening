@@ -33,7 +33,7 @@ taxonomy_loader.load()
 skill_matcher = SkillMatcherService(taxonomy_loader)
 scorer_service = ScorerService(skill_matcher)
 cv_parser_service = build_cv_parser_service()
-jd_parser_service = build_jd_parser_service()
+jd_parser_service = build_jd_parser_service(taxonomy_loader=taxonomy_loader)
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:

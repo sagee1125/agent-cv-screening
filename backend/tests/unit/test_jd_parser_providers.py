@@ -63,6 +63,27 @@ async def test_rule_mode_default_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rule_mode_uses_hit_line_source_sentence() -> None:
+    """Rule mode attaches the original hit line, not the JD prefix, per skill."""
+    service = JDParserService()
+    result = await service.parse_jd(SAMPLE_JD)
+    data = result["structured_data"]
+    by_name = {item["display_name"].lower(): item["provenance"]["source_sentence"] for item in data["must_skills"]}
+    assert "python" in by_name
+    assert by_name["python"] == "3+ years of experience with Python and FastAPI"
+    assert "docker" in by_name
+    assert by_name["docker"] == "Must have Docker"
+    assert by_name["python"] != by_name["docker"]
+    python_item = next(item for item in data["must_skills"] if item["display_name"].lower() == "python")
+    start = python_item["provenance"]["source_char_start"]
+    end = python_item["provenance"]["source_char_end"]
+    assert SAMPLE_JD[start:end] == by_name["python"]
+    assert data["language_requirements"][0]["provenance"] == ""
+    assert data["education_requirement"]["provenance"] == ""
+    assert data["visa_requirement"]["provenance"] == ""
+
+
+@pytest.mark.asyncio
 async def test_hybrid_mode_refines_skills_with_llm() -> None:
     """Hybrid mode replaces rule skills with LLM-refined skills and evidence."""
     llm = FakeLLM(
@@ -87,8 +108,46 @@ async def test_hybrid_mode_refines_skills_with_llm() -> None:
     assert data["must_skills"][0]["provenance"]["confidence"] == 0.95
     assert data["must_skills"][0]["provenance"]["source_sentence"].startswith("3+ years")
     assert data["preferred_skills"][0]["display_name"] == "Aws"
+    assert "AWS" in data["preferred_skills"][0]["provenance"]["source_sentence"]
     assert llm.calls == 1
     assert llm.last_messages[0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_uses_premap_phrase_when_not_in_taxonomy() -> None:
+    """Unmapped LLM skill names still attach the original JD sentence that mentioned them."""
+    jd = SAMPLE_JD + "\n- Experience with distributed systems\n"
+    llm = FakeLLM(
+        {
+            "must_skills": ["python", "distributed systems"],
+            "preferred_skills": [],
+            "reasoning_trace": [],
+        }
+    )
+    service = JDParserService()
+    result = await service.parse_jd(jd, mode="hybrid", enrichment_provider=LLMRefinerProvider(llm_client=llm))
+    data = result["structured_data"]
+    by_name = {item["display_name"].lower(): item["provenance"]["source_sentence"] for item in data["must_skills"]}
+    assert by_name["python"] == "3+ years of experience with Python and FastAPI"
+    assert by_name["distributed systems"] == "Experience with distributed systems"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_empty_source_when_skill_not_in_jd() -> None:
+    """Skills that cannot be located in the JD leave source_sentence empty."""
+    llm = FakeLLM(
+        {
+            "must_skills": ["python", "telepathy"],
+            "preferred_skills": [],
+            "reasoning_trace": [{"skill": "telepathy", "bucket": "must", "evidence": "invented", "confidence": 0.9}],
+        }
+    )
+    service = JDParserService()
+    result = await service.parse_jd(SAMPLE_JD, mode="hybrid", enrichment_provider=LLMRefinerProvider(llm_client=llm))
+    telepathy = next(item for item in result["structured_data"]["must_skills"] if item["display_name"].lower() == "telepathy")
+    assert telepathy["provenance"]["source_sentence"] == ""
+    assert telepathy["provenance"]["confidence"] == 0.9
+    assert "extracted_name" not in telepathy
 
 
 @pytest.mark.asyncio
@@ -202,3 +261,34 @@ async def test_empty_input_any_mode() -> None:
         result = await service.parse_jd("   ", mode=mode)
         assert result["status"] == "invalid_input"
         assert result["structured_data"] is None
+
+
+@pytest.mark.asyncio
+async def test_alias_skill_keeps_original_mention_line() -> None:
+    """Taxonomy aliases locate the pre-map mention in the original JD line."""
+    service = JDParserService()
+    jd = "Requirements:\n- Must have postgres\n"
+    result = await service.parse_jd(jd)
+    postgres = next(
+        item
+        for item in result["structured_data"]["must_skills"]
+        if item["canonical_skill"] == "postgresql"
+    )
+    assert postgres["provenance"]["source_sentence"] == "Must have postgres"
+
+
+@pytest.mark.asyncio
+async def test_requirement_fields_use_cue_lines() -> None:
+    """Language, education, and visa provenance use the matching JD line."""
+    service = JDParserService()
+    jd = """Requirements:
+- Python
+- Bachelor's degree
+- Visa sponsorship required
+- English fluency
+"""
+    result = await service.parse_jd(jd)
+    data = result["structured_data"]
+    assert "English" in data["language_requirements"][0]["provenance"]
+    assert "Bachelor" in data["education_requirement"]["provenance"]
+    assert "Visa" in data["visa_requirement"]["provenance"]
