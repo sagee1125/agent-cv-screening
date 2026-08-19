@@ -1,10 +1,5 @@
+# Orchestrates privacy-safe local PII extraction and external CV content parsing.
 from __future__ import annotations
-
-"""CV parser service implementation.
-
-This module owns candidate CV parsing logic only.
-JD parsing must live in a dedicated service/module.
-"""
 
 import asyncio
 import logging
@@ -52,8 +47,15 @@ from app.services.cv_parser.helpers import (
 )
 from app.services.cv_parser.pdf_utils import (
     extract_with_pdfplumber,
+    extract_with_pymupdf,
     extract_with_pypdf,
+    render_redacted_pdf_pages_as_data_urls,
     render_pdf_pages_as_data_urls,
+)
+from app.services.cv_parser.pii import (
+    contact_values_for_redaction,
+    mask_pii_text,
+    strip_contact_fields,
 )
 from app.services.cv_parser.prompts import (
     PARSER_SYSTEM_PROMPT,
@@ -62,6 +64,7 @@ from app.services.cv_parser.prompts import (
 )
 
 logger = logging.getLogger(__name__)
+PARSER_CACHE_VERSION = "pii-redaction-v1"
 
 
 class CVParserService:
@@ -102,7 +105,9 @@ class CVParserService:
     build_compressed_prompt = staticmethod(build_compressed_prompt)
     _extract_with_pdfplumber = staticmethod(extract_with_pdfplumber)
     _extract_with_pypdf = staticmethod(extract_with_pypdf)
+    _extract_with_pymupdf = staticmethod(extract_with_pymupdf)
     _render_pdf_pages_as_data_urls = staticmethod(render_pdf_pages_as_data_urls)
+    _render_redacted_pdf_pages_as_data_urls = staticmethod(render_redacted_pdf_pages_as_data_urls)
 
     def __init__(self, llm_client: LLMClient, cache: HashCache) -> None:
         self.llm_client = llm_client
@@ -111,7 +116,8 @@ class CVParserService:
     async def parse_cv(self, file_path: str, jd_text: str | None = None) -> dict[str, Any]:
         # 1) Check cache first for deterministic replay.
         file_hash = await self.cache.md5_for_file(file_path)
-        cached = await self.cache.get(file_hash)
+        cache_key = f"{file_hash}-{PARSER_CACHE_VERSION}"
+        cached = await self.cache.get(cache_key)
         if cached:
             logger.info("Parser cache hit hash=%s", file_hash)
             return {
@@ -122,13 +128,39 @@ class CVParserService:
 
         raw_text = await self._extract_pdf_text(file_path)
         contact_hints = self._extract_contact_hints(raw_text)
-        try:
-            llm_result = await self._parse_with_pdf_images(file_path=file_path, jd_text=jd_text)
-            structured = self._merge_contact_hints(self._normalize_schema(llm_result["parsed"]), contact_hints)
+        masked_text = mask_pii_text(raw_text)
+        pii_values = contact_values_for_redaction(raw_text)
+        if not contact_hints.get("name"):
+            logger.warning("Local name detection failed; blocking all external parser calls.")
+            structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
             structured = self._apply_content_fallback(raw_text, structured)
             cache_payload = {
                 "structured_data": structured,
-                "raw_llm_response": llm_result["parsed"],
+                "raw_llm_response": None,
+                "extraction_model": "local-rules",
+                "extraction_seed": 42,
+                "status": "fallback",
+                "parse_path": "privacy_rule_fallback",
+                "error_message": "privacy_error=local_name_not_detected",
+            }
+            await self.cache.set(cache_key, cache_payload)
+            return {
+                "file_hash": file_hash,
+                "cache_hit": False,
+                **cache_payload,
+            }
+        try:
+            llm_result = await self._parse_with_pdf_images(
+                file_path=file_path,
+                jd_text=jd_text,
+                pii_values=pii_values,
+            )
+            safe_llm_payload = strip_contact_fields(llm_result["parsed"])
+            structured = self._merge_contact_hints(self._normalize_schema(safe_llm_payload), contact_hints)
+            structured = self._apply_content_fallback(raw_text, structured)
+            cache_payload = {
+                "structured_data": structured,
+                "raw_llm_response": safe_llm_payload,
                 "extraction_model": llm_result["model"],
                 "extraction_seed": 42,
                 "status": "success",
@@ -152,7 +184,7 @@ class CVParserService:
                 }
             else:
                 try:
-                    user_prompt = self._build_prompt(raw_text=raw_text, jd_text=jd_text)
+                    user_prompt = self._build_prompt(raw_text=masked_text, jd_text=jd_text)
                     llm_result = await self.llm_client.chat_completion(
                         PARSER_SYSTEM_PROMPT,
                         user_prompt,
@@ -160,11 +192,15 @@ class CVParserService:
                         temperature=0,
                         seed=42,
                     )
-                    structured = self._merge_contact_hints(self._normalize_schema(llm_result["parsed"]), contact_hints)
+                    safe_llm_payload = strip_contact_fields(llm_result["parsed"])
+                    structured = self._merge_contact_hints(
+                        self._normalize_schema(safe_llm_payload),
+                        contact_hints,
+                    )
                     structured = self._apply_content_fallback(raw_text, structured)
                     cache_payload = {
                         "structured_data": structured,
-                        "raw_llm_response": llm_result["parsed"],
+                        "raw_llm_response": safe_llm_payload,
                         "extraction_model": llm_result["model"],
                         "extraction_seed": 42,
                         "status": "success",
@@ -184,18 +220,25 @@ class CVParserService:
                         "parse_path": "rule_fallback",
                         "error_message": f"vision_error={image_exc}; text_error={text_exc}",
                     }
-        await self.cache.set(file_hash, cache_payload)
+        await self.cache.set(cache_key, cache_payload)
         return {
             "file_hash": file_hash,
             "cache_hit": False,
             **cache_payload,
         }
 
-    async def _parse_with_pdf_images(self, *, file_path: str, jd_text: str | None) -> dict[str, Any]:
+    async def _parse_with_pdf_images(
+        self,
+        *,
+        file_path: str,
+        jd_text: str | None,
+        pii_values: list[str],
+    ) -> dict[str, Any]:
         image_urls = await asyncio.to_thread(
-            self._render_pdf_pages_as_data_urls,
+            self._render_redacted_pdf_pages_as_data_urls,
             file_path,
             settings.llm_vision_max_pages,
+            pii_values,
         )
         last_exc: Exception | None = None
         attempts = max(1, settings.llm_vision_retry_attempts)
@@ -273,10 +316,10 @@ class CVParserService:
         if path.suffix.lower() != ".pdf":
             raise ValueError("Only PDF files are currently supported.")
         try:
-            text = await asyncio.to_thread(self._extract_with_pdfplumber, path)
-            if text.strip():
-                return text
-            return await asyncio.to_thread(self._extract_with_pypdf, path)
+            text = await asyncio.to_thread(self._extract_with_pymupdf, path)
+            if not text.strip():
+                raise ValueError("PDF has no extractable text; local OCR is required.")
+            return text
         except Exception as exc:
             logger.exception("Failed to extract PDF text file=%s", file_path)
             raise ValueError("Failed to extract PDF text.") from exc

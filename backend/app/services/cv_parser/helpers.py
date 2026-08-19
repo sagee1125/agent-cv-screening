@@ -1,8 +1,10 @@
+# Normalizes CV parser output and provides deterministic local fallbacks.
 from __future__ import annotations
 
 import re
 from typing import Any
 
+from app.services.cv_parser.pii import extract_contact_hints_local
 from app.services.cv_parser.prompts import KNOWN_SKILLS
 
 
@@ -556,40 +558,9 @@ def build_compressed_prompt(*, raw_text: str, jd_text: str | None, max_chars: in
     segments.append("Return valid JSON only.")
     return "\n\n".join(segments)
 
-
+# Extracts identity fields with the shared local PII detector.
 def extract_contact_hints(raw_text: str) -> dict[str, str | None]:
-    email_match = re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", raw_text)
-    phone_matches = re.findall(r"(?:\+?\d[\d\s().-]{7,}\d)", raw_text)
-    phone = None
-    for candidate in phone_matches:
-        digit_count = sum(ch.isdigit() for ch in candidate)
-        if digit_count >= 8:
-            phone = candidate.strip()
-            break
-
-    name = None
-    for raw_line in raw_text.splitlines():
-        line = " ".join(raw_line.split()).strip()
-        if not line:
-            continue
-        lower_line = line.lower()
-        if "email" in lower_line or "phone" in lower_line or "resume" in lower_line or "curriculum vitae" in lower_line:
-            continue
-        if "@" in line or ":" in line:
-            continue
-        if len(line) > 64:
-            continue
-        token_count = len(line.split())
-        if token_count > 8:
-            continue
-        name = line
-        break
-
-    return {
-        "name": name,
-        "email": email_match.group(0) if email_match else None,
-        "phone": phone,
-    }
+    return extract_contact_hints_local(raw_text)
 
 
 def digits_only(value: str | None) -> str:

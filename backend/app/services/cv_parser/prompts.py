@@ -1,3 +1,4 @@
+# Defines privacy-safe prompts and canonical skill hints for CV parsing.
 from __future__ import annotations
 
 # Canonical skills list used by prompt hints and fallback extraction.
@@ -38,9 +39,6 @@ PARSER_SYSTEM_PROMPT = """You are a CV parser. Extract the following fields from
 
 Output schema:
 {
-  "name": string,
-  "email": string,
-  "phone": string,
   "skills": [string],          # Extract from tech skills section or mentioned technologies
   "education": [
     {
@@ -63,6 +61,7 @@ Output schema:
 
 
 Rules:
+- Name, email, and phone have already been removed locally. Do not return or infer identity fields.
 - Only extract information explicitly stated in the CV. Do not infer.
 - For skills, extract exact terms used (do not standardize).
 - Each education entry = ONE degree. Merge all info about that degree into ONE object.
