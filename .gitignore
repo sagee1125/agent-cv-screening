@@ -16,3 +16,6 @@ data/uploads/
 
 # Throwaway dev scripts created during testing
 backend/tmp_*.py
+
+# Large Docker image export artifact (temporary backup), not for version control.
+cv-backend-patched.tar
