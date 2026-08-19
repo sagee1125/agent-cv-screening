@@ -78,7 +78,7 @@ async def test_rule_mode_uses_hit_line_source_sentence() -> None:
     start = python_item["provenance"]["source_char_start"]
     end = python_item["provenance"]["source_char_end"]
     assert SAMPLE_JD[start:end] == by_name["python"]
-    assert data["language_requirements"][0]["provenance"] == ""
+    assert data["language_requirements"] == []
     assert data["education_requirement"]["provenance"] == ""
     assert data["visa_requirement"]["provenance"] == ""
 

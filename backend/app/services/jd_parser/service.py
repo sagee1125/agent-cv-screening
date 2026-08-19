@@ -1,3 +1,4 @@
+# Rule-based JD parser: skills, languages, education, visa, and experience.
 from __future__ import annotations
 
 from collections import Counter
@@ -27,6 +28,41 @@ from app.services.jd_parser.providers import (
 
 # Path to the curated all-industry skill taxonomy used by the rule parser.
 _TAXONOMY_PATH = "data/taxonomy/skill_taxonomy.yaml"
+# Taxonomy category whose nodes are languages, not job skills.
+_LANGUAGE_CATEGORY = "languages"
+# Rank used to keep the strongest stated language level.
+_LANGUAGE_LEVEL_RANK = {"basic": 0, "business": 1, "fluent": 2, "native": 3}
+# CJK and common aliases not always present on taxonomy language nodes.
+_LANGUAGE_EXTRA_ALIASES: tuple[tuple[str, str], ...] = (
+    ("英语", "English"),
+    ("英語", "English"),
+    ("英文", "English"),
+    ("中文", "Chinese"),
+    ("汉语", "Chinese"),
+    ("漢語", "Chinese"),
+    ("普通话", "Chinese"),
+    ("普通話", "Chinese"),
+    ("国语", "Chinese"),
+    ("國語", "Chinese"),
+    ("华语", "Chinese"),
+    ("華語", "Chinese"),
+    ("粤语", "Cantonese"),
+    ("粵語", "Cantonese"),
+    ("广东话", "Cantonese"),
+    ("廣東話", "Cantonese"),
+    ("日语", "Japanese"),
+    ("日語", "Japanese"),
+    ("日文", "Japanese"),
+    ("韩语", "Korean"),
+    ("韓語", "Korean"),
+    ("韩文", "Korean"),
+    ("法語", "French"),
+    ("法语", "French"),
+    ("德語", "German"),
+    ("德语", "German"),
+    ("西班牙语", "Spanish"),
+    ("西班牙語", "Spanish"),
+)
 
 
 @lru_cache(maxsize=1)
@@ -68,21 +104,53 @@ class JDParserService:
     """
 
     def __init__(self, taxonomy_loader: SkillTaxonomyLoader | None = None) -> None:
-        """Initialize taxonomy-driven skill lists and a compiled token matcher."""
+        """Initialize skill and language token matchers from the taxonomy."""
         loader = taxonomy_loader or _default_taxonomy_loader()
-        self.skill_synonyms = {
-            node.skill.casefold(): [syn.casefold() for syn in node.synonyms]
-            for node in loader.nodes.values()
-        }
-        self.common_skills = sorted(self.skill_synonyms)
+        self.skill_synonyms: dict[str, list[str]] = {}
         self._token_to_canonical: dict[str, str] = {}
-        for canonical in self.common_skills:
+        self._language_token_to_canonical: dict[str, str] = {}
+
+        for node in loader.nodes.values():
+            display_name = self._language_output_name(node.skill)
+            if node.category.strip().casefold() == _LANGUAGE_CATEGORY:
+                self._index_language_token(node.skill, display_name)
+                for alias in node.synonyms:
+                    self._index_language_token(alias, display_name)
+                continue
+            canonical = node.skill.casefold()
+            self.skill_synonyms[canonical] = [syn.casefold() for syn in node.synonyms]
             self._token_to_canonical[canonical] = canonical
-            for alias in self.skill_synonyms.get(canonical, []):
+            for alias in self.skill_synonyms[canonical]:
                 self._token_to_canonical[alias] = canonical
-        tokens = sorted(self._token_to_canonical, key=len, reverse=True)
+
+        for alias, display_name in _LANGUAGE_EXTRA_ALIASES:
+            self._index_language_token(alias, display_name)
+
+        self.common_skills = sorted(self.skill_synonyms)
+        self._skill_token_re = self._compile_token_regex(self._token_to_canonical)
+        self._language_token_re = self._compile_token_regex(self._language_token_to_canonical)
+
+    @staticmethod
+    def _language_output_name(skill: str) -> str:
+        """Map a taxonomy language node to the language_requirements display name."""
+        if skill.strip().casefold() == "business english":
+            return "English"
+        return skill.strip()
+
+    def _index_language_token(self, token: str, display_name: str) -> None:
+        """Register one language alias against its canonical display name."""
+        key = (token or "").strip().casefold()
+        if key:
+            self._language_token_to_canonical[key] = display_name
+
+    @staticmethod
+    def _compile_token_regex(token_map: dict[str, str]) -> re.Pattern[str]:
+        """Compile a longest-first token matcher, or a never-matching pattern."""
+        tokens = sorted(token_map, key=len, reverse=True)
+        if not tokens:
+            return re.compile(r"(?!)")
         pattern = r"(?<![a-z0-9])(?:" + "|".join(re.escape(token) for token in tokens) + r")(?![a-z0-9])"
-        self._skill_token_re = re.compile(pattern)
+        return re.compile(pattern)
 
     MUST_SECTION_MARKERS = (
         "requirement",
@@ -220,7 +288,7 @@ class JDParserService:
         candidates: set[str] = set()
         for matched in self._skill_token_re.finditer(line):
             canonical = self._token_to_canonical.get(matched.group(0))
-            if canonical:
+            if canonical and not self._is_language_value(canonical):
                 candidates.add(canonical)
 
         for pattern in self.SKILL_INTRO_PATTERNS:
@@ -245,6 +313,8 @@ class JDParserService:
             return None
         if cleaned in {"experience", "skills", "ability", "knowledge"}:
             return None
+        if self._is_language_value(cleaned):
+            return None
         return alias_to_canonical.get(cleaned, cleaned)
 
     def _rank_skills(self, scores: Counter[str], excluded: set[str] | None = None, limit: int = 5) -> list[str]:
@@ -254,6 +324,114 @@ class JDParserService:
             key=lambda item: (-item[1], item[0]),
         )
         return [skill for skill, _ in ranked[:limit]]
+
+    def _is_language_value(self, value: str) -> bool:
+        """Return True when a token or skill name is a spoken/written language."""
+        key = (value or "").strip().casefold().replace("_", " ")
+        return key in self._language_token_to_canonical
+
+    def _extract_language_requirements(self, text: str) -> list[dict[str, Any]]:
+        """Extract language requirements from JD lines, separate from job skills."""
+        lowered = self._clean_text(text)
+        sections = self._split_sections(lowered)
+        found: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+
+        for section_name, lines in sections.items():
+            for line in lines:
+                if self._should_ignore_line(line):
+                    continue
+                matched_names = self._languages_in_line(line)
+                if not matched_names:
+                    continue
+                target, _ = self._line_target_and_weight(section_name, line)
+                is_mandatory = target != "preferred"
+                level = self._infer_language_level(line)
+                for name in matched_names:
+                    key = name.casefold()
+                    if key not in found:
+                        found[key] = {
+                            "language": name,
+                            "level": level,
+                            "is_mandatory": is_mandatory,
+                            "provenance": "",
+                        }
+                        order.append(key)
+                        continue
+                    current = found[key]
+                    if is_mandatory:
+                        current["is_mandatory"] = True
+                    if _LANGUAGE_LEVEL_RANK.get(level, 0) > _LANGUAGE_LEVEL_RANK.get(current["level"], 0):
+                        current["level"] = level
+
+        return [found[key] for key in order]
+
+    def _languages_in_line(self, line: str) -> list[str]:
+        """Return canonical language names mentioned on a line, in mention order."""
+        names: list[str] = []
+        seen: set[str] = set()
+        for matched in self._language_token_re.finditer(line):
+            display = self._language_token_to_canonical.get(matched.group(0).casefold())
+            if not display:
+                continue
+            key = display.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(display)
+        return names
+
+    def _infer_language_level(self, line: str) -> str:
+        """Infer PRD language level from wording on the same line."""
+        if re.search(r"native|mother tongue|母語|母语", line):
+            return "native"
+        if re.search(r"fluent|fluency|excellent|proficient|精通|流利|出色", line):
+            return "fluent"
+        if re.search(r"basic|beginner|basic level|基本", line):
+            return "basic"
+        if re.search(r"business english|working (?:knowledge|proficiency)|商務|商务", line):
+            return "business"
+        return "business"
+
+    def _drop_language_skill_items(self, items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        """Remove spoken-language entries that leaked into a skill bucket."""
+        kept: list[dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            labels = (
+                str(item.get("canonical_skill") or ""),
+                str(item.get("display_name") or ""),
+                str(item.get("extracted_name") or ""),
+            )
+            if any(self._is_language_value(label) for label in labels if label.strip()):
+                continue
+            kept.append(item)
+        for idx, item in enumerate(kept, start=1):
+            item["priority_order"] = idx
+        return kept
+
+    def _needles_for_language(self, language: str) -> list[str]:
+        """Collect display name and aliases used to locate a language mention."""
+        needles: list[str] = []
+        seen: set[str] = set()
+        key = (language or "").strip().casefold()
+
+        def add(value: str | None) -> None:
+            text = (value or "").strip()
+            if len(text) < 2:
+                return
+            folded = text.casefold()
+            if folded in seen:
+                return
+            seen.add(folded)
+            needles.append(text)
+
+        add(language)
+        for token, display in self._language_token_to_canonical.items():
+            if display.casefold() == key:
+                add(token)
+        return needles
 
     def _extract_experience_requirement(self, text: str) -> dict[str, Any]:
         """Parse the experience requirement into min/max years plus the raw phrase."""
@@ -320,6 +498,8 @@ class JDParserService:
                     continue
                 target, weight = self._line_target_and_weight(section_name, line)
                 for skill in candidates:
+                    if self._is_language_value(skill):
+                        continue
                     skill_entry = skill_scores.setdefault(
                         skill,
                         {"must_score": 0, "preferred_score": 0, "evidence": []},
@@ -444,7 +624,7 @@ class JDParserService:
             if not isinstance(item, dict):
                 continue
             language = str(item.get("language") or "").strip()
-            item["provenance"] = find_cue_excerpt(jd_text, [language] if language else [])
+            item["provenance"] = find_cue_excerpt(jd_text, self._needles_for_language(language))
 
         education = structured_data.get("education_requirement")
         if isinstance(education, dict):
@@ -484,6 +664,7 @@ class JDParserService:
         provider = enrichment_provider or build_enrichment_provider(mode)
 
         must_skills, preferred_skills = self._extract_skills(cleaned_input)
+        language_requirements = self._extract_language_requirements(cleaned_input)
         experience_requirement = self._extract_experience_requirement(cleaned_input)
         normalized_cleaned = self._clean_text(cleaned_input)
         preprocessed_payload = self._build_preprocessed_payload(cleaned_input)
@@ -506,14 +687,7 @@ class JDParserService:
             "preferred_skills": [
                 build_skill_item(skill, idx + 1, 0.6) for idx, skill in enumerate(preferred_skills)
             ],
-            "language_requirements": [
-                {
-                    "language": "English",
-                    "level": "business",
-                    "is_mandatory": "english" in normalized_cleaned,
-                    "provenance": "",
-                }
-            ],
+            "language_requirements": language_requirements,
             "education_requirement": {
                 "minimum_degree": "bachelor" if "bachelor" in normalized_cleaned else "none",
                 "field_of_study": None,
@@ -548,8 +722,8 @@ class JDParserService:
             if result.succeeded:
                 parse_path = f"jd_{provider.name}_parser"
                 if result.must_skills or result.preferred_skills:
-                    structured_data["must_skills"] = result.must_skills
-                    structured_data["preferred_skills"] = result.preferred_skills
+                    structured_data["must_skills"] = self._drop_language_skill_items(result.must_skills)
+                    structured_data["preferred_skills"] = self._drop_language_skill_items(result.preferred_skills)
                 if result.jd_overview:
                     structured_data["jd_overview"] = result.jd_overview
             else:
