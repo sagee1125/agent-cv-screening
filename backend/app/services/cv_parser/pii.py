@@ -9,6 +9,10 @@ from app.services.cv_parser.prompts import KNOWN_SKILLS
 
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\d \t().-]{6,}\d)")
+URL_PATTERN = re.compile(
+    r"\b(?:https?://|www\.)[^\s<>()]+|\b(?:linkedin\.com/in|github\.com)/[A-Za-z0-9_.-]+",
+    flags=re.IGNORECASE,
+)
 DATE_RANGE_PATTERN = re.compile(
     r"^(?:(?:19|20)\d{2}(?:[./-]\d{1,2})?)"
     r"\s*(?:-|–|—|to)\s*"
@@ -50,6 +54,8 @@ CONTACT_PLACEHOLDERS = {
     "name": "[NAME_REDACTED]",
     "email": "[EMAIL_REDACTED]",
     "phone": "[PHONE_REDACTED]",
+    "private": "[PRIVATE_REDACTED]",
+    "url": "[URL_REDACTED]",
 }
 
 
@@ -84,9 +90,14 @@ def _looks_like_name(line: str) -> bool:
     return 1 <= len(normalized.split()) <= 6
 
 
-# Selects plausible name lines from the document header for conservative redaction.
-def extract_name_candidates(raw_text: str) -> list[str]:
+# Selects plausible local NER and header name values for conservative redaction.
+def extract_name_candidates(raw_text: str, extra_names: list[str] | None = None) -> list[str]:
     candidates: list[str] = []
+    for extra_name in extra_names or []:
+        cleaned_name = " ".join(extra_name.split()).strip()
+        if cleaned_name and cleaned_name.casefold() not in {item.casefold() for item in candidates}:
+            candidates.append(cleaned_name)
+
     labelled_match = NAME_LABEL_PATTERN.search(raw_text)
     if labelled_match:
         labelled_name = " ".join(labelled_match.group(1).split()).strip()
@@ -100,9 +111,9 @@ def extract_name_candidates(raw_text: str) -> list[str]:
     return candidates
 
 
-# Selects the primary local candidate name from conservative header candidates.
-def extract_name_hint(raw_text: str) -> str | None:
-    candidates = extract_name_candidates(raw_text)
+# Selects the primary local candidate name from NER and conservative header candidates.
+def extract_name_hint(raw_text: str, extra_names: list[str] | None = None) -> str | None:
+    candidates = extract_name_candidates(raw_text, extra_names)
     return candidates[0] if candidates else None
 
 
@@ -115,11 +126,19 @@ def is_phone_candidate(candidate: str) -> bool:
     return 8 <= digit_count <= 15
 
 
-# Detects all structured contact spans and the locally inferred candidate-name span.
-def detect_contact_entities(raw_text: str) -> list[PIIEntity]:
+# Detects all structured contact spans and locally inferred candidate-name spans.
+def detect_contact_entities(
+    raw_text: str,
+    extra_names: list[str] | None = None,
+    extra_sensitive_values: list[str] | None = None,
+) -> list[PIIEntity]:
     entities: list[PIIEntity] = []
     for match in EMAIL_PATTERN.finditer(raw_text):
         entities.append(PIIEntity("email", match.group(0), match.start(), match.end()))
+
+    for match in URL_PATTERN.finditer(raw_text):
+        value = match.group(0).rstrip(".,;")
+        entities.append(PIIEntity("url", value, match.start(), match.start() + len(value)))
 
     for match in PHONE_PATTERN.finditer(raw_text):
         candidate = match.group(0).strip()
@@ -129,19 +148,36 @@ def detect_contact_entities(raw_text: str) -> list[PIIEntity]:
         start = match.start() + leading_space_count
         entities.append(PIIEntity("phone", candidate, start, start + len(candidate)))
 
-    for name in extract_name_candidates(raw_text):
+    for name in extract_name_candidates(raw_text, extra_names):
         flexible_name_pattern = r"\s+".join(re.escape(part) for part in name.split())
         name_match = re.search(flexible_name_pattern, raw_text, flags=re.IGNORECASE)
         if name_match:
             entities.append(PIIEntity("name", name_match.group(0), name_match.start(), name_match.end()))
 
+    for value in extra_sensitive_values or []:
+        flexible_value_pattern = r"\s+".join(re.escape(part) for part in value.split())
+        value_match = re.search(flexible_value_pattern, raw_text, flags=re.IGNORECASE)
+        if value_match:
+            entities.append(
+                PIIEntity("private", value_match.group(0), value_match.start(), value_match.end())
+            )
+
     entities.sort(key=lambda entity: (entity.start, -(entity.end - entity.start)))
-    return entities
+    non_overlapping: list[PIIEntity] = []
+    for entity in entities:
+        if non_overlapping and entity.start < non_overlapping[-1].end:
+            continue
+        non_overlapping.append(entity)
+    return non_overlapping
 
 
 # Extracts the primary local identity fields while retaining all spans for masking.
-def extract_contact_hints_local(raw_text: str) -> dict[str, str | None]:
-    entities = detect_contact_entities(raw_text)
+def extract_contact_hints_local(
+    raw_text: str,
+    extra_names: list[str] | None = None,
+    extra_sensitive_values: list[str] | None = None,
+) -> dict[str, str | None]:
+    entities = detect_contact_entities(raw_text, extra_names, extra_sensitive_values)
 
     def first_value(kind: str) -> str | None:
         # Returns the first detected value for a requested PII kind.
@@ -155,19 +191,27 @@ def extract_contact_hints_local(raw_text: str) -> dict[str, str | None]:
 
 
 # Replaces every detected PII span with a semantic placeholder for text LLM input.
-def mask_pii_text(raw_text: str) -> str:
+def mask_pii_text(
+    raw_text: str,
+    extra_names: list[str] | None = None,
+    extra_sensitive_values: list[str] | None = None,
+) -> str:
     masked = raw_text
-    for entity in reversed(detect_contact_entities(raw_text)):
+    for entity in reversed(detect_contact_entities(raw_text, extra_names, extra_sensitive_values)):
         placeholder = CONTACT_PLACEHOLDERS[entity.kind]
         masked = f"{masked[:entity.start]}{placeholder}{masked[entity.end:]}"
     return masked
 
 
 # Returns unique local PII values that must be removed from rendered PDF pages.
-def contact_values_for_redaction(raw_text: str) -> list[str]:
+def contact_values_for_redaction(
+    raw_text: str,
+    extra_names: list[str] | None = None,
+    extra_sensitive_values: list[str] | None = None,
+) -> list[str]:
     seen: set[str] = set()
     values: list[str] = []
-    for entity in detect_contact_entities(raw_text):
+    for entity in detect_contact_entities(raw_text, extra_names, extra_sensitive_values):
         normalized = entity.value.casefold()
         if normalized in seen:
             continue

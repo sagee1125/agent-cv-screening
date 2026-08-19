@@ -17,6 +17,10 @@ tenacity==9.0.0
 pymupdf==1.28.2
 pypdf==5.9.0
 pdfplumber==0.11.4
+rapidocr==3.9.2
+onnxruntime==1.29.0
+opencv-python==4.14.0.94
+gliner==0.2.28
 python-multipart==0.0.20
 
 # Reports

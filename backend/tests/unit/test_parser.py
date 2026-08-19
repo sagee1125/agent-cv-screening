@@ -7,11 +7,13 @@ from typing import Any
 import pymupdf
 import pytest
 
+from app.services.cv_parser import local_ner as local_ner_module
 from app.services.cv_parser import CVParserService
 from app.services.cv_parser.pdf_utils import (
     extract_with_pymupdf,
     render_redacted_pdf_pages_as_data_urls,
 )
+from app.services.cv_parser.ocr import LocalCVDocument, extract_local_cv_document
 from app.services.cv_parser.pii import (
     contact_values_for_redaction,
     detect_contact_entities,
@@ -91,11 +93,16 @@ async def test_parse_cv_cache_miss_stores_structured_and_raw() -> None:
     llm = DummyLLM()
     service = CVParserService(llm_client=llm, cache=cache)
 
-    async def fake_extract(_: str) -> str:
+    async def fake_extract(_: str) -> LocalCVDocument:
         # Supplies realistic local contact data without reading a fixture PDF.
-        return "Alice Local\nalice.local@example.com\n+852 6123 4567\nSkills\nPython"
+        return LocalCVDocument(
+            raw_text="Alice Local\nalice.local@example.com\n+852 6123 4567\nSkills\nPython",
+            page_texts=(),
+            ocr_lines=(),
+            ocr_page_indexes=frozenset(),
+        )
 
-    service._extract_pdf_text = fake_extract  # type: ignore[method-assign]
+    service._extract_local_document = fake_extract  # type: ignore[method-assign]
 
     result = await service.parse_cv("resume.pdf")
 
@@ -214,6 +221,7 @@ def test_local_pii_masking_preserves_non_identity_cv_content() -> None:
         "陳大文\n"
         "Email: david.chan@example.com\n"
         "Phone: +852 6123 4567\n"
+        "LinkedIn: linkedin.com/in/david-chan\n"
         "Experience\n"
         "Engineer at ACME 2021 - 2024"
     )
@@ -221,10 +229,11 @@ def test_local_pii_masking_preserves_non_identity_cv_content() -> None:
     entities = detect_contact_entities(raw_text)
     masked = mask_pii_text(raw_text)
 
-    assert {entity.kind for entity in entities} == {"name", "email", "phone"}
+    assert {entity.kind for entity in entities} == {"name", "email", "phone", "url"}
     assert "陳大文" not in masked
     assert "david.chan@example.com" not in masked
     assert "+852 6123 4567" not in masked
+    assert "linkedin.com/in/david-chan" not in masked
     assert "Engineer at ACME 2021 - 2024" in masked
 
 
@@ -264,7 +273,7 @@ async def test_image_only_pdf_fails_closed_before_calling_llm(tmp_path: Path) ->
     llm = DummyLLM()
     service = CVParserService(llm_client=llm, cache=DummyCache())
 
-    with pytest.raises(ValueError, match="Failed to extract PDF text"):
+    with pytest.raises(ValueError, match="Failed to extract PDF text with local OCR"):
         await service.parse_cv(str(pdf_path))
 
     assert llm.called is False
@@ -276,11 +285,16 @@ async def test_missing_local_name_uses_privacy_rule_fallback() -> None:
     llm = DummyLLM()
     service = CVParserService(llm_client=llm, cache=DummyCache())
 
-    async def fake_extract(_: str) -> str:
+    async def fake_extract(_: str) -> LocalCVDocument:
         # Supplies content with contact details but no safely identifiable name.
-        return "Email: candidate@example.com\nPhone: +852 6123 4567\nSkills\nPython"
+        return LocalCVDocument(
+            raw_text="Email: candidate@example.com\nPhone: +852 6123 4567\nSkills\nPython",
+            page_texts=(),
+            ocr_lines=(),
+            ocr_page_indexes=frozenset(),
+        )
 
-    service._extract_pdf_text = fake_extract  # type: ignore[method-assign]
+    service._extract_local_document = fake_extract  # type: ignore[method-assign]
 
     result = await service.parse_cv("resume.pdf")
 
@@ -288,3 +302,67 @@ async def test_missing_local_name_uses_privacy_rule_fallback() -> None:
     assert result["parse_path"] == "privacy_rule_fallback"
     assert result["structured_data"]["email"] == "candidate@example.com"
     assert llm.called is False
+
+
+# Verifies image-only CV pages are OCRed locally with reusable redaction coordinates.
+def test_scanned_pdf_uses_local_ocr_and_renders_masked_image(tmp_path: Path) -> None:
+    source_document = pymupdf.open()
+    source_page = source_document.new_page(width=900, height=360)
+    source_page.insert_text((60, 80), "Alice Local", fontsize=28)
+    source_page.insert_text((60, 140), "alice.local@example.com", fontsize=24)
+    source_page.insert_text((60, 200), "+852 6123 4567", fontsize=24)
+    source_page.insert_text((60, 280), "Python Engineer", fontsize=24)
+    raster_bytes = source_page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False).tobytes("png")
+    source_document.close()
+
+    scan_path = tmp_path / "scanned-candidate.pdf"
+    scan_document = pymupdf.open()
+    scan_page = scan_document.new_page(width=900, height=360)
+    scan_page.insert_image(scan_page.rect, stream=raster_bytes)
+    scan_document.save(scan_path)
+    scan_document.close()
+
+    local_document = extract_local_cv_document(scan_path)
+    values = contact_values_for_redaction(local_document.raw_text)
+    image_urls = render_redacted_pdf_pages_as_data_urls(
+        str(scan_path),
+        max_pages=1,
+        pii_values=values,
+        ocr_lines=local_document.ocr_lines,
+    )
+
+    assert local_document.ocr_page_indexes == frozenset({0})
+    assert "alice.local@example.com" in local_document.raw_text
+    assert len(local_document.ocr_lines) >= 3
+    assert image_urls[0].startswith("data:image/")
+
+
+# Verifies local NER names can augment header heuristics without external requests.
+def test_local_ner_returns_unique_names_in_document_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeNERModel:
+        """Returns deterministic local person entities for NER integration testing."""
+
+        # Simulates GLiNER person extraction without loading model weights.
+        def predict_entities(
+            self,
+            _: str,
+            __: list[str],
+            *,
+            threshold: float,
+        ) -> list[dict[str, object]]:
+            assert threshold > 0
+            return [
+                {"text": "Alice Chan", "start": 20, "label": "person"},
+                {"text": "1 Example Road", "start": 50, "label": "full address"},
+                {"text": "Bob Lee", "start": 80, "label": "person name"},
+                {"text": "Alice Chan", "start": 100, "label": "person"},
+            ]
+
+    monkeypatch.setattr(local_ner_module.settings, "cv_local_ner_enabled", True)
+    monkeypatch.setattr(local_ner_module, "_NER_MODEL", FakeNERModel())
+    monkeypatch.setattr(local_ner_module, "_NER_LOAD_FAILED", False)
+
+    local_pii = local_ner_module.detect_local_pii("Local CV text")
+
+    assert local_pii.names == ("Alice Chan", "Bob Lee")
+    assert local_pii.sensitive_values == ("1 Example Road",)

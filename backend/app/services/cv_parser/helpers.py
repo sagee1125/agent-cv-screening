@@ -559,8 +559,12 @@ def build_compressed_prompt(*, raw_text: str, jd_text: str | None, max_chars: in
     return "\n\n".join(segments)
 
 # Extracts identity fields with the shared local PII detector.
-def extract_contact_hints(raw_text: str) -> dict[str, str | None]:
-    return extract_contact_hints_local(raw_text)
+def extract_contact_hints(
+    raw_text: str,
+    extra_names: list[str] | None = None,
+    extra_sensitive_values: list[str] | None = None,
+) -> dict[str, str | None]:
+    return extract_contact_hints_local(raw_text, extra_names, extra_sensitive_values)
 
 
 def digits_only(value: str | None) -> str:

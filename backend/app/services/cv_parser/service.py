@@ -9,6 +9,7 @@ from typing import Any
 from app.config import settings
 from app.core.hash_cache import HashCache
 from app.core.llm_client import LLMClient
+from app.services.cv_parser.local_ner import LocalNERResult, detect_local_pii
 from app.services.cv_parser.helpers import (
     apply_content_fallback,
     as_list,
@@ -45,6 +46,7 @@ from app.services.cv_parser.helpers import (
     to_clean_text,
     unique_keep_order,
 )
+from app.services.cv_parser.ocr import LocalCVDocument, OCRLine, extract_local_cv_document
 from app.services.cv_parser.pdf_utils import (
     extract_with_pdfplumber,
     extract_with_pymupdf,
@@ -64,7 +66,7 @@ from app.services.cv_parser.prompts import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v1"
+PARSER_CACHE_VERSION = "pii-redaction-v2-ocr"
 
 
 class CVParserService:
@@ -108,6 +110,8 @@ class CVParserService:
     _extract_with_pymupdf = staticmethod(extract_with_pymupdf)
     _render_pdf_pages_as_data_urls = staticmethod(render_pdf_pages_as_data_urls)
     _render_redacted_pdf_pages_as_data_urls = staticmethod(render_redacted_pdf_pages_as_data_urls)
+    _extract_local_cv_document = staticmethod(extract_local_cv_document)
+    _detect_local_pii = staticmethod(detect_local_pii)
 
     def __init__(self, llm_client: LLMClient, cache: HashCache) -> None:
         self.llm_client = llm_client
@@ -126,10 +130,17 @@ class CVParserService:
                 **cached,
             }
 
-        raw_text = await self._extract_pdf_text(file_path)
-        contact_hints = self._extract_contact_hints(raw_text)
-        masked_text = mask_pii_text(raw_text)
-        pii_values = contact_values_for_redaction(raw_text)
+        local_document = await self._extract_local_document(file_path)
+        raw_text = local_document.raw_text
+        heuristic_hints = self._extract_contact_hints(raw_text)
+        local_pii = LocalNERResult(names=(), sensitive_values=())
+        if local_document.ocr_page_indexes or not heuristic_hints.get("name"):
+            local_pii = await asyncio.to_thread(self._detect_local_pii, raw_text)
+        local_names = list(local_pii.names)
+        sensitive_values = list(local_pii.sensitive_values)
+        contact_hints = self._extract_contact_hints(raw_text, local_names, sensitive_values)
+        masked_text = mask_pii_text(raw_text, local_names, sensitive_values)
+        pii_values = contact_values_for_redaction(raw_text, local_names, sensitive_values)
         if not contact_hints.get("name"):
             logger.warning("Local name detection failed; blocking all external parser calls.")
             structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
@@ -154,6 +165,7 @@ class CVParserService:
                 file_path=file_path,
                 jd_text=jd_text,
                 pii_values=pii_values,
+                ocr_lines=local_document.ocr_lines,
             )
             safe_llm_payload = strip_contact_fields(llm_result["parsed"])
             structured = self._merge_contact_hints(self._normalize_schema(safe_llm_payload), contact_hints)
@@ -233,12 +245,14 @@ class CVParserService:
         file_path: str,
         jd_text: str | None,
         pii_values: list[str],
+        ocr_lines: tuple[OCRLine, ...],
     ) -> dict[str, Any]:
         image_urls = await asyncio.to_thread(
             self._render_redacted_pdf_pages_as_data_urls,
             file_path,
             settings.llm_vision_max_pages,
             pii_values,
+            ocr_lines,
         )
         last_exc: Exception | None = None
         attempts = max(1, settings.llm_vision_retry_attempts)
@@ -312,17 +326,18 @@ class CVParserService:
         return self.build_compressed_prompt(raw_text=raw_text, jd_text=jd_text)
 
     async def _extract_pdf_text(self, file_path: str) -> str:
+        return (await self._extract_local_document(file_path)).raw_text
+
+    # Builds one local text/OCR document while blocking unsupported files.
+    async def _extract_local_document(self, file_path: str) -> LocalCVDocument:
         path = Path(file_path)
         if path.suffix.lower() != ".pdf":
             raise ValueError("Only PDF files are currently supported.")
         try:
-            text = await asyncio.to_thread(self._extract_with_pymupdf, path)
-            if not text.strip():
-                raise ValueError("PDF has no extractable text; local OCR is required.")
-            return text
+            return await asyncio.to_thread(self._extract_local_cv_document, path)
         except Exception as exc:
-            logger.exception("Failed to extract PDF text file=%s", file_path)
-            raise ValueError("Failed to extract PDF text.") from exc
+            logger.exception("Failed to extract PDF text or local OCR file=%s", file_path)
+            raise ValueError("Failed to extract PDF text with local OCR.") from exc
 
     @staticmethod
     def _needs_focus_pass(structured: dict[str, Any]) -> bool:

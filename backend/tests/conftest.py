@@ -8,6 +8,7 @@ os.environ.setdefault("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
 os.environ.setdefault("LLM_MODEL", "glm-4-flash")
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test_db")
 os.environ.setdefault("SECRET_KEY", "test-secret")
+os.environ.setdefault("CV_LOCAL_NER_ENABLED", "false")
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
