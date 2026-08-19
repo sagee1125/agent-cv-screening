@@ -2,7 +2,9 @@
 import { useState } from "react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
+import { Label } from "../ui/label";
 import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
 
 interface JDPasteAreaProps {
   value: string;
@@ -29,15 +31,19 @@ export function JDPasteArea({
         <h3 className="text-base font-semibold text-slate-900">
           Job Description
         </h3>
-        <label className="flex items-center gap-2 text-xs text-slate-700">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-2">
+          <Switch
+            id="jd-enable-edit"
             checked={editable}
-            onChange={(event) => setEditable(event.target.checked)}
-            className="h-4 w-4 accent-slate-700"
+            onCheckedChange={setEditable}
           />
-          Enable Edit
-        </label>
+          <Label
+            htmlFor="jd-enable-edit"
+            className="cursor-pointer text-xs font-normal text-slate-700"
+          >
+            Enable Edit
+          </Label>
+        </div>
       </div>
       {editable ? (
         <Textarea

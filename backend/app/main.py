@@ -71,7 +71,7 @@ async def _ensure_polyu_sync_columns(connection) -> None:
 
 
 async def _ensure_resume_job_columns(connection) -> None:
-    """Add job_post_id/source_channel to resumes, relax file_hash to per-candidate uniqueness, and enforce job_post_id NOT NULL."""
+    """Add job_post_id/source_channel to resumes, enforce one resume per (candidate, job), and widen phone column."""
     await connection.execute(text("ALTER TABLE resumes ADD COLUMN IF NOT EXISTS job_post_id UUID"))
     await connection.execute(text("ALTER TABLE resumes ADD COLUMN IF NOT EXISTS source_channel VARCHAR(64) DEFAULT 'manual_upload'"))
     # Drop legacy orphan resumes that predate the job-scoped model, then enforce NOT NULL.
@@ -88,19 +88,58 @@ async def _ensure_resume_job_columns(connection) -> None:
     )
     await connection.execute(text("DELETE FROM resumes WHERE job_post_id IS NULL"))
     await connection.execute(text("ALTER TABLE resumes ALTER COLUMN job_post_id SET NOT NULL"))
-    await connection.execute(text("ALTER TABLE resumes DROP CONSTRAINT IF EXISTS resumes_file_hash_key"))
+
+    # Widen candidates.phone so long international numbers no longer cause 500s.
+    await connection.execute(text("ALTER TABLE candidates ALTER COLUMN phone TYPE VARCHAR(64)"))
+
+    # Replace the old (candidate_id, file_hash) uniqueness rule with one resume per (candidate, job).
+    await connection.execute(text("DROP INDEX IF EXISTS uq_resumes_candidate_file_hash"))
+    await connection.execute(text("DROP INDEX IF EXISTS resumes_file_hash_key"))
+    # Collapse any pre-existing duplicate (candidate, job) rows before adding the unique constraint.
+    # Keep the newest resume per pair (max uploaded_at, then max id as tiebreaker) and delete the rest.
     await connection.execute(
         text(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_resumes_candidate_file_hash
-            ON resumes (candidate_id, file_hash)
+            DELETE FROM resumes
+            WHERE id IN (
+                SELECT r.id
+                FROM resumes r
+                JOIN (
+                    SELECT candidate_id, job_post_id,
+                           (array_agg(id ORDER BY uploaded_at DESC, id DESC))[1] AS keep_id
+                    FROM resumes
+                    GROUP BY candidate_id, job_post_id
+                    HAVING COUNT(*) > 1
+                ) kept
+                  ON r.candidate_id = kept.candidate_id
+                 AND r.job_post_id = kept.job_post_id
+                WHERE r.id <> kept.keep_id
+            )
+            """
+        )
+    )
+    # Remove dependents of any duplicate resumes that were just deleted, then drop the legacy non-unique index.
+    await connection.execute(
+        text(
+            """
+            DELETE FROM extracted_data
+            WHERE resume_id NOT IN (SELECT id FROM resumes)
             """
         )
     )
     await connection.execute(
         text(
             """
-            CREATE INDEX IF NOT EXISTS idx_resumes_candidate_job
+            DELETE FROM scoring_results
+            WHERE resume_id NOT IN (SELECT id FROM resumes)
+            """
+        )
+    )
+    await connection.execute(text("DROP INDEX IF EXISTS idx_resumes_candidate_job"))
+    await connection.execute(
+        text(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_resumes_candidate_job
             ON resumes (candidate_id, job_post_id)
             """
         )

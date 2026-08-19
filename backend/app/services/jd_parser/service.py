@@ -5,19 +5,26 @@ import json
 import re
 from typing import Any
 
+from app.config import settings
 from app.services.jd_parser.prompts import (
     JD_SKILL_REFINER_OUTPUT_SCHEMA,
     JD_SKILL_REFINER_SYSTEM_PROMPT,
     build_jd_skill_refiner_user_prompt,
 )
+from app.services.jd_parser.providers import (
+    JDEnrichmentProvider,
+    build_enrichment_provider,
+    normalize_mode,
+)
 
 
 class JDParserService:
-    """Dedicated JD parser service placeholder.
+    """Rule-based JD parser with optional pluggable enrichment providers.
 
-    NOTE:
-    - JD parser logic has not been implemented yet.
-    - This service exists to keep CV/JD parser responsibilities separated.
+    Modes:
+    - rule: deterministic rule-based parsing (default).
+    - hybrid: rule parsing + LLM skill refinement via the shared LLM client.
+    - qwen: rule parsing + local Qwen3-0.6B overview extraction.
     """
 
     COMMON_SKILLS = [
@@ -329,7 +336,13 @@ class JDParserService:
             "input_preview": json.dumps(llm_input, ensure_ascii=False)[:900],
         }
 
-    async def parse_jd(self, jd_text: str) -> dict[str, Any]:
+    async def parse_jd(
+        self,
+        jd_text: str,
+        *,
+        mode: str | None = None,
+        enrichment_provider: JDEnrichmentProvider | None = None,
+    ) -> dict[str, Any]:
         cleaned_input = (jd_text or "").strip()
         if not cleaned_input:
             return {
@@ -338,6 +351,10 @@ class JDParserService:
                 "error_message": "JD text is empty.",
                 "structured_data": None,
             }
+
+        mode = normalize_mode(mode or settings.jd_parser_mode)
+        provider = enrichment_provider or build_enrichment_provider(mode)
+
         must_skills, preferred_skills = self._extract_skills(cleaned_input)
         years = self._extract_years(cleaned_input)
         normalized_cleaned = self._clean_text(cleaned_input)
@@ -386,16 +403,39 @@ class JDParserService:
             "experience_requirement": {"minimum_years": years},
         }
 
+        raw_llm_response: dict[str, Any] = {
+            "note": "Rule-based parser with LLM-ready preprocessed payload",
+            **preprocessed_payload,
+            "llm_refine_request": llm_refine_request,
+        }
+
+        parse_path = "jd_preprocessed_rule_parser"
+        if provider is not None:
+            raw_llm_response["enrichment_provider"] = provider.name
+            result = await provider.refine(
+                jd_text=cleaned_input,
+                preprocessed_payload=preprocessed_payload,
+                rule_structured=structured_data,
+            )
+            raw_llm_response["enrichment_raw_output"] = result.raw_output
+            if result.notes:
+                raw_llm_response["enrichment_notes"] = result.notes
+            if result.succeeded:
+                parse_path = f"jd_{provider.name}_parser"
+                if result.must_skills or result.preferred_skills:
+                    structured_data["must_skills"] = result.must_skills
+                    structured_data["preferred_skills"] = result.preferred_skills
+                if result.jd_overview:
+                    structured_data["jd_overview"] = result.jd_overview
+            else:
+                parse_path = f"jd_{provider.name}_fallback_rule_parser"
+
         return {
             "status": "success",
-            "parse_path": "jd_preprocessed_rule_parser",
+            "parse_path": parse_path,
             "error_message": None,
             "structured_data": structured_data,
-            "raw_llm_response": {
-                "note": "Rule-based parser with LLM-ready preprocessed payload",
-                **preprocessed_payload,
-                "llm_refine_request": llm_refine_request,
-            },
+            "raw_llm_response": raw_llm_response,
         }
 
 

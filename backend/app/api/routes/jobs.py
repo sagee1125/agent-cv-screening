@@ -138,7 +138,7 @@ async def create_job(
         if not description.strip():
             raise HTTPException(status_code=422, detail="JD description is required.")
         ## parse the JD
-        parse_result = await parse_jd_skill(description, parser=parser)
+        parse_result = await parse_jd_skill(description, parser=parser, mode=settings.jd_parser_mode)
         parsed = parse_result.get("structured_data")
         if not isinstance(parsed, dict):
             raise HTTPException(status_code=422, detail=parse_result.get("error_message", "Failed to parse JD."))
@@ -241,7 +241,7 @@ async def import_polyu_job(
     parsed: dict[str, Any] = {}
     parse_error: str | None = None
     try:
-        parse_result = await parse_jd_skill(description, parser=parser)
+        parse_result = await parse_jd_skill(description, parser=parser, mode=settings.jd_parser_mode)
         structured = parse_result.get("structured_data")
         if isinstance(structured, dict):
             parsed = structured
@@ -582,7 +582,7 @@ async def parse_jd(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    parse_result = await parse_jd_skill(payload.jd_text, parser=parser)
+    parse_result = await parse_jd_skill(payload.jd_text, parser=parser, mode=settings.jd_parser_mode)
     parsed = parse_result.get("structured_data")
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=422, detail=parse_result.get("error_message", "Failed to parse JD."))

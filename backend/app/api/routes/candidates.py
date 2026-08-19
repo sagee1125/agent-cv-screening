@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -84,19 +85,26 @@ async def upload_candidate_cv(
         final_structured = structured if parse_ok else {}
 
         # Resolve the parsed email/name/phone, falling back to form values, to identify the candidate.
-        parsed_email = (
-            email
-            or (str(structured.get("email")).strip() if isinstance(structured, dict) and structured.get("email") else None)
-            or f"unknown-{uuid4().hex[:8]}@example.com"
+        # Normalize email to lowercase + trimmed so the same person always converges to one row.
+        raw_email = email or (
+            str(structured.get("email")).strip()
+            if isinstance(structured, dict) and structured.get("email")
+            else None
+        )
+        parsed_email = (raw_email.strip().lower() if raw_email else None) or (
+            f"unknown-{uuid4().hex[:8]}@example.com"
         )
         parsed_name = (
             name
             or (str(structured.get("name")).strip() if isinstance(structured, dict) and structured.get("name") else None)
             or "Unknown Candidate"
         )
-        parsed_phone = phone or (
+        raw_phone = phone or (
             str(structured.get("phone")).strip() if isinstance(structured, dict) and structured.get("phone") else None
         )
+        # Truncate to column widths so a long parsed value never causes a DB 500.
+        parsed_name = parsed_name[:100] if parsed_name else "Unknown Candidate"
+        parsed_phone = raw_phone[:64] if raw_phone else None
 
         # Upsert the candidate by email so the same person's CVs converge to one record.
         candidate_stmt = select(Candidate).where(Candidate.email == parsed_email)
@@ -106,10 +114,9 @@ async def upload_candidate_cv(
             db.add(candidate)
             await db.flush()
         else:
-            if name and structured.get("name"):
-                candidate.name = parsed_name
-            if parsed_phone:
-                candidate.phone = parsed_phone
+            # Inherit the existing candidate and refresh profile fields from the latest parse.
+            candidate.name = parsed_name
+            candidate.phone = parsed_phone
 
         def _build_extracted(resume_id: UUID) -> ExtractedData:
             # Create a fresh ExtractedData row for a resume with the current parse outcome.
@@ -123,37 +130,41 @@ async def upload_candidate_cv(
                 error_message=parse_error_message,
             )
 
-        def _sync_extracted(existing: ExtractedData) -> None:
-            # Overwrite an existing ExtractedData row with the latest parse outcome.
-            existing.structured_data = final_structured
-            existing.raw_llm_response = raw_llm
-            existing.extraction_model = extraction_model
-            existing.status = parse_status
-            existing.error_message = parse_error_message
-
-        # Override the existing (candidate, job) resume in place, inheriting its UUID.
+        # Verify the target job exists before linking a resume to it.
         job_stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
         job = (await db.execute(job_stmt)).scalar_one_or_none()
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found.")
 
+        # One resume per (candidate, job): take the newest row if any exist, then overwrite in place.
+        # Use limit(1) instead of scalar_one_or_none so historical duplicate rows cannot raise.
         existing_for_job_stmt = (
             select(Resume)
             .where(Resume.candidate_id == candidate.id, Resume.job_post_id == job_id)
             .options(selectinload(Resume.extracted_data))
+            .order_by(Resume.uploaded_at.desc(), Resume.id.desc())
+            .limit(1)
         )
-        resume = (await db.execute(existing_for_job_stmt)).scalar_one_or_none()
+        resume = (await db.execute(existing_for_job_stmt)).scalars().first()
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        # if the candidate has already uploaded a resume for this job
+        # overwrite the existing resume
         if resume is not None:
             resume.original_filename = file.filename or "uploaded.pdf"
             resume.file_path = str(saved_path)
             resume.file_hash = final_hash
             resume.source_channel = "manual_upload"
-            if resume.extracted_data is None:
-                extracted = _build_extracted(resume.id)
-                db.add(extracted)
-            else:
-                extracted = resume.extracted_data
-                _sync_extracted(extracted)
+            resume.uploaded_at = now_utc
+            # Rewrite extracted data as a new row instead of patching the existing one.
+            if resume.extracted_data is not None:
+                await db.delete(resume.extracted_data)
+                await db.flush()
+            extracted = _build_extracted(resume.id)
+            db.add(extracted)
+
+        # if the candidate has not uploaded a resume for this job
+        # create a new one
         else:
             resume = Resume(
                 candidate_id=candidate.id,
@@ -162,6 +173,7 @@ async def upload_candidate_cv(
                 file_path=str(saved_path),
                 file_hash=final_hash,
                 source_channel="manual_upload",
+                uploaded_at=now_utc,
             )
             db.add(resume)
             await db.flush()
