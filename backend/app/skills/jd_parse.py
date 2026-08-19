@@ -15,6 +15,7 @@ async def parse_jd_skill(
     jd_text: str,
     *,
     parser: JDParserService | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
     """Parse JD text into structured skill/requirement data.
 
@@ -22,6 +23,8 @@ async def parse_jd_skill(
         jd_text: Raw job description text.
         parser: Optional injected JDParserService (used by the REST API);
             a default service is built when omitted (used by CLI scripts).
+        mode: Parser mode ("rule" | "hybrid" | "qwen"); falls back to
+            settings.jd_parser_mode when omitted.
     """
     service = parser or build_jd_parser_service()
-    return await service.parse_jd(jd_text=jd_text)
+    return await service.parse_jd(jd_text=jd_text, mode=mode)

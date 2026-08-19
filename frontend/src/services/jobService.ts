@@ -1,8 +1,19 @@
 // Job Post REST client, including PolyU catalog fetch and one-by-one import.
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./api";
+import {
+  convertJdParsedPayload,
+  EMPTY_JD_PARSED_PAYLOAD,
+  toCandidateSummary,
+  toJobPost,
+  toPolyUCatalogItem,
+} from "../utils/jdParsedConvert";
+import type {
+  BackendCandidateRow,
+  BackendJob,
+  BackendPolyUCatalogItem,
+} from "../utils/jdParsedConvert";
 import type {
   CandidateListResponse,
-  CandidateSummary,
   ChannelAnalyticsResponse,
   JDDiagnosisResponse,
   JDParsedPayload,
@@ -19,19 +30,16 @@ import type {
   WeightConfig,
 } from "../types";
 
-type BackendJob = {
-  id: string;
-  title: string;
-  description: string;
-  jd_summary_200: string;
-  head_count: number;
-  status: string;
-  start_date: string;
-  closed_date: string | null;
-  jd_parsed_json: unknown;
-  weight_config_json: WeightConfig | null;
-  created_at: string;
-  updated_at: string;
+type BackendJobListResponse = {
+  items: BackendJob[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+type BackendJobDetailResponse = {
+  job: BackendJob;
+  candidates: BackendCandidateRow[];
 };
 
 // Response returned by POST /candidates/upload after a CV is stored and parsed.
@@ -50,188 +58,14 @@ type CandidateDetail = {
   extractedData: Record<string, unknown> | null;
 };
 
-type BackendJobListResponse = {
-  items: BackendJob[];
-  total: number;
-  page: number;
-  limit: number;
-};
-
-type BackendJobDetailResponse = {
-  job: BackendJob;
-  candidates: Array<{
-    candidate_id: string;
-    resume_id?: string;
-    candidate_name?: string;
-    candidate_email?: string;
-    original_filename?: string;
-    source_channel: string;
-    cv_parse_status: "success" | "failed" | "pending";
-    extracted_data?: Record<string, unknown> | null;
-    uploaded_at?: string;
-    match_score?: number;
-    fit_level?: "high" | "medium" | "low";
-    score_breakdown?: { skill: number; experience: number; education: number; language: number };
-  }>;
-};
-
-function restoreDescriptionNewlines(value: string): string {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/\\r\\n/g, "\n")
-    .replace(/\\n/g, "\n");
-}
-
-const toJobPost = (job: BackendJob): JobPost => ({
-  id: job.id,
-  title: job.title,
-  description: restoreDescriptionNewlines(job.description),
-  headCount: job.head_count,
-  status: job.status as JobPost["status"],
-  startDate: job.start_date,
-  closedDate: job.closed_date,
-  jdParsedJson: normalizeJDParsedPayload(job.jd_parsed_json),
-  weightConfigJson: job.weight_config_json,
-  createdAt: job.created_at,
-  updatedAt: job.updated_at,
-});
-
-function normalizeJDParsedPayload(value: unknown): JDParsedPayload | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const payload = value as Record<string, unknown>;
-
-  const mapSkills = (skills: unknown, type: "must" | "preferred") => {
-    if (!Array.isArray(skills)) return [];
-    return skills.map((item, index) => {
-      const raw = (item ?? {}) as Record<string, unknown>;
-      const provenance = (raw.provenance ?? {}) as Record<string, unknown>;
-      const displayName = typeof raw.display_name === "string" ? raw.display_name : null;
-      const fallbackName = typeof raw.canonical_skill === "string" ? raw.canonical_skill : null;
-      return {
-        id: typeof raw.skill_id === "string" ? raw.skill_id : `${type}-${index + 1}`,
-        name: displayName ?? fallbackName ?? `${type}-${index + 1}`,
-        type,
-        weight: typeof raw.weight === "number" ? raw.weight : undefined,
-        sourceSentence:
-          typeof provenance.source_sentence === "string" ? provenance.source_sentence : undefined,
-      };
-    });
-  };
-
-  const mustSkills = mapSkills(payload.mustSkills ?? payload.must_skills, "must");
-  const preferredSkills = mapSkills(payload.preferredSkills ?? payload.preferred_skills, "preferred");
-
-  const normalizeSourceSentence = (raw: Record<string, unknown>): string | undefined => {
-    if (typeof raw.sourceSentence === "string") return raw.sourceSentence;
-    if (typeof raw.source_sentence === "string") return raw.source_sentence;
-    if (typeof raw.provenance === "string") return raw.provenance;
-    const provenance = (raw.provenance ?? {}) as Record<string, unknown>;
-    if (typeof provenance.source_sentence === "string") return provenance.source_sentence;
-    return undefined;
-  };
-  type LanguageItem = JDParsedPayload["languageRequirements"][number];
-  type EducationItem = NonNullable<JDParsedPayload["educationRequirement"]>;
-  type VisaItem = NonNullable<JDParsedPayload["visaRequirement"]>;
-
-  const languageRaw = Array.isArray(payload.languageRequirements)
-    ? payload.languageRequirements
-    : Array.isArray(payload.language_requirements)
-      ? payload.language_requirements
-      : [];
-  const languageRequirements = languageRaw.reduce<LanguageItem[]>((acc, item) => {
-      const raw = (item ?? {}) as Record<string, unknown>;
-      if (typeof raw.language !== "string" || typeof raw.level !== "string") return acc;
-      const normalized: LanguageItem = {
-        language: raw.language,
-        level: raw.level as LanguageItem["level"],
-        isMandatory:
-          typeof raw.isMandatory === "boolean"
-            ? raw.isMandatory
-            : typeof raw.is_mandatory === "boolean"
-              ? raw.is_mandatory
-              : false,
-      };
-      const sourceSentence = normalizeSourceSentence(raw);
-      if (sourceSentence) {
-        normalized.sourceSentence = sourceSentence;
-      }
-      acc.push(normalized);
-      return acc;
-    }, []);
-
-  const educationRaw = ((payload.educationRequirement ??
-    payload.education_requirement ??
-    null) ?? null) as Record<string, unknown> | null;
-  const educationRequirement: JDParsedPayload["educationRequirement"] =
-    educationRaw && typeof educationRaw === "object"
-      ? {
-          minimumDegree:
-            (educationRaw.minimumDegree as EducationItem["minimumDegree"]) ??
-            (educationRaw.minimum_degree as EducationItem["minimumDegree"]) ??
-            "none",
-          fieldOfStudy:
-            (educationRaw.fieldOfStudy as string | null | undefined) ??
-            (educationRaw.field_of_study as string | null | undefined) ??
-            null,
-          isMandatory:
-            typeof educationRaw.isMandatory === "boolean"
-              ? educationRaw.isMandatory
-              : typeof educationRaw.is_mandatory === "boolean"
-                ? educationRaw.is_mandatory
-                : false,
-          sourceSentence: normalizeSourceSentence(educationRaw) ?? null,
-        }
-      : null;
-
-  const visaRaw = ((payload.visaRequirement ?? payload.visa_requirement ?? null) ??
-    null) as Record<string, unknown> | null;
-  const visaRequirement: JDParsedPayload["visaRequirement"] =
-    visaRaw && typeof visaRaw === "object"
-      ? {
-          requirementType:
-            (visaRaw.requirementType as VisaItem["requirementType"]) ??
-            (visaRaw.requirement_type as VisaItem["requirementType"]) ??
-            "unknown",
-          targetRegion:
-            (visaRaw.targetRegion as string | null | undefined) ??
-            (visaRaw.target_region as string | null | undefined) ??
-            null,
-          sourceSentence: normalizeSourceSentence(visaRaw) ?? null,
-        }
-      : null;
-
-  return {
-    mustSkills,
-    preferredSkills,
-    languageRequirements,
-    educationRequirement,
-    visaRequirement,
-  };
-}
-
-const toCandidateSummary = (item: BackendJobDetailResponse["candidates"][number]): CandidateSummary => ({
-  candidateId: item.candidate_id,
-  candidateName: item.candidate_name ?? item.candidate_id,
-  resumeId: item.resume_id,
-  candidateEmail: item.candidate_email,
-  originalFilename: item.original_filename,
-  sourceChannel: item.source_channel,
-  cvParseStatus: item.cv_parse_status,
-  extractedData: item.extracted_data ?? null,
-  uploadedAt: item.uploaded_at,
-  matchScore: item.match_score,
-  fitLevel: item.fit_level,
-  scoreBreakdown: item.score_breakdown,
-});
-
-export async function getJobPosts(query: JobPostListQuery): Promise<JobPostListResponse> {
+/** Lists job posts with optional status filter and pagination. */
+export async function getJobPosts(
+  query: JobPostListQuery
+): Promise<JobPostListResponse> {
   const response = await apiGet<BackendJobListResponse>("/jobs", {
-      status: query.status === "all" ? undefined : query.status,
-      page: query.page ?? 1,
-      limit: query.limit ?? 12,
+    status: query.status === "all" ? undefined : query.status,
+    page: query.page ?? 1,
+    limit: query.limit ?? 12,
   });
   return {
     items: response.items.map(toJobPost),
@@ -241,7 +75,10 @@ export async function getJobPosts(query: JobPostListQuery): Promise<JobPostListR
   };
 }
 
-export async function getJobPostDetail(jobId: string): Promise<JobPostDetailResponse> {
+/** Fetches one job post and its attached candidates. */
+export async function getJobPostDetail(
+  jobId: string
+): Promise<JobPostDetailResponse> {
   const response = await apiGet<BackendJobDetailResponse>(`/jobs/${jobId}`);
   return {
     job: toJobPost(response.job),
@@ -249,7 +86,10 @@ export async function getJobPostDetail(jobId: string): Promise<JobPostDetailResp
   };
 }
 
-export async function createJobPost(payload: JobPostCreateInput): Promise<JobPost> {
+/** Creates a job post from the frontend form payload. */
+export async function createJobPost(
+  payload: JobPostCreateInput
+): Promise<JobPost> {
   const created = await apiPost<BackendJob>("/jobs", {
     title: payload.title,
     description: payload.description,
@@ -261,7 +101,11 @@ export async function createJobPost(payload: JobPostCreateInput): Promise<JobPos
   return toJobPost(created);
 }
 
-export async function updateJobPost(jobId: string, payload: JobPostUpdateInput): Promise<JobPost> {
+/** Updates an existing job post. */
+export async function updateJobPost(
+  jobId: string,
+  payload: JobPostUpdateInput
+): Promise<JobPost> {
   const updated = await apiPut<BackendJob>(`/jobs/${jobId}`, {
     title: payload.title,
     description: payload.description,
@@ -272,16 +116,27 @@ export async function updateJobPost(jobId: string, payload: JobPostUpdateInput):
   return toJobPost(updated);
 }
 
-export async function deleteJobPost(jobId: string): Promise<{ id: string; deletedAt: string }> {
-  const response = await apiDelete<{ id: string; updated_at: string }>(`/jobs/${jobId}`);
+/** Soft-deletes a job post and returns the deletion timestamp. */
+export async function deleteJobPost(
+  jobId: string
+): Promise<{ id: string; deletedAt: string }> {
+  const response = await apiDelete<{ id: string; updated_at: string }>(
+    `/jobs/${jobId}`
+  );
   return { id: response.id, deletedAt: response.updated_at };
 }
 
-export async function duplicateJobPost(jobId: string): Promise<{ newJobId: string }> {
-  const response = await apiPost<{ new_job_id: string }>(`/jobs/${jobId}/duplicate`);
+/** Duplicates a job post and returns the new job id. */
+export async function duplicateJobPost(
+  jobId: string
+): Promise<{ newJobId: string }> {
+  const response = await apiPost<{ new_job_id: string }>(
+    `/jobs/${jobId}/duplicate`
+  );
   return { newJobId: response.new_job_id };
 }
 
+/** Patches job status and optional closed date. */
 export async function patchJobStatus(
   jobId: string,
   payload: JobPostStatusPatchInput
@@ -293,48 +148,50 @@ export async function patchJobStatus(
   return response;
 }
 
-export async function updateJobWeight(jobId: string, weightConfigJson: WeightConfig): Promise<void> {
-  await apiPut<void>(`/jobs/${jobId}/weight`, { weight_config_json: weightConfigJson });
+/** Saves the skill weight config for a job. */
+export async function updateJobWeight(
+  jobId: string,
+  weightConfigJson: WeightConfig
+): Promise<void> {
+  await apiPut<void>(`/jobs/${jobId}/weight`, {
+    weight_config_json: weightConfigJson,
+  });
 }
 
-export async function recalculateJob(jobId: string): Promise<{ recalcJobId: string; status: string }> {
+/** Triggers a rescore job after weight changes. */
+export async function recalculateJob(
+  jobId: string
+): Promise<{ recalcJobId: string; status: string }> {
   return apiPost<{ recalcJobId: string; status: string }>(
     `/jobs/${jobId}/recalculate`,
     { reason: "weight_updated" }
   );
 }
 
-export async function parseJobJD(jobId: string, jdText: string): Promise<{ jdParsedJson: JDParsedPayload; weightConfigJson: WeightConfig }> {
+/** Parses JD text and returns frontend-shaped JD and weight payloads. */
+export async function parseJobJD(
+  jobId: string,
+  jdText: string
+): Promise<{ jdParsedJson: JDParsedPayload; weightConfigJson: WeightConfig }> {
   const response = await apiPost<{
     jd_parsed_json: unknown;
     weight_config_json: WeightConfig;
   }>(`/jobs/${jobId}/parse-jd`, { jd_text: jdText });
   return {
-    jdParsedJson: normalizeJDParsedPayload(response.jd_parsed_json) ?? {
-      mustSkills: [],
-      preferredSkills: [],
-      languageRequirements: [],
-      educationRequirement: null,
-      visaRequirement: null,
-    },
+    jdParsedJson:
+      convertJdParsedPayload(response.jd_parsed_json) ?? EMPTY_JD_PARSED_PAYLOAD,
     weightConfigJson: response.weight_config_json,
   };
 }
 
+/** Lists scored candidates for a job. */
 export async function getJobCandidates(
   jobId: string,
   page = 1,
   limit = 20
 ): Promise<CandidateListResponse> {
   const response = await apiGet<{
-    items: Array<{
-      candidate_id: string;
-      match_score: number;
-      fit_level: "high" | "medium" | "low";
-      source_channel: string;
-      cv_parse_status: "success" | "failed" | "pending";
-      score_breakdown: { skill: number; experience: number; education: number; language: number };
-    }>;
+    items: BackendCandidateRow[];
     total: number;
     page: number;
     limit: number;
@@ -347,7 +204,10 @@ export async function getJobCandidates(
   };
 }
 
-export async function getJobChannelStats(jobId: string): Promise<ChannelAnalyticsResponse> {
+/** Fetches per-channel candidate analytics for a job. */
+export async function getJobChannelStats(
+  jobId: string
+): Promise<ChannelAnalyticsResponse> {
   const response = await apiGet<{
     job_post_id: string;
     by_channel: Array<{
@@ -366,7 +226,10 @@ export async function getJobChannelStats(jobId: string): Promise<ChannelAnalytic
   };
 }
 
-export async function getJDDiagnosis(jobId: string): Promise<JDDiagnosisResponse> {
+/** Fetches must-skill satisfaction diagnosis for a job. */
+export async function getJDDiagnosis(
+  jobId: string
+): Promise<JDDiagnosisResponse> {
   const response = await apiGet<{
     job_post_id: string;
     must_skill_satisfaction: Array<{
@@ -385,17 +248,7 @@ export async function getJDDiagnosis(jobId: string): Promise<JDDiagnosisResponse
   };
 }
 
-type BackendPolyUCatalogItem = {
-  job_code: string;
-  external_ref: string;
-  title: string;
-  department: string;
-  closing_date: string | null;
-  detail_url: string;
-  already_imported: boolean;
-};
-
-// Fetch the PolyU general jobs catalog and import flags.
+/** Fetches the PolyU general jobs catalog and import flags. */
 export async function getPolyUJobCatalog(): Promise<PolyUCatalogResponse> {
   const response = await apiGet<{
     items: BackendPolyUCatalogItem[];
@@ -403,22 +256,16 @@ export async function getPolyUJobCatalog(): Promise<PolyUCatalogResponse> {
     new_count: number;
   }>("/jobs/sync-polyu/catalog");
   return {
-    items: response.items.map((item) => ({
-      jobCode: item.job_code,
-      externalRef: item.external_ref,
-      title: item.title,
-      department: item.department,
-      closingDate: item.closing_date,
-      detailUrl: item.detail_url,
-      alreadyImported: item.already_imported,
-    })),
+    items: response.items.map(toPolyUCatalogItem),
     total: response.total,
     newCount: response.new_count,
   };
 }
 
-// Import one PolyU listing, parse its JD, and return the saved Job Post.
-export async function importPolyUJob(item: PolyUCatalogItem): Promise<PolyUImportResponse> {
+/** Imports one PolyU listing, parses its JD, and returns the saved Job Post. */
+export async function importPolyUJob(
+  item: PolyUCatalogItem
+): Promise<PolyUImportResponse> {
   const response = await apiPost<{
     action: "created" | "skipped";
     job: BackendJob;
@@ -438,7 +285,7 @@ export async function importPolyUJob(item: PolyUCatalogItem): Promise<PolyUImpor
   };
 }
 
-// Uploads a single PDF CV to the backend parsing endpoint, linked to the given job.
+/** Uploads a single PDF CV to the backend parsing endpoint, linked to the given job. */
 export async function uploadCandidateCV(
   file: File,
   jobId: string
@@ -458,8 +305,10 @@ export async function uploadCandidateCV(
   };
 }
 
-// Fetches the parsed structured data for a stored candidate by id.
-export async function getCandidateDetail(candidateId: string): Promise<CandidateDetail> {
+/** Fetches the parsed structured data for a stored candidate by id. */
+export async function getCandidateDetail(
+  candidateId: string
+): Promise<CandidateDetail> {
   const response = await apiGet<{
     id: string;
     email: string;

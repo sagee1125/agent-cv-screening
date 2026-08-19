@@ -92,7 +92,7 @@ class Candidate(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=True)
+    phone = Column(String(64), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     resumes = relationship("Resume", back_populates="candidate")
@@ -118,8 +118,8 @@ class Resume(Base):
     scoring_results = relationship("ScoringResult", back_populates="resume")
 
     __table_args__ = (
-        UniqueConstraint("candidate_id", "file_hash", name="uq_resumes_candidate_file_hash"),
-        Index("idx_resumes_candidate_job", "candidate_id", "job_post_id"),
+        # One resume per (candidate, job): re-uploading overwrites the same row instead of inserting.
+        UniqueConstraint("candidate_id", "job_post_id", name="uq_resumes_candidate_job"),
         Index("idx_resumes_job_uploaded", "job_post_id", "uploaded_at"),
     )
 

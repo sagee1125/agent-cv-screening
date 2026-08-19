@@ -1,0 +1,31 @@
+Senior Data Engineer - Hong Kong
+
+Company: DataStream Analytics
+Website: https://datastream.example.com
+
+About the role
+We are looking for a Senior Data Engineer to join our Hong Kong team and help build our real-time analytics platform.
+
+What you will do
+- Design and maintain scalable ETL pipelines
+- Optimize Spark and Airflow jobs for large-scale data processing
+- Build and monitor data quality checks with dbt
+
+Requirements
+- Bachelor's degree in Computer Science or related field
+- 5+ years of experience with Python, Spark, and SQL
+- Strong knowledge of cloud data warehouses (BigQuery, Snowflake)
+- Experience with Airflow and dbt
+- Must be eligible to work in Hong Kong
+- Fluent English communication
+
+Preferred
+- Nice to have: Kubernetes, Terraform, Redshift
+- Experience with streaming (Kafka, Flink)
+
+Compensation & Benefits
+- Salary: HKD 55,000 - 75,000 per month
+- Work mode: Hybrid (2 days onsite)
+- Job type: Full-time
+- Notice period: 1 month
+- Industry: Data & Analytics

@@ -58,9 +58,9 @@ export function CandidateCard({ item }: CandidateCardProps) {
             Candidate ID: {item.candidateId}
           </p>
         ) : null}
-        {item.error ? (
+        {/* {item.error ? (
           <p className="text-sm font-medium text-rose-600">{item.error}</p>
-        ) : null}
+        ) : null} */}
         {item.extractedData ? (
           <pre className="max-h-72 overflow-auto rounded-md bg-slate-900 p-3 text-xs text-slate-50">
             {JSON.stringify(item.extractedData, null, 2)}

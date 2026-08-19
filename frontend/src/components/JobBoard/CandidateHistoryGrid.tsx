@@ -32,15 +32,12 @@ export function CandidateHistoryGrid({
   candidates,
   loading = false,
 }: CandidateHistoryGridProps) {
-  if (loading) {
-    return (
-      <p className="text-sm text-slate-500">Loading previously uploaded CVs...</p>
-    );
-  }
   if (candidates.length === 0) {
     return (
       <p className="text-sm text-slate-500">
-        No CVs uploaded for this job yet.
+        {loading
+          ? "Loading previously uploaded CVs..."
+          : "No CVs uploaded for this job yet."}
       </p>
     );
   }

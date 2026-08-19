@@ -11,7 +11,7 @@ import { CandidateCard, type CandidateUploadItem } from "./CandidateCard";
 interface BatchCVUploadProps {
   // The job this batch of CVs should be linked to.
   jobId: string;
-  // Called after a batch finishes so the parent can refresh the historical CV list.
+  // Called after each successful upload so the parent can refresh the historical CV list.
   onUploaded?: () => void | Promise<void>;
 }
 
@@ -35,7 +35,10 @@ export function BatchCVUpload({ jobId, onUploaded }: BatchCVUploadProps) {
     const picked = Array.from(event.target.files ?? []).filter((file) =>
       file.name.toLowerCase().endsWith(".pdf")
     );
-    const entries = picked.map((file) => ({ file, localId: createLocalId(file) }));
+    const entries = picked.map((file) => ({
+      file,
+      localId: createLocalId(file),
+    }));
     setFiles(entries);
     setItems(
       entries.map(({ file, localId }) => ({
@@ -75,6 +78,7 @@ export function BatchCVUpload({ jobId, onUploaded }: BatchCVUploadProps) {
           // Success: the CV now lives in "Uploaded CVs", so retire it from the upload area.
           setSucceededCount((count) => count + 1);
           removeItem(entry.localId);
+          await onUploaded?.();
         } catch (error) {
           updateItem(entry.localId, {
             status: "failed",
@@ -83,7 +87,6 @@ export function BatchCVUpload({ jobId, onUploaded }: BatchCVUploadProps) {
         }
       }
       toast.success("Batch CV upload complete", { position: "top-center" });
-      await onUploaded?.();
     } finally {
       setUploading(false);
     }
@@ -91,16 +94,15 @@ export function BatchCVUpload({ jobId, onUploaded }: BatchCVUploadProps) {
 
   return (
     <section className="space-y-3">
-      <h3 className="text-base font-semibold text-slate-900">
-        Batch CV Upload
-      </h3>
+      <h3 className="text-base font-semibold text-slate-900">Batch Upload</h3>
 
       <div className="space-y-2">
         <Label htmlFor="batch-cv-input">
-          Select PDF resumes (multiple files)
+          Select PDF resumes/CVs (multiple files)
         </Label>
         <Input
           id="batch-cv-input"
+          className="cursor-pointer"
           type="file"
           accept=".pdf,application/pdf"
           multiple

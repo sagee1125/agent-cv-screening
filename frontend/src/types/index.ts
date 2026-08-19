@@ -3,7 +3,7 @@ export type JobPostStatus = "draft" | "active" | "closed";
 export type FitLevel = "high" | "medium" | "low";
 export type CVParseStatus = "success" | "failed" | "pending";
 
-export type SkillType = "must" | "preferred";
+export type SkillType = "must" | "preferred" | "other";
 
 export interface SkillItem {
   id: string;
@@ -33,6 +33,7 @@ export interface VisaRequirement {
   sourceSentence?: string | null;
 }
 
+/** Frontend JD schema after convertJdParsedPayload maps the backend wire JSON. */
 export interface JDParsedPayload {
   mustSkills: SkillItem[];
   preferredSkills: SkillItem[];

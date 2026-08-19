@@ -170,10 +170,36 @@ Notes:
     "provenance": "..."
   },
   "experience_requirement": {
-    "minimum_years": 3
+    "minimum_years": 3,
+    "maximum_years": null,
+    "raw_text": "3+ years"
   }
 }
 ```
+
+### 5.1.1 Experience Requirement Parsing
+
+`experience_requirement` is extracted deterministically from the JD text:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `minimum_years` | int \| null | Lower bound of required experience (canonical field used by scoring/eval). |
+| `maximum_years` | int \| null | Upper bound, or `null` for open-ended ("at least N", "N+", "N年以上"). |
+| `raw_text` | str \| null | The exact matched phrase, or `null` when no year phrase is found. |
+
+Supported JD phrasings (English + Traditional/Simplified Chinese):
+
+| Pattern | Example | Result |
+| --- | --- | --- |
+| Range | `5-8 years`, `5至8年`, `五至八年` | `{minimum_years: 5, maximum_years: 8}` |
+| Lower bound (prefix) | `at least 6 years`, `不少於三年`, `不少于3年`, `至少 5 年`, `最少三年`, `不低於三年`, `不低于三年`, `超過三年`, `超过三年` | `{minimum_years: N, maximum_years: null}` |
+| Lower bound (suffix) | `3+ years`, `10+ years`, `3年以上`, `五年以上`, `年或以上`, `年或更多` | `{minimum_years: N, maximum_years: null}` |
+| Exact | `2 years`, `2年`, `三年` | `{minimum_years: N, maximum_years: N}` |
+| None | `No specific experience required` | `{minimum_years: null, maximum_years: null, raw_text: null}` |
+
+Chinese numerals are supported: `一`-`九`, `十`, `十一`-`十九`, `二十`-`九十九`, and `兩`/`两`
+(e.g. `十二年以上` -> `minimum_years: 12`). Matching order is range -> "N+" -> lower-bound
+prefix -> lower-bound suffix -> exact, so `不少於三年` is a lower bound, never an exact match.
 
 ### 5.2 `weight_config_json` (Persisted)
 

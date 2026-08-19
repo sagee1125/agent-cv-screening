@@ -40,6 +40,15 @@ class Settings(BaseSettings):
         "http://localhost:8000",
     ]
 
+
+    # JD parser mode: rule (default, deterministic) | hybrid (rule + LLM refine) | qwen (rule + local Qwen model)
+    jd_parser_mode: str = "rule"
+    # Optional model override for the LLM skill refiner (defaults to llm_model).
+    jd_parser_llm_model: str | None = None
+    # Local Qwen3-0.6B fine-tuned extractor settings (used when mode == "qwen").
+    jd_qwen_model_id: str = "Rithankoushik/job-parser-model-qwen"
+    jd_qwen_max_new_tokens: int = 512
+    jd_qwen_device: str = "auto"
     # PolyU public jobs board used by the one-click sync button.
     polyu_jobs_base_url: str = "https://jobs.polyu.edu.hk"
     polyu_jobs_list_url: str = "https://jobs.polyu.edu.hk/general.php"
