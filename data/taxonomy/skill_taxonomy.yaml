@@ -108,7 +108,14 @@
   parent: null
 - skill: CI/CD
   category: Software Development
-  synonyms: [ci/cd, cicd, continuous integration, continuous delivery, continuous deployment]
+  synonyms:
+    [
+      ci/cd,
+      cicd,
+      continuous integration,
+      continuous delivery,
+      continuous deployment,
+    ]
   parent: null
 - skill: Test Automation
   category: Software Development
@@ -472,7 +479,8 @@
   parent: null
 - skill: Regression Analysis
   category: AI & Machine Learning
-  synonyms: [regression, regression analysis, linear regression, logistic regression]
+  synonyms:
+    [regression, regression analysis, linear regression, logistic regression]
   parent: null
 - skill: Classification
   category: AI & Machine Learning
@@ -616,7 +624,8 @@
   parent: null
 - skill: Vulnerability Assessment
   category: Cybersecurity
-  synonyms: [vulnerability assessment, vulnerability scanning, vulnerability management]
+  synonyms:
+    [vulnerability assessment, vulnerability scanning, vulnerability management]
   parent: null
 - skill: SIEM
   category: Cybersecurity
@@ -760,7 +769,8 @@
   parent: null
 - skill: Financial Statements
   category: Finance & Accounting
-  synonyms: [financial statements, balance sheet, income statement, cash flow statement]
+  synonyms:
+    [financial statements, balance sheet, income statement, cash flow statement]
   parent: null
 - skill: Auditing
   category: Finance & Accounting
@@ -1444,7 +1454,8 @@
   parent: null
 - skill: Requirements Gathering
   category: Project & Program Management
-  synonyms: [requirements gathering, requirements analysis, requirement elicitation]
+  synonyms:
+    [requirements gathering, requirements analysis, requirement elicitation]
   parent: null
 - skill: Business Analysis
   category: Project & Program Management
@@ -1484,7 +1495,8 @@
   parent: null
 - skill: Competitive Analysis
   category: Consulting & Strategy
-  synonyms: [competitive analysis, competitor analysis, competitive intelligence]
+  synonyms:
+    [competitive analysis, competitor analysis, competitive intelligence]
   parent: null
 - skill: Business Case
   category: Consulting & Strategy
@@ -1872,7 +1884,8 @@
   parent: null
 - skill: Healthcare Management
   category: Healthcare & Clinical
-  synonyms: [healthcare management, hospital administration, health administration]
+  synonyms:
+    [healthcare management, hospital administration, health administration]
   parent: null
 - skill: Health Informatics
   category: Healthcare & Clinical
@@ -2600,7 +2613,8 @@
   parent: null
 - skill: E-commerce Operations
   category: Retail & E-commerce
-  synonyms: [e-commerce operations, ecommerce operations, online store management]
+  synonyms:
+    [e-commerce operations, ecommerce operations, online store management]
   parent: null
 - skill: Shopify
   category: Retail & E-commerce
