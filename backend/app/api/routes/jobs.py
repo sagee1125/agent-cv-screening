@@ -4,21 +4,33 @@
 # calls .codex/skills/jd-parser/scripts/run_jd_parse.py directly instead.
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, false, func, select
+from sqlalchemy import and_, delete, false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import get_db_session, get_jd_parser_service
 from app.config import settings
-from app.models.database import CandidateMatchScore, JobPost, JobPostStatus, Resume
+from app.models.database import (
+    CandidateMatchScore,
+    ExtractedData,
+    FeedbackLog,
+    JDParserHistory,
+    JobPost,
+    JobPostStatus,
+    MatchingRecalcJob,
+    Resume,
+    ScoringResult,
+)
 from app.models.schemas import (
     JDParseRequest,
     JDParseResponse,
@@ -30,6 +42,7 @@ from app.models.schemas import (
     JobDiagnosisResponse,
     JobPostCreateRequest,
     JobPostDetailResponse,
+    JobPostDeleteResponse,
     JobPostDuplicateResponse,
     JobPostItemResponse,
     JobPostListResponse,
@@ -57,6 +70,35 @@ logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# Execute a SQLAlchemy delete statement and return the number of affected rows.
+async def _delete_rows(db: AsyncSession, statement: Any) -> int:
+    result = await db.execute(statement)
+    return max(int(result.rowcount or 0), 0)
+
+
+# Remove uploaded CV files that live under the configured upload directory.
+def _delete_uploaded_files(file_paths: list[str]) -> int:
+    upload_root = Path(settings.upload_dir).resolve()
+    deleted = 0
+    for value in file_paths:
+        if not value:
+            continue
+        path = Path(value)
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        # Never delete files outside the configured upload directory or non-files.
+        if not resolved.is_relative_to(upload_root) or not resolved.is_file():
+            continue
+        try:
+            resolved.unlink()
+            deleted += 1
+        except OSError:
+            logger.exception("Failed to remove uploaded CV file %s.", resolved)
+    return deleted
 
 
 def _status_from_string(value: str) -> JobPostStatus:
@@ -631,6 +673,124 @@ async def archive_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) 
         status=job.status.value,
         updated_at=job.updated_at or _utcnow(),
     )
+
+
+# Permanently delete a Job Post and all job-scoped related records.
+@router.delete("/{job_id}/permanent", response_model=JobPostDeleteResponse)
+async def delete_job_permanently(
+    job_id: UUID,
+    db: AsyncSession = Depends(get_db_session),
+) -> JobPostDeleteResponse:
+    """Permanently delete a Job Post and all job-scoped related records."""
+    job_stmt = select(JobPost).where(JobPost.id == job_id)
+    job = (await db.execute(job_stmt)).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    resume_ids = (
+        (await db.execute(select(Resume.id).where(Resume.job_post_id == job_id)))
+        .scalars()
+        .all()
+    )
+    resume_file_paths = list(
+        dict.fromkeys(
+            (
+                await db.execute(
+                    select(Resume.file_path).where(Resume.job_post_id == job_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    )
+    scoring_result_ids: list[UUID] = []
+    if resume_ids:
+        scoring_result_ids = (
+            (
+                await db.execute(
+                    select(ScoringResult.id).where(
+                        ScoringResult.resume_id.in_(resume_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    deleted_at = _utcnow()
+    deleted_counts: dict[str, int] = {}
+
+    try:
+        # Score rows must be removed before their parent recalc jobs and resumes.
+        deleted_counts["candidate_match_scores"] = await _delete_rows(
+            db,
+            delete(CandidateMatchScore).where(
+                CandidateMatchScore.job_post_id == job_id
+            ),
+        )
+        deleted_counts["matching_recalc_jobs"] = await _delete_rows(
+            db,
+            delete(MatchingRecalcJob).where(
+                MatchingRecalcJob.job_post_id == job_id
+            ),
+        )
+
+        if scoring_result_ids:
+            # Feedback logs reference scoring results, so remove them first.
+            deleted_counts["feedback_logs"] = await _delete_rows(
+                db,
+                delete(FeedbackLog).where(
+                    FeedbackLog.scoring_result_id.in_(scoring_result_ids)
+                ),
+            )
+            deleted_counts["scoring_results"] = await _delete_rows(
+                db,
+                delete(ScoringResult).where(
+                    ScoringResult.id.in_(scoring_result_ids)
+                ),
+            )
+        else:
+            deleted_counts["feedback_logs"] = 0
+            deleted_counts["scoring_results"] = 0
+
+        if resume_ids:
+            deleted_counts["extracted_data"] = await _delete_rows(
+                db,
+                delete(ExtractedData).where(
+                    ExtractedData.resume_id.in_(resume_ids)
+                ),
+            )
+        else:
+            deleted_counts["extracted_data"] = 0
+
+        deleted_counts["resumes"] = await _delete_rows(
+            db,
+            delete(Resume).where(Resume.job_post_id == job_id),
+        )
+        deleted_counts["jd_parser_history"] = await _delete_rows(
+            db,
+            delete(JDParserHistory).where(JDParserHistory.job_post_id == job_id),
+        )
+        deleted_counts["job_posts"] = await _delete_rows(
+            db,
+            delete(JobPost).where(JobPost.id == job_id),
+        )
+
+        await db.commit()
+        deleted_files = await asyncio.to_thread(
+            _delete_uploaded_files, resume_file_paths
+        )
+        return JobPostDeleteResponse(
+            version=settings.app_version,
+            id=job_id,
+            deleted_at=deleted_at,
+            deleted_counts=deleted_counts,
+            deleted_files=deleted_files,
+        )
+    except Exception as exc:
+        logger.exception("Failed to permanently delete job post %s.", job_id)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete job post.") from exc
 
 
 @router.post("/{job_id}/duplicate", response_model=JobPostDuplicateResponse)

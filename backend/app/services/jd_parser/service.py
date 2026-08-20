@@ -30,6 +30,8 @@ from app.services.jd_parser.providers import (
 _TAXONOMY_PATH = "data/taxonomy/skill_taxonomy.yaml"
 # Taxonomy category whose nodes are languages, not job skills.
 _LANGUAGE_CATEGORY = "languages"
+# Maximum skills kept in each must/preferred bucket after extraction or LLM refine.
+MAX_SKILLS_PER_BUCKET = 10
 # Rank used to keep the strongest stated language level.
 _LANGUAGE_LEVEL_RANK = {"basic": 0, "business": 1, "fluent": 2, "native": 3}
 # CJK and common aliases not always present on taxonomy language nodes.
@@ -165,7 +167,15 @@ class JDParserService:
     RESPONSIBILITY_SECTION_MARKERS = ("responsibilit", "what you will do", "you will")
 
     MUST_CUES = ("must", "required", "mandatory", "need to", "at least")
-    PREFERRED_CUES = ("preferred", "nice to have", "plus", "bonus", "good to have")
+    PREFERRED_CUES = (
+        "preferred",
+        "nice to have",
+        "plus",
+        "bonus",
+        "good to have",
+        "familiarity with",
+        "familiar with",
+    )
     IGNORE_LINE_CUES = (
         "equal opportunity",
         "about us",
@@ -208,13 +218,17 @@ class JDParserService:
 
         if not must or not preferred:
             combined = must_scores + preferred_scores
-            ranked_all = self._rank_skills(combined, excluded=set(must + preferred), limit=10)
+            ranked_all = self._rank_skills(
+                combined,
+                excluded=set(must + preferred),
+                limit=MAX_SKILLS_PER_BUCKET * 2,
+            )
             if not must:
-                must = ranked_all[:5]
+                must = ranked_all[:MAX_SKILLS_PER_BUCKET]
             if not preferred:
-                preferred = ranked_all[:5]
+                preferred = ranked_all[:MAX_SKILLS_PER_BUCKET]
 
-        return must[:5], preferred[:5]
+        return must[:MAX_SKILLS_PER_BUCKET], preferred[:MAX_SKILLS_PER_BUCKET]
 
     def _clean_text(self, text: str) -> str:
         squashed = re.sub(r"[ \t]+", " ", text or "")
@@ -307,6 +321,7 @@ class JDParserService:
         cleaned = self.TOKEN_CLEAN_RE.sub(" ", raw.lower()).strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
         cleaned = re.sub(r"^(with|in|on|of)\s+", "", cleaned)
+        cleaned = cleaned.strip(" .,:;")
         if not cleaned:
             return None
         if len(cleaned) < 2 or len(cleaned.split()) > 4:
@@ -317,13 +332,14 @@ class JDParserService:
             return None
         return alias_to_canonical.get(cleaned, cleaned)
 
-    def _rank_skills(self, scores: Counter[str], excluded: set[str] | None = None, limit: int = 5) -> list[str]:
+    def _rank_skills(self, scores: Counter[str], excluded: set[str] | None = None, limit: int | None = None) -> list[str]:
         excluded = excluded or set()
+        bucket_limit = limit if limit is not None else MAX_SKILLS_PER_BUCKET
         ranked = sorted(
             ((skill, score) for skill, score in scores.items() if skill not in excluded),
             key=lambda item: (-item[1], item[0]),
         )
-        return [skill for skill, _ in ranked[:limit]]
+        return [skill for skill, _ in ranked[:bucket_limit]]
 
     def _is_language_value(self, value: str) -> bool:
         """Return True when a token or skill name is a spoken/written language."""
@@ -410,6 +426,39 @@ class JDParserService:
         for idx, item in enumerate(kept, start=1):
             item["priority_order"] = idx
         return kept
+
+    @staticmethod
+    def _skill_bucket_key(item: dict[str, Any]) -> str:
+        """Return the canonical key used to dedupe skill items across buckets."""
+        return str(item.get("canonical_skill") or item.get("extracted_name") or "").strip().casefold()
+
+    def _backfill_refined_skills(
+        self,
+        structured_data: dict[str, Any],
+        rule_must: list[dict[str, Any]],
+        rule_preferred: list[dict[str, Any]],
+    ) -> None:
+        """Restore rule-extracted skills that LLM refinement dropped from either bucket."""
+        must = list(structured_data.get("must_skills") or [])
+        preferred = list(structured_data.get("preferred_skills") or [])
+        seen = {key for key in (self._skill_bucket_key(item) for item in must + preferred) if key}
+
+        def append_missing(bucket: list[dict[str, Any]], source: list[dict[str, Any]]) -> None:
+            for item in source:
+                key = self._skill_bucket_key(item)
+                if not key or key in seen or len(bucket) >= MAX_SKILLS_PER_BUCKET:
+                    continue
+                bucket.append(dict(item))
+                seen.add(key)
+
+        append_missing(must, rule_must)
+        append_missing(preferred, rule_preferred)
+        for idx, item in enumerate(must, start=1):
+            item["priority_order"] = idx
+        for idx, item in enumerate(preferred, start=1):
+            item["priority_order"] = idx
+        structured_data["must_skills"] = must[:MAX_SKILLS_PER_BUCKET]
+        structured_data["preferred_skills"] = preferred[:MAX_SKILLS_PER_BUCKET]
 
     def _needles_for_language(self, language: str) -> list[str]:
         """Collect display name and aliases used to locate a language mention."""
@@ -722,8 +771,11 @@ class JDParserService:
             if result.succeeded:
                 parse_path = f"jd_{provider.name}_parser"
                 if result.must_skills or result.preferred_skills:
+                    rule_must = structured_data["must_skills"]
+                    rule_preferred = structured_data["preferred_skills"]
                     structured_data["must_skills"] = self._drop_language_skill_items(result.must_skills)
                     structured_data["preferred_skills"] = self._drop_language_skill_items(result.preferred_skills)
+                    self._backfill_refined_skills(structured_data, rule_must, rule_preferred)
                 if result.jd_overview:
                     structured_data["jd_overview"] = result.jd_overview
             else:

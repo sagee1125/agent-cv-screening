@@ -80,8 +80,8 @@ def build_refined_skill_items(
             },
         }
 
-    must_items = [build_item(name, idx + 1, 1.0) for idx, name in enumerate(must_names[:5])]
+    must_items = [build_item(name, idx + 1, 1.0) for idx, name in enumerate(must_names[:10])]
     must_set = {name.strip().lower() for name in must_names}
-    kept_preferred = [name for name in preferred_names if name.strip().lower() not in must_set][:5]
+    kept_preferred = [name for name in preferred_names if name.strip().lower() not in must_set][:10]
     preferred_items = [build_item(name, idx + 1, 0.6) for idx, name in enumerate(kept_preferred)]
     return must_items, preferred_items

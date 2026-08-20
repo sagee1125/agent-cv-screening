@@ -111,3 +111,19 @@ Requirements:
     assert "content marketing" in skills
     assert "communication" in skills
     assert "teamwork" in skills
+
+
+@pytest.mark.asyncio
+async def test_rule_parser_extracts_frontend_and_database_stack() -> None:
+    """Soft frontend familiarity lines map to preferred; API/DB lines map to must."""
+    jd = """Familiarity with frontend technologies: React, JavaScript/TypeScript, HTML/CSS.
+Experience building RESTful APIs and working with relational databases (PostgreSQL, MySQL).
+Experience with Flask and Git."""
+    service = JDParserService()
+    result = await service.parse_jd(jd)
+    data = result["structured_data"]
+    must = {item["display_name"].lower() for item in data["must_skills"]}
+    preferred = {item["display_name"].lower() for item in data["preferred_skills"]}
+    assert {"flask", "git", "mysql", "postgresql", "rest api"} <= must
+    assert {"css", "html", "javascript", "react", "typescript"} <= preferred
+    assert must.isdisjoint(preferred)

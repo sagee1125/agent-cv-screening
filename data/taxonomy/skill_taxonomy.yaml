@@ -143,7 +143,7 @@
   parent: null
 - skill: REST API
   category: Software Development
-  synonyms: [rest api, restful api, restful, rest]
+  synonyms: [rest api, restful api, restful apis, restful, rest]
   parent: null
 - skill: GraphQL
   category: Software Development

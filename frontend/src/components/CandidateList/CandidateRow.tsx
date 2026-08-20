@@ -12,6 +12,7 @@ export function CandidateRow({ candidate }: CandidateRowProps) {
   const [expanded, setExpanded] = useState(false);
   const matchScore = candidate.matchScore ?? 0;
   const progressWidth = `${Math.max(0, Math.min(100, matchScore))}%`;
+  const fitLevel = candidate.fitBand ?? candidate.fitLevel;
 
   return (
     <div className="rounded-md border border-slate-200 p-3">
@@ -27,7 +28,7 @@ export function CandidateRow({ candidate }: CandidateRowProps) {
               <div className="h-2 rounded-full bg-sky-500" style={{ width: progressWidth }} />
             </div>
           </div>
-          {candidate.fitLevel ? <FitLevelBadge fitLevel={candidate.fitLevel} /> : null}
+          {fitLevel ? <FitLevelBadge fitLevel={fitLevel} /> : null}
           <Button size="sm" variant="outline" onClick={() => setExpanded((prev) => !prev)}>
             {expanded ? "Hide" : "Breakdown"}
           </Button>

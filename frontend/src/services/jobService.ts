@@ -7,6 +7,10 @@ import {
   toJobPost,
   toPolyUCatalogItem,
 } from "../utils/jdParsedConvert";
+import {
+  convertCandidateMatchDetail,
+  type BackendCandidateMatchDetail,
+} from "../utils/matching";
 import type {
   BackendCandidateRow,
   BackendJob,
@@ -14,6 +18,7 @@ import type {
 } from "../utils/jdParsedConvert";
 import type {
   CandidateListResponse,
+  CandidateMatchDetail,
   ChannelAnalyticsResponse,
   JDDiagnosisResponse,
   JDParsedPayload,
@@ -124,6 +129,29 @@ export async function deleteJobPost(
     `/jobs/${jobId}`
   );
   return { id: response.id, deletedAt: response.updated_at };
+}
+
+/** Permanently deletes a job post and all of its job-scoped related data. */
+export async function permanentlyDeleteJobPost(
+  jobId: string
+): Promise<{
+  id: string;
+  deletedAt: string;
+  deletedCounts: Record<string, number>;
+  deletedFiles: number;
+}> {
+  const response = await apiDelete<{
+    id: string;
+    deleted_at: string;
+    deleted_counts: Record<string, number>;
+    deleted_files: number;
+  }>(`/jobs/${jobId}/permanent`);
+  return {
+    id: response.id,
+    deletedAt: response.deleted_at,
+    deletedCounts: response.deleted_counts,
+    deletedFiles: response.deleted_files,
+  };
 }
 
 /** Duplicates a job post and returns the new job id. */
@@ -297,6 +325,17 @@ export async function importPolyUJob(
     job: toJobPost(response.job),
     parseError: response.parse_error,
   };
+}
+
+/** Fetches one candidate's complete matching detail payload for the modal. */
+export async function getCandidateMatchDetail(
+  jobId: string,
+  candidateId: string
+): Promise<CandidateMatchDetail> {
+  const response = await apiGet<BackendCandidateMatchDetail>(
+    `/jobs/${jobId}/matching/candidates/${candidateId}`
+  );
+  return convertCandidateMatchDetail(response);
 }
 
 /** Uploads a single PDF CV to the backend parsing endpoint, linked to the given job. */

@@ -226,6 +226,12 @@ class JobPostMutationResponse(VersionedResponse):
     status: str
     updated_at: datetime
 
+class JobPostDeleteResponse(VersionedResponse):
+    id: UUID
+    deleted_at: datetime
+    deleted_counts: dict[str, int]
+    deleted_files: int = 0
+
 
 class JobPostDuplicateResponse(VersionedResponse):
     new_job_id: UUID
