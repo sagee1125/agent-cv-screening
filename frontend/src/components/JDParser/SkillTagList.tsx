@@ -62,7 +62,7 @@ export function SkillTagList({ jdParsed }: SkillTagListProps) {
         </div>
       </section>
       <section className="space-y-2 flex flex-wrap gap-2 items-start text-sm font-semibold">
-        Language Requirements
+        Language Requirements:
         <div className="flex flex-wrap gap-2">
           {languageRequirements.map((language) => (
             <SourceBadge

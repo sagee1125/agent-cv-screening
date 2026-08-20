@@ -2694,7 +2694,11 @@
   parent: null
 - skill: Chinese
   category: Languages
-  synonyms: [chinese, mandarin, putonghua, mandarin chinese]
+  synonyms: [chinese, chinese language]
+  parent: null
+- skill: Mandarin
+  category: Languages
+  synonyms: [mandarin, putonghua, mandarin chinese]
   parent: null
 - skill: Cantonese
   category: Languages

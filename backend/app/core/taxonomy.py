@@ -22,12 +22,14 @@ class SkillTaxonomyLoader:
         self.nodes: dict[str, SkillNode] = {}
         self.synonym_to_skill: dict[str, str] = {}
         self.children_map: dict[str, set[str]] = {}
+        self._nodes_by_lower: dict[str, SkillNode] = {}
 
     def load(self) -> None:
         payload = yaml.safe_load(self.yaml_path.read_text(encoding="utf-8")) or []
         self.nodes.clear()
         self.synonym_to_skill.clear()
         self.children_map.clear()
+        self._nodes_by_lower.clear()
 
         for item in payload:
             skill_name = str(item["skill"]).strip()
@@ -38,6 +40,7 @@ class SkillTaxonomyLoader:
                 parent=item.get("parent"),
             )
             self.nodes[skill_name] = node
+            self._nodes_by_lower[skill_name.casefold()] = node
             self._index_synonym(skill_name, skill_name)
             for synonym in node.synonyms:
                 self._index_synonym(synonym, skill_name)
@@ -55,15 +58,18 @@ class SkillTaxonomyLoader:
 
     def ancestors(self, skill_name: str) -> set[str]:
         ancestors: set[str] = set()
-        current = self.nodes.get(skill_name)
+        current = self._node_for(skill_name)
         while current and current.parent:
             ancestors.add(current.parent)
-            current = self.nodes.get(current.parent)
+            current = self._node_for(current.parent)
         return ancestors
 
     def descendants(self, skill_name: str) -> set[str]:
         collected: set[str] = set()
-        pending = list(self.children_map.get(skill_name, set()))
+        node = self._node_for(skill_name)
+        if not node:
+            return collected
+        pending = list(self.children_map.get(node.skill, set()))
         while pending:
             child = pending.pop()
             if child in collected:
@@ -76,3 +82,10 @@ class SkillTaxonomyLoader:
         if left == right:
             return True
         return right in self.ancestors(left) or right in self.descendants(left)
+
+    # Case-insensitive node lookup so lowercased canonical ids still resolve.
+    def _node_for(self, skill_name: str) -> SkillNode | None:
+        if not skill_name:
+            return None
+        key = skill_name.casefold()
+        return self._nodes_by_lower.get(key)
