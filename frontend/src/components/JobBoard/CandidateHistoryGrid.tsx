@@ -45,7 +45,10 @@ export function CandidateHistoryGrid({
   return (
     <div className="flex flex-wrap gap-4">
       {candidates.map((candidate) => (
-        <Card key={candidate.resumeId ?? candidate.candidateId} className="w-80 shrink-0">
+        <Card
+          key={candidate.resumeId ?? candidate.candidateId}
+          className="w-80 shrink-0"
+        >
           <CardHeader className="space-y-2">
             <div className="flex items-start justify-between gap-2">
               <CardTitle className="text-sm break-all">
@@ -72,7 +75,9 @@ export function CandidateHistoryGrid({
                 {JSON.stringify(candidate.extractedData, null, 2)}
               </pre>
             ) : (
-              <p className="text-xs text-slate-500">No parsed data available.</p>
+              <p className="text-xs text-slate-500">
+                No parsed data available.
+              </p>
             )}
           </CardContent>
         </Card>

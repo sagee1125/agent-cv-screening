@@ -11,14 +11,14 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import get_db_session, get_jd_parser_service
 from app.config import settings
-from app.models.database import JobPost, JobPostStatus, Resume
+from app.models.database import CandidateMatchScore, JobPost, JobPostStatus, Resume
 from app.models.schemas import (
     JDParseRequest,
     JDParseResponse,
@@ -330,11 +330,40 @@ async def get_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) -> J
     )
 
 
+# Resolve the candidate-level score state from the current published job version.
+def _candidate_scoring_status(
+    job: JobPost,
+    score: CandidateMatchScore | None,
+) -> str:
+    if score is None:
+        return "failed" if job.matching_status == "failed" else "unscored"
+    if job.matching_status == "ready":
+        return "ready"
+    return "stale"
+
+
+# Convert stored radar dimensions into the compact list response map.
+def _radar_summary(dimensions: list[dict[str, Any]] | dict[str, Any]) -> dict[str, float | None]:
+    if not isinstance(dimensions, list):
+        return {}
+    return {
+        str(item.get("dimension_id")): (
+            float(item["score"]) if item.get("score") is not None else None
+        )
+        for item in dimensions
+        if isinstance(item, dict) and item.get("dimension_id")
+    }
+
+
 @router.get("/{job_id}/candidates", response_model=JobCandidateListResponse)
 async def list_job_candidates(
     job_id: UUID,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
+    fit_band: str | None = Query(default=None),
+    eligibility_status: str | None = Query(default=None),
+    scoring_status: str | None = Query(default=None),
+    sort: str = Query(default="recommendation"),
     db: AsyncSession = Depends(get_db_session),
 ) -> JobCandidateListResponse:
     job_stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
@@ -342,37 +371,102 @@ async def list_job_candidates(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    total_stmt = select(func.count(Resume.id)).where(Resume.job_post_id == job_id)
+    if sort != "recommendation":
+        raise HTTPException(status_code=400, detail="Invalid sort, expected recommendation.")
+    if fit_band not in {None, "high", "medium", "low"}:
+        raise HTTPException(status_code=400, detail="Invalid fit_band.")
+    if eligibility_status not in {None, "passed", "needs_review", "failed"}:
+        raise HTTPException(status_code=400, detail="Invalid eligibility_status.")
+    if scoring_status not in {None, "unscored", "ready", "stale", "failed"}:
+        raise HTTPException(status_code=400, detail="Invalid scoring_status.")
+
+    score_join = and_(
+        CandidateMatchScore.job_post_id == job_id,
+        CandidateMatchScore.candidate_id == Resume.candidate_id,
+        CandidateMatchScore.score_version == job.current_score_version,
+        CandidateMatchScore.is_published.is_(True),
+    )
+    filters = [Resume.job_post_id == job_id]
+    if fit_band:
+        filters.append(CandidateMatchScore.fit_band == fit_band)
+    if eligibility_status:
+        filters.append(CandidateMatchScore.eligibility_status == eligibility_status)
+
+    has_stale_scores = job.current_score_version > 0 and job.matching_status != "ready"
+    if scoring_status == "ready":
+        filters.append(CandidateMatchScore.id.is_not(None))
+        if job.matching_status != "ready":
+            filters.append(false())
+    elif scoring_status == "stale":
+        filters.append(CandidateMatchScore.id.is_not(None))
+        if not has_stale_scores:
+            filters.append(false())
+    elif scoring_status == "unscored":
+        filters.append(CandidateMatchScore.id.is_(None))
+        if job.matching_status == "failed":
+            filters.append(false())
+    elif scoring_status == "failed":
+        filters.append(CandidateMatchScore.id.is_(None))
+        if job.matching_status != "failed":
+            filters.append(false())
+
+    total_stmt = (
+        select(func.count(Resume.id))
+        .outerjoin(CandidateMatchScore, score_join)
+        .where(*filters)
+    )
     total = (await db.execute(total_stmt)).scalar_one()
     offset = (page - 1) * limit
     rows_stmt = (
-        select(Resume)
-        .where(Resume.job_post_id == job_id)
+        select(Resume, CandidateMatchScore)
+        .outerjoin(CandidateMatchScore, score_join)
+        .where(*filters)
         .options(
             selectinload(Resume.candidate),
             selectinload(Resume.extracted_data),
         )
-        .order_by(Resume.uploaded_at.desc())
+        .order_by(
+            CandidateMatchScore.recommendation_rank.asc().nulls_last(),
+            Resume.candidate_id.asc(),
+        )
         .offset(offset)
         .limit(limit)
     )
-    rows = (await db.execute(rows_stmt)).scalars().all()
+    rows = (await db.execute(rows_stmt)).all()
 
     return JobCandidateListResponse(
         version=settings.app_version,
+        schema_version=settings.matching_schema_version,
+        job_post_id=job.id,
+        score_version=job.current_score_version,
+        scoring_status=job.matching_status,
+        stale=has_stale_scores,
         items=[
             JobCandidateSummaryItem(
-                candidate_id=row.candidate_id,
-                resume_id=row.id,
-                candidate_name=row.candidate.name if row.candidate else None,
-                candidate_email=row.candidate.email if row.candidate else None,
-                original_filename=row.original_filename,
-                source_channel=row.source_channel,
-                cv_parse_status=(row.extracted_data.status if row.extracted_data else "pending"),
-                extracted_data=(row.extracted_data.structured_data if row.extracted_data else None),
-                uploaded_at=row.uploaded_at,
+                candidate_id=resume.candidate_id,
+                resume_id=resume.id,
+                candidate_name=resume.candidate.name if resume.candidate else None,
+                candidate_email=resume.candidate.email if resume.candidate else None,
+                original_filename=resume.original_filename,
+                source_channel=resume.source_channel,
+                cv_parse_status=(
+                    resume.extracted_data.status if resume.extracted_data else "pending"
+                ),
+                candidate_scoring_status=_candidate_scoring_status(job, score),
+                recommendation_rank=score.recommendation_rank if score else None,
+                match_score=float(score.total_score) if score else None,
+                fit_band=score.fit_band if score else None,
+                eligibility_status=score.eligibility_status if score else None,
+                evidence_confidence=float(score.evidence_confidence) if score else None,
+                top_strengths=list(score.top_strengths or []) if score else [],
+                key_gaps=list(score.key_gaps or []) if score else [],
+                radar_summary=_radar_summary(score.dimension_results if score else []),
+                extracted_data=(
+                    resume.extracted_data.structured_data if resume.extracted_data else None
+                ),
+                uploaded_at=resume.uploaded_at,
             )
-            for row in rows
+            for resume, score in rows
         ],
         total=total,
         page=page,
@@ -459,7 +553,11 @@ async def update_job(
     payload: JobPostUpdateRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> JobPostItemResponse:
-    stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+    stmt = (
+        select(JobPost)
+        .where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+        .with_for_update()
+    )
     job = (await db.execute(stmt)).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -469,6 +567,7 @@ async def update_job(
             job.title = payload.title.strip()
         if payload.description is not None:
             job.description = _normalize_description(payload.description)
+            job.matching_status = "stale" if job.current_score_version > 0 else "unscored"
         if payload.head_count is not None:
             job.head_count = payload.head_count
         if payload.start_date is not None:
@@ -550,6 +649,7 @@ async def duplicate_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)
         closed_date=None,
         jd_parsed_json=source.jd_parsed_json or {},
         weight_config_json=source.weight_config_json or {},
+        matching_config_json=source.matching_config_json or {},
     )
     db.add(duplicated)
     await db.commit()
@@ -587,9 +687,18 @@ async def parse_jd(
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=422, detail=parse_result.get("error_message", "Failed to parse JD."))
 
+    locked_stmt = (
+        select(JobPost)
+        .where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+        .with_for_update()
+    )
+    job = (await db.execute(locked_stmt)).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
     job.description = _normalize_description(payload.jd_text)
     job.jd_parsed_json = parsed
     job.weight_config_json = _default_weight_config(parsed)
+    job.matching_status = "stale" if job.current_score_version > 0 else "unscored"
     job.updated_at = _utcnow()
     await db.commit()
     await db.refresh(job)

@@ -246,11 +246,25 @@ class JobCandidateSummaryItem(BaseModel):
     original_filename: str
     source_channel: str
     cv_parse_status: str
+    candidate_scoring_status: str = "unscored"
+    recommendation_rank: int | None = None
+    match_score: float | None = None
+    fit_band: str | None = None
+    eligibility_status: str | None = None
+    evidence_confidence: float | None = None
+    top_strengths: list[str] = Field(default_factory=list)
+    key_gaps: list[str] = Field(default_factory=list)
+    radar_summary: dict[str, float | None] = Field(default_factory=dict)
     extracted_data: dict[str, Any] | None = None
     uploaded_at: datetime | None = None
 
 
 class JobCandidateListResponse(VersionedResponse):
+    schema_version: str = "1.0.0"
+    job_post_id: UUID
+    score_version: int
+    scoring_status: str
+    stale: bool
     items: list[JobCandidateSummaryItem]
     total: int
     page: int

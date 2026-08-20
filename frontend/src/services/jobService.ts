@@ -158,14 +158,27 @@ export async function updateJobWeight(
   });
 }
 
-/** Triggers a rescore job after weight changes. */
+export type MatchingRecalculationTrigger =
+  | "manual"
+  | "cv_uploaded"
+  | "jd_updated"
+  | "config_updated"
+  | "retry";
+
+/** Triggers one candidate matching recalculation for a job. */
 export async function recalculateJob(
-  jobId: string
+  jobId: string,
+  trigger: MatchingRecalculationTrigger = "manual",
+  reason?: string
 ): Promise<{ recalcJobId: string; status: string }> {
-  return apiPost<{ recalcJobId: string; status: string }>(
-    `/jobs/${jobId}/recalculate`,
-    { reason: "weight_updated" }
-  );
+  const response = await apiPost<{
+    recalc_job_id: string;
+    status: string;
+  }>(`/jobs/${jobId}/recalculate`, { trigger, reason: reason ?? null });
+  return {
+    recalcJobId: response.recalc_job_id,
+    status: response.status,
+  };
 }
 
 /** Parses JD text and returns frontend-shaped JD and weight payloads. */
@@ -179,7 +192,8 @@ export async function parseJobJD(
   }>(`/jobs/${jobId}/parse-jd`, { jd_text: jdText });
   return {
     jdParsedJson:
-      convertJdParsedPayload(response.jd_parsed_json) ?? EMPTY_JD_PARSED_PAYLOAD,
+      convertJdParsedPayload(response.jd_parsed_json) ??
+      EMPTY_JD_PARSED_PAYLOAD,
     weightConfigJson: response.weight_config_json,
   };
 }

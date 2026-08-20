@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -28,7 +29,20 @@ engine = create_async_engine(
 )
 AsyncSessionFactory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
-taxonomy_loader = SkillTaxonomyLoader("data/taxonomy/skill_taxonomy.yaml")
+# Resolve repo root for both monorepo checkout (parents[3]) and Docker /app mount (parents[2]).
+def _resolve_project_root() -> Path:
+    here = Path(__file__).resolve()
+    for candidate in (here.parents[2], here.parents[3]):
+        taxonomy_path = candidate / "data" / "taxonomy" / "skill_taxonomy.yaml"
+        if taxonomy_path.is_file():
+            return candidate
+    return here.parents[3]
+
+
+_PROJECT_ROOT = _resolve_project_root()
+taxonomy_loader = SkillTaxonomyLoader(
+    str(_PROJECT_ROOT / "data" / "taxonomy" / "skill_taxonomy.yaml")
+)
 taxonomy_loader.load()
 skill_matcher = SkillMatcherService(taxonomy_loader)
 scorer_service = ScorerService(skill_matcher)

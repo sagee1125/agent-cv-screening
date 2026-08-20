@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str
     app_version: str = "1.0.0"
+    matching_enabled: bool = True
+    matching_schema_version: str = "1.0.0"
+    matching_algorithm_version: str = "candidate-matching-v1"
+    matching_taxonomy_version: str = "skill-taxonomy-v1"
+    matching_recalc_timeout_seconds: int = 900
+    matching_recalc_debounce_seconds: int = 5
     cors_origins: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
