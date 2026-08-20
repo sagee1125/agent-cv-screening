@@ -7,6 +7,10 @@ import {
   toJobPost,
   toPolyUCatalogItem,
 } from "../utils/jdParsedConvert";
+import {
+  convertCandidateMatchDetail,
+  type BackendCandidateMatchDetail,
+} from "../utils/matching";
 import type {
   BackendCandidateRow,
   BackendJob,
@@ -14,6 +18,7 @@ import type {
 } from "../utils/jdParsedConvert";
 import type {
   CandidateListResponse,
+  CandidateMatchDetail,
   ChannelAnalyticsResponse,
   JDDiagnosisResponse,
   JDParsedPayload,
@@ -126,6 +131,29 @@ export async function deleteJobPost(
   return { id: response.id, deletedAt: response.updated_at };
 }
 
+/** Permanently deletes a job post and all of its job-scoped related data. */
+export async function permanentlyDeleteJobPost(
+  jobId: string
+): Promise<{
+  id: string;
+  deletedAt: string;
+  deletedCounts: Record<string, number>;
+  deletedFiles: number;
+}> {
+  const response = await apiDelete<{
+    id: string;
+    deleted_at: string;
+    deleted_counts: Record<string, number>;
+    deleted_files: number;
+  }>(`/jobs/${jobId}/permanent`);
+  return {
+    id: response.id,
+    deletedAt: response.deleted_at,
+    deletedCounts: response.deleted_counts,
+    deletedFiles: response.deleted_files,
+  };
+}
+
 /** Duplicates a job post and returns the new job id. */
 export async function duplicateJobPost(
   jobId: string
@@ -158,14 +186,27 @@ export async function updateJobWeight(
   });
 }
 
-/** Triggers a rescore job after weight changes. */
+export type MatchingRecalculationTrigger =
+  | "manual"
+  | "cv_uploaded"
+  | "jd_updated"
+  | "config_updated"
+  | "retry";
+
+/** Triggers one candidate matching recalculation for a job. */
 export async function recalculateJob(
-  jobId: string
+  jobId: string,
+  trigger: MatchingRecalculationTrigger = "manual",
+  reason?: string
 ): Promise<{ recalcJobId: string; status: string }> {
-  return apiPost<{ recalcJobId: string; status: string }>(
-    `/jobs/${jobId}/recalculate`,
-    { reason: "weight_updated" }
-  );
+  const response = await apiPost<{
+    recalc_job_id: string;
+    status: string;
+  }>(`/jobs/${jobId}/recalculate`, { trigger, reason: reason ?? null });
+  return {
+    recalcJobId: response.recalc_job_id,
+    status: response.status,
+  };
 }
 
 /** Parses JD text and returns frontend-shaped JD and weight payloads. */
@@ -179,7 +220,8 @@ export async function parseJobJD(
   }>(`/jobs/${jobId}/parse-jd`, { jd_text: jdText });
   return {
     jdParsedJson:
-      convertJdParsedPayload(response.jd_parsed_json) ?? EMPTY_JD_PARSED_PAYLOAD,
+      convertJdParsedPayload(response.jd_parsed_json) ??
+      EMPTY_JD_PARSED_PAYLOAD,
     weightConfigJson: response.weight_config_json,
   };
 }
@@ -283,6 +325,17 @@ export async function importPolyUJob(
     job: toJobPost(response.job),
     parseError: response.parse_error,
   };
+}
+
+/** Fetches one candidate's complete matching detail payload for the modal. */
+export async function getCandidateMatchDetail(
+  jobId: string,
+  candidateId: string
+): Promise<CandidateMatchDetail> {
+  const response = await apiGet<BackendCandidateMatchDetail>(
+    `/jobs/${jobId}/matching/candidates/${candidateId}`
+  );
+  return convertCandidateMatchDetail(response);
 }
 
 /** Uploads a single PDF CV to the backend parsing endpoint, linked to the given job. */

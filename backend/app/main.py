@@ -1,6 +1,7 @@
 # FastAPI application entry point, middleware, and startup hooks.
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -10,9 +11,15 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api.dependencies import AsyncSessionFactory, engine
-from app.api.routes import candidates, feedback, jobs, reports, scoring
+from app.api.matching_errors import MatchingAPIError, matching_api_error_handler
+from app.api.routes import candidates, feedback, jobs, matching, reports, scoring
 from app.config import settings
-from app.models.database import Base
+from app.services.matching_service import (
+    recover_recalculation_tasks,
+    run_recalculation_watchdog,
+    schedule_recalculation_task,
+    shutdown_recalculation_tasks,
+)
 from app.services.taxonomy_sync import sync_taxonomy_to_db
 
 logging.basicConfig(
@@ -20,12 +27,14 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+_matching_watchdog_task: asyncio.Task[None] | None = None
 
 app = FastAPI(
     title="Agent-CV-Screening API",
     description="AI-powered CV screening system with deterministic LLM parsing",
     version=settings.app_version,
 )
+app.add_exception_handler(MatchingAPIError, matching_api_error_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,18 +47,20 @@ app.add_middleware(
 app.include_router(candidates.router, prefix="/api/v1", tags=["candidates"])
 app.include_router(jobs.router, prefix="/api/v1", tags=["jobs"])
 app.include_router(scoring.router, prefix="/api/v1", tags=["scoring"])
+app.include_router(matching.router, prefix="/api/v1", tags=["candidate-matching"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 app.include_router(feedback.router, prefix="/api/v1", tags=["feedback"])
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Create local folders, tables, and any additive PolyU sync columns."""
+    """Initialize local resources and recover persisted background work."""
+    global _matching_watchdog_task
+
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.report_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.cache_dir).mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
         await _ensure_polyu_sync_columns(conn)
         await _ensure_resume_job_columns(conn)
 
@@ -57,7 +68,30 @@ async def startup_event() -> None:
     async with AsyncSessionFactory() as session:
         counts = await sync_taxonomy_to_db(session)
         logger.info("Skill taxonomy synced: %s", counts)
+    if settings.matching_enabled:
+        async with AsyncSessionFactory() as session:
+            pending_recalculations = await recover_recalculation_tasks(session)
+        for recalc_job_id in pending_recalculations:
+            schedule_recalculation_task(recalc_job_id)
+        _matching_watchdog_task = asyncio.create_task(run_recalculation_watchdog())
+        if pending_recalculations:
+            logger.info(
+                "Recovered %d pending candidate matching recalculation(s).",
+                len(pending_recalculations),
+            )
     logger.info("Application startup complete.")
+
+
+# Stop the watchdog and local recalculation tasks during graceful shutdown.
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    global _matching_watchdog_task
+
+    if _matching_watchdog_task is not None:
+        _matching_watchdog_task.cancel()
+        await asyncio.gather(_matching_watchdog_task, return_exceptions=True)
+        _matching_watchdog_task = None
+    await shutdown_recalculation_tasks()
 
 
 async def _ensure_polyu_sync_columns(connection) -> None:

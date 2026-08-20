@@ -43,6 +43,14 @@ export type BackendCandidateRow = {
   match_score?: number;
   fit_level?: "high" | "medium" | "low";
   score_breakdown?: CandidateSummary["scoreBreakdown"];
+  candidate_scoring_status?: CandidateSummary["candidateScoringStatus"];
+  recommendation_rank?: number | null;
+  fit_band?: CandidateSummary["fitBand"];
+  eligibility_status?: CandidateSummary["eligibilityStatus"];
+  evidence_confidence?: number | null;
+  top_strengths?: string[];
+  key_gaps?: string[];
+  radar_summary?: CandidateSummary["radarSummary"];
 };
 
 /** Backend PolyU catalog item from /jobs/sync-polyu/catalog. */
@@ -273,6 +281,14 @@ export function toCandidateSummary(
     matchScore: item.match_score,
     fitLevel: item.fit_level,
     scoreBreakdown: item.score_breakdown,
+    candidateScoringStatus: item.candidate_scoring_status,
+    recommendationRank: item.recommendation_rank ?? null,
+    fitBand: item.fit_band ?? null,
+    eligibilityStatus: item.eligibility_status ?? null,
+    evidenceConfidence: item.evidence_confidence ?? null,
+    topStrengths: item.top_strengths ?? [],
+    keyGaps: item.key_gaps ?? [],
+    radarSummary: item.radar_summary ?? {},
   };
 }
 

@@ -4,21 +4,33 @@
 # calls .codex/skills/jd-parser/scripts/run_jd_parse.py directly instead.
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import get_db_session, get_jd_parser_service
 from app.config import settings
-from app.models.database import JobPost, JobPostStatus, Resume
+from app.models.database import (
+    CandidateMatchScore,
+    ExtractedData,
+    FeedbackLog,
+    JDParserHistory,
+    JobPost,
+    JobPostStatus,
+    MatchingRecalcJob,
+    Resume,
+    ScoringResult,
+)
 from app.models.schemas import (
     JDParseRequest,
     JDParseResponse,
@@ -30,6 +42,7 @@ from app.models.schemas import (
     JobDiagnosisResponse,
     JobPostCreateRequest,
     JobPostDetailResponse,
+    JobPostDeleteResponse,
     JobPostDuplicateResponse,
     JobPostItemResponse,
     JobPostListResponse,
@@ -57,6 +70,35 @@ logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# Execute a SQLAlchemy delete statement and return the number of affected rows.
+async def _delete_rows(db: AsyncSession, statement: Any) -> int:
+    result = await db.execute(statement)
+    return max(int(result.rowcount or 0), 0)
+
+
+# Remove uploaded CV files that live under the configured upload directory.
+def _delete_uploaded_files(file_paths: list[str]) -> int:
+    upload_root = Path(settings.upload_dir).resolve()
+    deleted = 0
+    for value in file_paths:
+        if not value:
+            continue
+        path = Path(value)
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        # Never delete files outside the configured upload directory or non-files.
+        if not resolved.is_relative_to(upload_root) or not resolved.is_file():
+            continue
+        try:
+            resolved.unlink()
+            deleted += 1
+        except OSError:
+            logger.exception("Failed to remove uploaded CV file %s.", resolved)
+    return deleted
 
 
 def _status_from_string(value: str) -> JobPostStatus:
@@ -330,11 +372,40 @@ async def get_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) -> J
     )
 
 
+# Resolve the candidate-level score state from the current published job version.
+def _candidate_scoring_status(
+    job: JobPost,
+    score: CandidateMatchScore | None,
+) -> str:
+    if score is None:
+        return "failed" if job.matching_status == "failed" else "unscored"
+    if job.matching_status == "ready":
+        return "ready"
+    return "stale"
+
+
+# Convert stored radar dimensions into the compact list response map.
+def _radar_summary(dimensions: list[dict[str, Any]] | dict[str, Any]) -> dict[str, float | None]:
+    if not isinstance(dimensions, list):
+        return {}
+    return {
+        str(item.get("dimension_id")): (
+            float(item["score"]) if item.get("score") is not None else None
+        )
+        for item in dimensions
+        if isinstance(item, dict) and item.get("dimension_id")
+    }
+
+
 @router.get("/{job_id}/candidates", response_model=JobCandidateListResponse)
 async def list_job_candidates(
     job_id: UUID,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
+    fit_band: str | None = Query(default=None),
+    eligibility_status: str | None = Query(default=None),
+    scoring_status: str | None = Query(default=None),
+    sort: str = Query(default="recommendation"),
     db: AsyncSession = Depends(get_db_session),
 ) -> JobCandidateListResponse:
     job_stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
@@ -342,37 +413,102 @@ async def list_job_candidates(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    total_stmt = select(func.count(Resume.id)).where(Resume.job_post_id == job_id)
+    if sort != "recommendation":
+        raise HTTPException(status_code=400, detail="Invalid sort, expected recommendation.")
+    if fit_band not in {None, "high", "medium", "low"}:
+        raise HTTPException(status_code=400, detail="Invalid fit_band.")
+    if eligibility_status not in {None, "passed", "needs_review", "failed"}:
+        raise HTTPException(status_code=400, detail="Invalid eligibility_status.")
+    if scoring_status not in {None, "unscored", "ready", "stale", "failed"}:
+        raise HTTPException(status_code=400, detail="Invalid scoring_status.")
+
+    score_join = and_(
+        CandidateMatchScore.job_post_id == job_id,
+        CandidateMatchScore.candidate_id == Resume.candidate_id,
+        CandidateMatchScore.score_version == job.current_score_version,
+        CandidateMatchScore.is_published.is_(True),
+    )
+    filters = [Resume.job_post_id == job_id]
+    if fit_band:
+        filters.append(CandidateMatchScore.fit_band == fit_band)
+    if eligibility_status:
+        filters.append(CandidateMatchScore.eligibility_status == eligibility_status)
+
+    has_stale_scores = job.current_score_version > 0 and job.matching_status != "ready"
+    if scoring_status == "ready":
+        filters.append(CandidateMatchScore.id.is_not(None))
+        if job.matching_status != "ready":
+            filters.append(false())
+    elif scoring_status == "stale":
+        filters.append(CandidateMatchScore.id.is_not(None))
+        if not has_stale_scores:
+            filters.append(false())
+    elif scoring_status == "unscored":
+        filters.append(CandidateMatchScore.id.is_(None))
+        if job.matching_status == "failed":
+            filters.append(false())
+    elif scoring_status == "failed":
+        filters.append(CandidateMatchScore.id.is_(None))
+        if job.matching_status != "failed":
+            filters.append(false())
+
+    total_stmt = (
+        select(func.count(Resume.id))
+        .outerjoin(CandidateMatchScore, score_join)
+        .where(*filters)
+    )
     total = (await db.execute(total_stmt)).scalar_one()
     offset = (page - 1) * limit
     rows_stmt = (
-        select(Resume)
-        .where(Resume.job_post_id == job_id)
+        select(Resume, CandidateMatchScore)
+        .outerjoin(CandidateMatchScore, score_join)
+        .where(*filters)
         .options(
             selectinload(Resume.candidate),
             selectinload(Resume.extracted_data),
         )
-        .order_by(Resume.uploaded_at.desc())
+        .order_by(
+            CandidateMatchScore.recommendation_rank.asc().nulls_last(),
+            Resume.candidate_id.asc(),
+        )
         .offset(offset)
         .limit(limit)
     )
-    rows = (await db.execute(rows_stmt)).scalars().all()
+    rows = (await db.execute(rows_stmt)).all()
 
     return JobCandidateListResponse(
         version=settings.app_version,
+        schema_version=settings.matching_schema_version,
+        job_post_id=job.id,
+        score_version=job.current_score_version,
+        scoring_status=job.matching_status,
+        stale=has_stale_scores,
         items=[
             JobCandidateSummaryItem(
-                candidate_id=row.candidate_id,
-                resume_id=row.id,
-                candidate_name=row.candidate.name if row.candidate else None,
-                candidate_email=row.candidate.email if row.candidate else None,
-                original_filename=row.original_filename,
-                source_channel=row.source_channel,
-                cv_parse_status=(row.extracted_data.status if row.extracted_data else "pending"),
-                extracted_data=(row.extracted_data.structured_data if row.extracted_data else None),
-                uploaded_at=row.uploaded_at,
+                candidate_id=resume.candidate_id,
+                resume_id=resume.id,
+                candidate_name=resume.candidate.name if resume.candidate else None,
+                candidate_email=resume.candidate.email if resume.candidate else None,
+                original_filename=resume.original_filename,
+                source_channel=resume.source_channel,
+                cv_parse_status=(
+                    resume.extracted_data.status if resume.extracted_data else "pending"
+                ),
+                candidate_scoring_status=_candidate_scoring_status(job, score),
+                recommendation_rank=score.recommendation_rank if score else None,
+                match_score=float(score.total_score) if score else None,
+                fit_band=score.fit_band if score else None,
+                eligibility_status=score.eligibility_status if score else None,
+                evidence_confidence=float(score.evidence_confidence) if score else None,
+                top_strengths=list(score.top_strengths or []) if score else [],
+                key_gaps=list(score.key_gaps or []) if score else [],
+                radar_summary=_radar_summary(score.dimension_results if score else []),
+                extracted_data=(
+                    resume.extracted_data.structured_data if resume.extracted_data else None
+                ),
+                uploaded_at=resume.uploaded_at,
             )
-            for row in rows
+            for resume, score in rows
         ],
         total=total,
         page=page,
@@ -459,7 +595,11 @@ async def update_job(
     payload: JobPostUpdateRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> JobPostItemResponse:
-    stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+    stmt = (
+        select(JobPost)
+        .where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+        .with_for_update()
+    )
     job = (await db.execute(stmt)).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -469,6 +609,7 @@ async def update_job(
             job.title = payload.title.strip()
         if payload.description is not None:
             job.description = _normalize_description(payload.description)
+            job.matching_status = "stale" if job.current_score_version > 0 else "unscored"
         if payload.head_count is not None:
             job.head_count = payload.head_count
         if payload.start_date is not None:
@@ -534,6 +675,124 @@ async def archive_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) 
     )
 
 
+# Permanently delete a Job Post and all job-scoped related records.
+@router.delete("/{job_id}/permanent", response_model=JobPostDeleteResponse)
+async def delete_job_permanently(
+    job_id: UUID,
+    db: AsyncSession = Depends(get_db_session),
+) -> JobPostDeleteResponse:
+    """Permanently delete a Job Post and all job-scoped related records."""
+    job_stmt = select(JobPost).where(JobPost.id == job_id)
+    job = (await db.execute(job_stmt)).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    resume_ids = (
+        (await db.execute(select(Resume.id).where(Resume.job_post_id == job_id)))
+        .scalars()
+        .all()
+    )
+    resume_file_paths = list(
+        dict.fromkeys(
+            (
+                await db.execute(
+                    select(Resume.file_path).where(Resume.job_post_id == job_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    )
+    scoring_result_ids: list[UUID] = []
+    if resume_ids:
+        scoring_result_ids = (
+            (
+                await db.execute(
+                    select(ScoringResult.id).where(
+                        ScoringResult.resume_id.in_(resume_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    deleted_at = _utcnow()
+    deleted_counts: dict[str, int] = {}
+
+    try:
+        # Score rows must be removed before their parent recalc jobs and resumes.
+        deleted_counts["candidate_match_scores"] = await _delete_rows(
+            db,
+            delete(CandidateMatchScore).where(
+                CandidateMatchScore.job_post_id == job_id
+            ),
+        )
+        deleted_counts["matching_recalc_jobs"] = await _delete_rows(
+            db,
+            delete(MatchingRecalcJob).where(
+                MatchingRecalcJob.job_post_id == job_id
+            ),
+        )
+
+        if scoring_result_ids:
+            # Feedback logs reference scoring results, so remove them first.
+            deleted_counts["feedback_logs"] = await _delete_rows(
+                db,
+                delete(FeedbackLog).where(
+                    FeedbackLog.scoring_result_id.in_(scoring_result_ids)
+                ),
+            )
+            deleted_counts["scoring_results"] = await _delete_rows(
+                db,
+                delete(ScoringResult).where(
+                    ScoringResult.id.in_(scoring_result_ids)
+                ),
+            )
+        else:
+            deleted_counts["feedback_logs"] = 0
+            deleted_counts["scoring_results"] = 0
+
+        if resume_ids:
+            deleted_counts["extracted_data"] = await _delete_rows(
+                db,
+                delete(ExtractedData).where(
+                    ExtractedData.resume_id.in_(resume_ids)
+                ),
+            )
+        else:
+            deleted_counts["extracted_data"] = 0
+
+        deleted_counts["resumes"] = await _delete_rows(
+            db,
+            delete(Resume).where(Resume.job_post_id == job_id),
+        )
+        deleted_counts["jd_parser_history"] = await _delete_rows(
+            db,
+            delete(JDParserHistory).where(JDParserHistory.job_post_id == job_id),
+        )
+        deleted_counts["job_posts"] = await _delete_rows(
+            db,
+            delete(JobPost).where(JobPost.id == job_id),
+        )
+
+        await db.commit()
+        deleted_files = await asyncio.to_thread(
+            _delete_uploaded_files, resume_file_paths
+        )
+        return JobPostDeleteResponse(
+            version=settings.app_version,
+            id=job_id,
+            deleted_at=deleted_at,
+            deleted_counts=deleted_counts,
+            deleted_files=deleted_files,
+        )
+    except Exception as exc:
+        logger.exception("Failed to permanently delete job post %s.", job_id)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete job post.") from exc
+
+
 @router.post("/{job_id}/duplicate", response_model=JobPostDuplicateResponse)
 async def duplicate_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)) -> JobPostDuplicateResponse:
     stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
@@ -550,6 +809,7 @@ async def duplicate_job(job_id: UUID, db: AsyncSession = Depends(get_db_session)
         closed_date=None,
         jd_parsed_json=source.jd_parsed_json or {},
         weight_config_json=source.weight_config_json or {},
+        matching_config_json=source.matching_config_json or {},
     )
     db.add(duplicated)
     await db.commit()
@@ -587,9 +847,18 @@ async def parse_jd(
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=422, detail=parse_result.get("error_message", "Failed to parse JD."))
 
+    locked_stmt = (
+        select(JobPost)
+        .where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+        .with_for_update()
+    )
+    job = (await db.execute(locked_stmt)).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
     job.description = _normalize_description(payload.jd_text)
     job.jd_parsed_json = parsed
     job.weight_config_json = _default_weight_config(parsed)
+    job.matching_status = "stale" if job.current_score_version > 0 else "unscored"
     job.updated_at = _utcnow()
     await db.commit()
     await db.refresh(job)

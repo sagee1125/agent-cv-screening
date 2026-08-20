@@ -107,9 +107,20 @@ export function JobPostList() {
     [runWithWorking]
   );
 
+  // Reload the current list view, then clear the selected job after a hard delete.
+  const handleDeleted = useCallback(
+    async (jobId: string) => {
+      await refresh();
+      if (selectedJobId === jobId) {
+        setSelectedJobId(null);
+      }
+    },
+    [refresh, selectedJobId]
+  );
+
   return (
-    <main className="min-h-screen bg-slate-50 py-6">
-      <div className="mx-auto w-full max-w-7xl space-y-5 px-4">
+    <main className="flex h-full w-full flex-col overflow-hidden">
+      <div className="mx-auto flex h-full w-full max-w-7xl flex-col space-y-5 px-4 py-6">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold text-slate-900">Job Posts</h1>
           <div className="flex flex-col items-end gap-1">
@@ -140,7 +151,7 @@ export function JobPostList() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
           <JobListPanel
             items={items}
             total={total}
@@ -164,9 +175,10 @@ export function JobPostList() {
               key={selectedJob.id}
               job={selectedJob}
               onSaved={refresh}
+              onDeleted={handleDeleted}
             />
           ) : (
-            <div className="flex h-[calc(100vh-160px)] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
+            <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
               Select a job card from the left list to view JD parser details.
             </div>
           )}

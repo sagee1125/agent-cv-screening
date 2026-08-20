@@ -5,7 +5,13 @@ import { JDPasteArea } from "../JDParser/JDPasteArea";
 import { SkillTagList } from "../JDParser/SkillTagList";
 // import { SkillWeightDrag } from "../JDParser/SkillWeightDrag";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { parseJobJD, updateJobPost } from "../../services/jobService";
+import { Button } from "../ui/button";
+import {
+  parseJobJD,
+  permanentlyDeleteJobPost,
+  updateJobPost,
+} from "../../services/jobService";
+import { useConfirm } from "../Common/ConfirmProvider";
 import type { JobPost } from "../../types";
 import { formatDate } from "../../utils";
 import { useCandidates } from "../../hooks/useCandidates";
@@ -15,6 +21,7 @@ import { CandidateHistoryGrid } from "./CandidateHistoryGrid";
 interface JDParserPanelProps {
   job: JobPost;
   onSaved: () => Promise<void> | void;
+  onDeleted: (jobId: string) => Promise<void> | void;
 }
 
 // Build the initial flat skill list (must + preferred) from a parsed JD payload.
@@ -24,13 +31,15 @@ interface JDParserPanelProps {
 // }
 
 // Renders the right-side JD parser card; remounts via key when the job changes.
-export function JDParserPanel({ job, onSaved }: JDParserPanelProps) {
+export function JDParserPanel({ job, onSaved, onDeleted }: JDParserPanelProps) {
   // useState lazy initializers read from props once at mount; key=job.id resets them.
   const [jdText, setJdText] = useState(job.description);
   const [parsing, setParsing] = useState(false);
   const [savingJD, setSavingJD] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [parsedJD, setParsedJD] = useState(job.jdParsedJson);
+  const [deleting, setDeleting] = useState(false);
+  const confirm = useConfirm();
   // Historical CVs uploaded for this job, refreshed after each batch upload.
   const candidates = useCandidates(job.id);
   // const [weightedSkills, setWeightedSkills] = useState<SkillItem[]>(() =>
@@ -78,12 +87,51 @@ export function JDParserPanel({ job, onSaved }: JDParserPanelProps) {
     }
   };
 
+  // Confirm then permanently delete the current job post and notify the parent page.
+  const handleDeleteJob = async () => {
+    const confirmed = await confirm({
+      title: "Delete job post?",
+      description: `This permanently deletes "${job.title}" and all uploaded CVs, scores, and related data. This cannot be undone.`,
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+    });
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await permanentlyDeleteJobPost(job.id);
+      toast.success("Job post deleted.", { position: "top-center" });
+      await onDeleted(job.id);
+    } catch (deleteError) {
+      toast.error(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Failed to delete job post.",
+        { position: "top-center" }
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
-    <Card className="h-[calc(100vh-160px)]">
+    <Card className="flex h-full flex-col">
       <CardHeader>
-        <CardTitle className="text-base">JD Parser · {job.title}</CardTitle>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-base">Job: {job.title}</CardTitle>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+            onClick={() => void handleDeleteJob()}
+            disabled={deleting}
+          >
+            {deleting ? "Deleting..." : "Delete"}
+          </Button>
+        </div>
       </CardHeader>
-      <CardContent className="h-[calc(100%-88px)] space-y-5 overflow-y-auto">
+      <CardContent className="flex min-h-0 flex-1 flex-col space-y-5 overflow-y-auto">
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
           <p>Status: {job.status}</p>
           <p>Headcount: {job.headCount}</p>
@@ -113,6 +161,7 @@ export function JDParserPanel({ job, onSaved }: JDParserPanelProps) {
             Uploaded CVs ({candidates.total})
           </h3>
           <CandidateHistoryGrid
+            jobId={job.id}
             candidates={candidates.items}
             loading={candidates.loading}
           />

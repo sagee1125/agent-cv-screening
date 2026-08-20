@@ -49,7 +49,7 @@ export function JobListPanel({
   onToggleStatus,
 }: JobListPanelProps) {
   return (
-    <Card className="h-[calc(100vh-160px)]">
+    <Card className="flex h-full flex-col">
       <CardHeader className="space-y-4">
         <CardTitle className="text-base">Job List</CardTitle>
         <div className="flex flex-wrap gap-2">
@@ -65,9 +65,9 @@ export function JobListPanel({
           ))}
         </div>
       </CardHeader>
-      <CardContent className="flex h-[calc(100%-120px)] flex-col gap-4">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
         {loading ? (
-          <div className="space-y-3 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {Array.from({ length: 4 }).map((_, index) => (
               <div
                 key={index}
@@ -90,7 +90,7 @@ export function JobListPanel({
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
         {!loading && !error ? (
-          <div className="space-y-3 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {items.map((job) => (
               <div
                 key={job.id}

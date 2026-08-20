@@ -34,45 +34,39 @@ export function SkillTagList({ jdParsed }: SkillTagListProps) {
 
   return (
     <div className="space-y-4">
-      <section className="space-y-2 flex flex-wrap gap-2 items-start text-sm font-semibold">
+      <section className="flex flex-wrap gap-2 items-start text-sm font-semibold">
         Must Skills:
-        <div className="flex flex-wrap gap-2">
-          {mustSkills.map((skill) => (
-            <SourceBadge
-              key={skill.id}
-              variant="success"
-              label={skill.name}
-              sourceSentence={skill.sourceSentence}
-            />
-          ))}
-        </div>
+        {mustSkills.map((skill) => (
+          <SourceBadge
+            key={skill.id}
+            variant="success"
+            label={skill.name}
+            sourceSentence={skill.sourceSentence}
+          />
+        ))}
       </section>
 
-      <section className="space-y-2 flex flex-wrap gap-2 items-start text-sm font-semibold">
+      <section className="flex flex-wrap gap-2 items-start text-sm font-semibold">
         Preferred Skills:
-        <div className="flex flex-wrap gap-2">
-          {preferredSkills.map((skill) => (
-            <SourceBadge
-              key={skill.id}
-              variant="info"
-              label={skill.name}
-              sourceSentence={skill.sourceSentence}
-            />
-          ))}
-        </div>
+        {preferredSkills.map((skill) => (
+          <SourceBadge
+            key={skill.id}
+            variant="info"
+            label={skill.name}
+            sourceSentence={skill.sourceSentence}
+          />
+        ))}
       </section>
-      <section className="space-y-2 flex flex-wrap gap-2 items-start text-sm font-semibold">
+      <section className="flex flex-wrap gap-2 items-start text-sm font-semibold">
         Language Requirements:
-        <div className="flex flex-wrap gap-2">
-          {languageRequirements.map((language) => (
-            <SourceBadge
-              key={language.language}
-              variant="language"
-              label={language.language}
-              sourceSentence={language.sourceSentence}
-            />
-          ))}
-        </div>
+        {languageRequirements.map((language) => (
+          <SourceBadge
+            key={language.language}
+            variant="language"
+            label={language.language}
+            sourceSentence={language.sourceSentence}
+          />
+        ))}
       </section>
       {/* <section className="space-y-2">
         <h4 className="text-sm font-semibold">Other Preferences</h4>

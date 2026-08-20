@@ -11,7 +11,7 @@ import { CandidateCard, type CandidateUploadItem } from "./CandidateCard";
 interface BatchCVUploadProps {
   // The job this batch of CVs should be linked to.
   jobId: string;
-  // Called after each successful upload so the parent can refresh the historical CV list.
+  // Called once after a batch with successful parses so the parent can refresh.
   onUploaded?: () => void | Promise<void>;
 }
 
@@ -70,15 +70,19 @@ export function BatchCVUpload({ jobId, onUploaded }: BatchCVUploadProps) {
   const handleUploadAndParse = async () => {
     if (uploading || files.length === 0) return;
     setUploading(true);
+    let successfulUploads = 0;
     try {
       for (const entry of files) {
         updateItem(entry.localId, { status: "uploading", error: null });
         try {
-          await uploadCandidateCV(entry.file, jobId);
+          const upload = await uploadCandidateCV(entry.file, jobId);
+          if (!["processing", "success"].includes(upload.status)) {
+            throw new Error(`CV parsing ended with status: ${upload.status}`);
+          }
           // Success: the CV now lives in "Uploaded CVs", so retire it from the upload area.
+          successfulUploads += 1;
           setSucceededCount((count) => count + 1);
           removeItem(entry.localId);
-          await onUploaded?.();
         } catch (error) {
           updateItem(entry.localId, {
             status: "failed",
@@ -86,7 +90,25 @@ export function BatchCVUpload({ jobId, onUploaded }: BatchCVUploadProps) {
           });
         }
       }
-      toast.success("Batch CV upload complete", { position: "top-center" });
+      if (successfulUploads > 0) {
+        toast.success("CV upload complete; matching will refresh shortly", {
+          position: "top-center",
+        });
+        try {
+          await onUploaded?.();
+        } catch {
+          toast.warning(
+            "CVs were saved, but the candidate list could not refresh",
+            {
+              position: "top-center",
+            }
+          );
+        }
+      } else {
+        toast.error("No CVs were uploaded successfully", {
+          position: "top-center",
+        });
+      }
     } finally {
       setUploading(false);
     }
