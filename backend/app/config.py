@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     llm_text_fallback_enabled: bool = True
     llm_temperature: float = 0
     llm_seed: int = 42
+    # Local CV privacy pipeline settings.
+    cv_ocr_enabled: bool = True
+    cv_ocr_max_pages: int = 6
+    cv_ocr_render_scale: float = 2.6
+    cv_ocr_min_page_chars: int = 24
+    cv_ocr_confidence_threshold: float = 0.55
+    cv_local_ner_enabled: bool = True
+    cv_local_ner_model: str = "urchade/gliner_multi_pii-v1"
+    cv_local_ner_threshold: float = 0.55
+    cv_local_ner_max_chars: int = 6000
 
     # Database
     database_url: str

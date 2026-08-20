@@ -104,10 +104,10 @@ async def test_sync_inserts_full_taxonomy() -> None:
     """First sync inserts every taxonomy row and commits."""
     session = FakeSession()
     counts = await sync_taxonomy_to_db(session, TAXONOMY_PATH)
-    assert counts["inserted"] == 708
+    assert counts["inserted"] == 709
     assert counts["updated"] == 0
-    assert counts["total"] == 708
-    assert len(session.inserted) == 708
+    assert counts["total"] == 709
+    assert len(session.inserted) == 709
     assert session.flushed is True
     assert session.committed is True
 
@@ -118,7 +118,7 @@ async def test_sync_updates_existing_rows() -> None:
     session = FakeSession(existing=_taxonomy_names())
     counts = await sync_taxonomy_to_db(session, TAXONOMY_PATH)
     assert counts["inserted"] == 0
-    assert counts["updated"] == 708
-    # 708 row updates plus 708 parent-link updates.
-    assert len(session.updated) == 708 * 2
+    assert counts["updated"] == 709
+    # 709 row updates plus 709 parent-link updates.
+    assert len(session.updated) == 709 * 2
     assert len(session.inserted) == 0
