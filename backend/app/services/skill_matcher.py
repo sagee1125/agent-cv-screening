@@ -31,27 +31,36 @@ class SkillMatcherService:
 
     def match(
         self,
-        candidate_skills: list[str],
+        candidate_skills: list[Any],
         required_skills: list[str],
         experience_items: list[dict[str, Any]] | None = None,
+        additional_skills: list[Any] | None = None,
     ) -> dict[str, Any]:
-        normalized_candidate = {
-            skill: self.taxonomy.normalize_skill(skill) or skill.strip()
-            for skill in candidate_skills
-            if skill and skill.strip()
-        }
+        # Normalize candidate skills from structured dicts, plain strings, or a mix.
+        candidate_canonicals = self._candidate_canonical_set(candidate_skills)
+        # Also fold in skills_used attached to each experience entry.
+        for item in experience_items or []:
+            for used in item.get("skills_used") or []:
+                canonical = self._canonicalize_one(used)
+                if canonical:
+                    candidate_canonicals.add(canonical)
+        # Fold in extra skill evidence (e.g. project skills_used) without affecting quality.
+        for extra in additional_skills or []:
+            canonical = self._canonicalize_one(extra)
+            if canonical:
+                candidate_canonicals.add(canonical)
+
         normalized_required = {
-            skill: self.taxonomy.normalize_skill(skill) or skill.strip()
+            skill: self._canonicalize_one(skill) or str(skill).strip().casefold().replace(" ", "_")
             for skill in required_skills
-            if skill and skill.strip()
+            if skill and str(skill).strip()
         }
 
         hits: list[dict[str, str]] = []
         misses: list[str] = []
-        candidate_canonical = set(normalized_candidate.values())
 
         for original_required, canonical_required in normalized_required.items():
-            matched_skill = self._find_match(canonical_required, candidate_canonical)
+            matched_skill = self._find_match(canonical_required, candidate_canonicals)
             if matched_skill:
                 hits.append({"required": original_required, "matched_with": matched_skill})
             else:
@@ -67,6 +76,40 @@ class SkillMatcherService:
             "hits": hits,
             "misses": misses,
         }
+
+    # Build the set of canonical candidate skills from mixed-format input.
+    def _candidate_canonical_set(self, candidate_skills: list[Any]) -> set[str]:
+        canonicals: set[str] = set()
+        for item in candidate_skills or []:
+            canonical = self._canonicalize_one(item)
+            if canonical:
+                canonicals.add(canonical)
+        return canonicals
+
+    # Canonicalize one skill item (dict with raw/canonical_skill, or a plain string).
+    def _canonicalize_one(self, item: Any) -> str | None:
+        if item is None:
+            return None
+        if isinstance(item, dict):
+            canonical = item.get("canonical_skill")
+            if isinstance(canonical, str) and canonical.strip():
+                return canonical.strip().casefold().replace(" ", "_")
+            raw = item.get("raw") or item.get("name") or item.get("skill") or item.get("display_name")
+            if not raw:
+                return None
+            return self._canonicalize_token(str(raw))
+        return self._canonicalize_token(str(item))
+
+    # Canonicalize a raw token to a lowercase-underscore canonical id via taxonomy.
+    def _canonicalize_token(self, token: str) -> str | None:
+        text = token.strip()
+        if not text:
+            return None
+        preserved = self.taxonomy.normalize_skill(text)
+        if preserved:
+            return preserved.casefold().replace(" ", "_")
+        cleaned = " ".join(text.casefold().split())
+        return cleaned.replace(" ", "_") if cleaned else None
 
     def _find_match(self, required: str, candidate_values: set[str]) -> str | None:
         for candidate_skill in candidate_values:

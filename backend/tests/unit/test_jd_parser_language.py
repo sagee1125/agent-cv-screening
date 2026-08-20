@@ -11,7 +11,7 @@ from tests.unit.test_jd_parser_providers import FakeLLM, SAMPLE_JD
 
 @pytest.mark.asyncio
 async def test_languages_go_to_language_requirements_not_skills() -> None:
-    """English, Chinese, and Cantonese fill language_requirements, not must_skills."""
+    """English, Chinese, Cantonese, and Mandarin/Putonghua fill language_requirements."""
     jd = """Requirements:
 - (c) have excellent written and verbal communication skills in both English and Chinese (both Cantonese and Putonghua);
 - Must have proficiency in MS Office
@@ -20,13 +20,15 @@ async def test_languages_go_to_language_requirements_not_skills() -> None:
     result = await service.parse_jd(jd)
     data = result["structured_data"]
     languages = {item["language"]: item for item in data["language_requirements"]}
-    assert set(languages) == {"English", "Chinese", "Cantonese"}
+    assert set(languages) == {"English", "Chinese", "Cantonese", "Mandarin"}
     assert languages["English"]["is_mandatory"] is True
     assert languages["Chinese"]["is_mandatory"] is True
     assert languages["Cantonese"]["is_mandatory"] is True
+    assert languages["Mandarin"]["is_mandatory"] is True
     assert languages["English"]["level"] == "fluent"
     assert "Cantonese" in languages["Cantonese"]["provenance"]
     assert "Chinese" in languages["Chinese"]["provenance"]
+    assert "Putonghua" in languages["Mandarin"]["provenance"]
     skill_names = {
         item["canonical_skill"]
         for bucket in ("must_skills", "preferred_skills")
@@ -36,6 +38,7 @@ async def test_languages_go_to_language_requirements_not_skills() -> None:
     assert "chinese" not in skill_names
     assert "cantonese" not in skill_names
     assert "putonghua" not in skill_names
+    assert "mandarin" not in skill_names
 
 
 @pytest.mark.asyncio
@@ -66,16 +69,32 @@ async def test_cjk_language_aliases_are_extracted() -> None:
     """Chinese-script language names map onto canonical language_requirements."""
     jd = """职位要求：
 - 精通中文及英语
-- Nice to have: 粤语
+- Nice to have: 粤语、普通话
 """
     service = JDParserService()
     result = await service.parse_jd(jd)
     languages = {item["language"]: item for item in result["structured_data"]["language_requirements"]}
-    assert set(languages) >= {"Chinese", "English", "Cantonese"}
+    assert set(languages) >= {"Chinese", "English", "Cantonese", "Mandarin"}
     assert languages["Chinese"]["level"] == "fluent"
     assert languages["English"]["level"] == "fluent"
     assert languages["Cantonese"]["is_mandatory"] is False
+    assert languages["Mandarin"]["is_mandatory"] is False
     assert "中文" in languages["Chinese"]["provenance"]
+    assert "普通话" in languages["Mandarin"]["provenance"]
+
+
+@pytest.mark.asyncio
+async def test_putonghua_and_mandarin_collapse_to_mandarin() -> None:
+    """Putonghua and Mandarin are one spoken-language row, distinct from Chinese."""
+    jd = """Requirements:
+- Written Chinese
+- Spoken Mandarin and Putonghua
+"""
+    service = JDParserService()
+    result = await service.parse_jd(jd)
+    languages = {item["language"]: item for item in result["structured_data"]["language_requirements"]}
+    assert set(languages) == {"Chinese", "Mandarin"}
+    assert languages["Mandarin"]["is_mandatory"] is True
 
 
 @pytest.mark.asyncio
@@ -83,7 +102,7 @@ async def test_hybrid_strips_languages_from_refined_skills() -> None:
     """LLM-refined language labels are dropped from skill buckets."""
     llm = FakeLLM(
         {
-            "must_skills": ["python", "chinese", "cantonese"],
+            "must_skills": ["python", "chinese", "cantonese", "putonghua"],
             "preferred_skills": ["english"],
             "reasoning_trace": [],
         }
@@ -101,4 +120,6 @@ async def test_hybrid_strips_languages_from_refined_skills() -> None:
     assert "chinese" not in skill_names
     assert "cantonese" not in skill_names
     assert "english" not in skill_names
+    assert "putonghua" not in skill_names
+    assert "mandarin" not in skill_names
     assert {item["language"] for item in data["language_requirements"]} >= {"English", "Chinese", "Cantonese"}

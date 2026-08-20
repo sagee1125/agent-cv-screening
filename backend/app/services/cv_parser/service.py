@@ -66,7 +66,7 @@ from app.services.cv_parser.prompts import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v2-ocr"
+PARSER_CACHE_VERSION = "pii-redaction-v4-p1-fields"
 
 
 class CVParserService:
