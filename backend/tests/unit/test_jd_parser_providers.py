@@ -190,6 +190,28 @@ async def test_hybrid_dedupes_overlapping_skills() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hybrid_backfills_skills_dropped_by_llm() -> None:
+    """Hybrid mode keeps rule-extracted skills when the LLM returns an incomplete subset."""
+    jd = """Familiarity with frontend technologies: React, JavaScript/TypeScript, HTML/CSS.
+Experience building RESTful APIs and working with relational databases (PostgreSQL, MySQL).
+Experience with Flask and Git."""
+    llm = FakeLLM(
+        {
+            "must_skills": ["rest api"],
+            "preferred_skills": ["css", "html", "javascript", "react"],
+            "reasoning_trace": [],
+        }
+    )
+    service = JDParserService()
+    result = await service.parse_jd(jd, mode="hybrid", enrichment_provider=LLMRefinerProvider(llm_client=llm))
+    data = result["structured_data"]
+    must = {item["display_name"].lower() for item in data["must_skills"]}
+    preferred = {item["display_name"].lower() for item in data["preferred_skills"]}
+    assert {"flask", "git", "mysql", "postgresql", "rest api"} <= must
+    assert {"css", "html", "javascript", "react", "typescript"} <= preferred
+
+
+@pytest.mark.asyncio
 async def test_qwen_provider_maps_overview() -> None:
     """Qwen provider adds a rich jd_overview while keeping rule skills."""
     provider = QwenJDExtractorProvider(model_id="fake-model")

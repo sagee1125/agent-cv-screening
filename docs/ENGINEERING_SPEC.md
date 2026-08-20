@@ -301,6 +301,45 @@ http://localhost:8000/api/v1
 | `POST` | `/jobs`             | Create job + upload JD | `{ "department_name": "...", "position_name": "...", "jd_text": "...", "config": {...} }` | `{ "id": "uuid", "config_version": "v1.0" }`                      |
 | `GET`  | `/jobs/{id}`        | Get job details        | -                                                                                         | `{ "id": "uuid", "department_name": "...", "config": {...} }`     |
 | `PUT`  | `/jobs/{id}/config` | Update scoring weights | `{ "config": {...} }`                                                                     | `{ "id": "uuid", "config_version": "v1.1", "updated_at": "..." }` |
+| `DELETE` | `/jobs/{id}`          | Archive (soft delete) a job post                 | -                                                                                         | `{ "id": "uuid", "status": "closed", "updated_at": "..." }`      |
+| `DELETE` | `/jobs/{id}/permanent` | Permanently delete a job post and all job-scoped data | -                                                                                     | `{ "id": "uuid", "deleted_at": "...", "deleted_counts": { ... } }` |
+
+
+#### Job Post Deletion (Hard Delete)
+
+`DELETE /jobs/{id}/permanent` permanently removes the Job Post, every job-scoped child row, and the uploaded CV files under `UPLOAD_DIR` that belong to the job. The global `candidates` table is intentionally kept because a candidate can be linked to multiple Job Posts.
+
+Deleted database rows, in dependency order:
+
+1. `candidate_match_scores` for the job
+2. `matching_recalc_jobs` for the job
+3. `feedback_logs` whose `scoring_result_id` belongs to one of the job's resumes
+4. `scoring_results` for the job's resumes
+5. `extracted_data` for the job's resumes
+6. `resumes` for the job
+7. `jd_parser_history` for the job
+8. `job_posts` for the job id
+
+Response:
+
+```json
+{
+  "version": "1.0.0",
+  "id": "uuid",
+  "deleted_at": "2026-08-20T12:00:00",
+  "deleted_counts": {
+    "candidate_match_scores": 3,
+    "matching_recalc_jobs": 1,
+    "feedback_logs": 0,
+    "scoring_results": 0,
+    "extracted_data": 2,
+    "resumes": 2,
+    "jd_parser_history": 1,
+    "job_posts": 1
+  },
+  "deleted_files": 2
+}
+```
 
 #### Scoring
 

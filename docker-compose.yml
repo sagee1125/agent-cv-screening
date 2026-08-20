@@ -1,3 +1,4 @@
+# Runs the PostgreSQL database and migration-backed backend development services.
 version: "3.8"
 
 services:
@@ -46,7 +47,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
   # Frontend is local-only (`cd frontend && npm run dev`) so Windows Docker bind
   # mounts do not break Vite HMR. Uncomment this service to serve the UI from Compose.
   # frontend:

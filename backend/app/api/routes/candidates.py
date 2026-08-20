@@ -27,6 +27,7 @@ from app.models.schemas import (
 )
 from app.skills.cv_parse import parse_cv_skill
 from app.services.cv_parser import CVParserService
+from app.services.matching_service import request_matching_recalculation
 
 router = APIRouter(prefix="/candidates")
 logger = logging.getLogger(__name__)
@@ -131,7 +132,11 @@ async def upload_candidate_cv(
             )
 
         # Verify the target job exists before linking a resume to it.
-        job_stmt = select(JobPost).where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+        job_stmt = (
+            select(JobPost)
+            .where(JobPost.id == job_id, JobPost.deleted_at.is_(None))
+            .with_for_update()
+        )
         job = (await db.execute(job_stmt)).scalar_one_or_none()
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found.")
@@ -180,7 +185,16 @@ async def upload_candidate_cv(
             extracted = _build_extracted(resume.id)
             db.add(extracted)
 
+        # A changed CV invalidates any currently published matching snapshot.
+        job.matching_status = "stale" if job.current_score_version > 0 else "unscored"
         await db.commit()
+
+        if parse_status == "success":
+            request_matching_recalculation(
+                job.id,
+                trigger="cv_uploaded",
+                reason=f"CV uploaded: {file.filename or 'uploaded.pdf'}",
+            )
 
         response_status = "processing" if parse_status == "success" else parse_status
         return CandidateUploadResponse(
