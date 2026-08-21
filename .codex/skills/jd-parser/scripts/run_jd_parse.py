@@ -1,8 +1,8 @@
 """CLI entry point for the JD Parser skill (agent-facing).
 
 Example (from repository root):
-    python backend/scripts/skills/run_jd_parse.py --jd-file jd.txt
-    python backend/scripts/skills/run_jd_parse.py --jd-text "Requirements: Python, SQL"
+    python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt
+    python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-text "Requirements: Python, SQL"
 """
 from __future__ import annotations
 

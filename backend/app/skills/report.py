@@ -29,26 +29,43 @@ def _is_valid_score_result(score_result: dict[str, Any]) -> bool:
     return isinstance(snapshot, dict) and "dimension_scores" in snapshot
 
 
-# Generate a one-page PDF report from an extracted profile plus its score result.
+# Generate a one-page PDF report from an extracted profile, its score, and optional matching detail.
 def generate_candidate_report_skill(
     *,
     extracted_data: dict[str, Any],
-    score_result: dict[str, Any],
+    score_result: dict[str, Any] | None = None,
     position_name: str,
     candidate_name: str | None = None,
     rank: int = 0,
     output_path: str,
     version: str = "skill",
+    detail_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    score_result = _unwrap_score_result(score_result)
-    if not _is_valid_score_result(score_result):
-        raise ValueError("invalid score input: missing total_score or full_snapshot.dimension_scores")
+    detail = detail_result or {}
+    if not isinstance(detail, dict):
+        raise ValueError("invalid detail input: expected a JSON object")
     if isinstance(extracted_data.get("structured_data"), dict):
         extracted_data = extracted_data["structured_data"]
+
+    if score_result is not None:
+        score_result = _unwrap_score_result(score_result)
+        if not _is_valid_score_result(score_result):
+            raise ValueError(
+                "invalid score input: missing total_score or full_snapshot.dimension_scores"
+            )
+    else:
+        score_result = {}
+    if detail and "match_score" not in detail and "radar_dimensions" not in detail:
+        raise ValueError(
+            "invalid detail input: expected matching detail with match_score or radar_dimensions"
+        )
+
     snapshot = score_result.get("full_snapshot") or {}
     skill_details = score_result.get("skill_match_details") or snapshot.get("skill_match_details") or {}
     dimension_scores = score_result.get("dimension_scores") or snapshot.get("dimension_scores") or {}
     suggestions = score_result.get("interview_suggestions") or snapshot.get("interview_suggestions") or []
+    total_score = detail.get("match_score") if "match_score" in detail else score_result.get("total_score", 0)
+    tier = detail.get("fit_band") if "fit_band" in detail else score_result.get("tier", "")
     name = candidate_name or extracted_data.get("name") or "Unknown"
     service = ReporterService()
     service.generate_candidate_one_pager_pdf(
@@ -56,8 +73,8 @@ def generate_candidate_report_skill(
         candidate_name=name,
         position_name=position_name,
         report_date=datetime.utcnow(),
-        total_score=float(score_result.get("total_score", 0)),
-        tier=score_result.get("tier", ""),
+        total_score=float(total_score),
+        tier=str(tier or ""),
         rank=rank,
         education=extracted_data.get("education", []),
         experience=extracted_data.get("experience", []),
@@ -67,6 +84,13 @@ def generate_candidate_report_skill(
         dimension_scores={k: float(v) for k, v in dimension_scores.items()},
         interview_suggestions=suggestions,
         version=version,
+        radar_dimensions=detail.get("radar_dimensions"),
+        interview_questions=detail.get("interview_questions"),
+        eligibility=detail.get("eligibility"),
+        evidence_confidence=detail.get("evidence_confidence"),
+        fit_band=detail.get("fit_band"),
+        top_strengths=detail.get("top_strengths"),
+        key_gaps=detail.get("key_gaps"),
     )
     return {"status": "success", "format": "pdf", "output_path": output_path}
 

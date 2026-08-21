@@ -1,7 +1,7 @@
 """CLI entry point for the CV Parser skill (agent-facing).
 
 Example (from repository root):
-    python backend/scripts/skills/run_cv_parse.py --file data/resume.pdf --jd-file jd.txt
+    python .codex/skills/cv-parser/scripts/run_cv_parse.py --file data/resume.pdf --jd-file jd.txt
 """
 from __future__ import annotations
 
