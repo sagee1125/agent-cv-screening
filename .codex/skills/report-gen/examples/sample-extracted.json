@@ -1,0 +1,35 @@
+{
+  "name": "Alice Chen",
+  "email": "alice@example.com",
+  "phone": "+86 138 0000 0000",
+  "skills": [
+    "Python",
+    "FastAPI",
+    "Docker",
+    "SQL",
+    "PostgreSQL"
+  ],
+  "education": [
+    {
+      "school": "National Taiwan University",
+      "degree": "MSc",
+      "major": "Computer Science",
+      "period": "2020-2023"
+    }
+  ],
+  "experience": [
+    {
+      "company": "Acme",
+      "job_title": "Backend Engineer",
+      "period": "2021-01 - 2024-01",
+      "description": "主導千万级项目, 负责 API 設計與資料庫優化"
+    }
+  ],
+  "publications": [
+    {
+      "title": "Scalable REST APIs",
+      "journal": "IEEE",
+      "year": "2023"
+    }
+  ]
+}

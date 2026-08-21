@@ -82,6 +82,10 @@ def _job_code_from_href(href: str) -> str:
     return match.group(1) if match else href.strip()
 
 
+# Public alias so the polyu-import skill can avoid importing a private symbol.
+job_code_from_href = _job_code_from_href
+
+
 # Parse the general.php HTML table into listing rows.
 def parse_listing_html(html: str, *, base_url: str | None = None) -> list[PolyUListing]:
     origin = base_url or DEFAULT_BASE_URL
