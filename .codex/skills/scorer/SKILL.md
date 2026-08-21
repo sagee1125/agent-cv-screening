@@ -1,25 +1,70 @@
 ---
 name: scorer
-description: "Score an extracted candidate profile against a scoring config (five dimension scores, weighted total, tier, rejection reasons, interview suggestions) and rank candidates by running the project Scorer Python service directly via CLI. Use when: (1) a parsed candidate profile needs scoring, (2) ranking multiple candidates, or (3) a user asks to run the Scorer skill or replicate the /jobs/{id}/score logic offline."
+description: "Score an extracted candidate profile against a scoring config (five dimension scores, weighted total, tier, rejection reasons, interview suggestions), build scoring configs from JD parser output, and rank candidates by running the project Scorer Python service directly via CLI. Use when: (1) a parsed candidate profile needs scoring, (2) ranking multiple candidates, (3) a scoring config needs to be built from a JD, or (4) a user asks to run the Scorer skill or replicate the /jobs/{id}/score logic offline."
 ---
 
 # Scorer Skill
 
 Run the project Scorer service directly as a Python script (no HTTP). Deterministic, no LLM.
 
-## Run
+## Pipeline
+
+JD text → **jd-parser** → `structured_data` → **build-config** → scoring config → **score** → scored candidate.
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py --extracted <extracted.json> --config <config.json> [--rank --items <scored-items.json>] [--output <result.json>]
+# 1. Parse the JD
+python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt --output jd-out.json
+
+# 2. Build the scoring config from the parsed JD (no hand-written config needed)
+python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured jd-out.json --output config.json
+
+# 3. Score an extracted candidate profile against that config
+#    extracted.json may be the cv-parser --output envelope; the CLI auto-unwraps structured_data.
+python .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json
+```
+
+## Run
+
+### `score` — score an extracted candidate
+
+```bash
+python .codex/skills/scorer/scripts/run_score.py score --extracted <extracted.json> --config <config.json> [--rank --items <scored-items.json>] [--output <result.json>]
 ```
 
 | flag | meaning |
 |---|---|
-| `--extracted` (required) | JSON file with CV Parser `structured_data` |
-| `--config` (required) | JSON file with the scoring config |
+| `--extracted` (required) | JSON file with CV Parser `structured_data` (a full cv-parser envelope is auto-unwrapped) |
+| `--config` (required) | JSON file with the scoring config (a build-config envelope is auto-unwrapped) |
 | `--rank` (optional) | Also rank a list of scored items |
 | `--items` (optional) | JSON file with a list of `{"candidate_id", "total_score"}` items to rank |
 | `--output` (optional) | Write JSON to file instead of stdout |
+
+### `build-config` — build a scoring config from a JD
+
+```bash
+python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured <jd_structured.json> [--base-config <base.json>] [--output <config.json>]
+```
+
+| flag | meaning |
+|---|---|
+| `--jd-structured` (required) | JD parser full output (contains `structured_data`) or a pure `structured_data` dict; the CLI auto-unwraps the full output |
+| `--base-config` (optional) | Base scoring config JSON to merge/override before JD-derived keys are applied |
+| `--output` (optional) | Write JSON to file instead of stdout |
+
+Output JSON:
+
+```json
+{
+  "status": "success",
+  "config": { ... scoring config ... }
+}
+```
+
+- `stdout` always prints the envelope above.
+- With `--output <config.json>`, the file contains ONLY the inner scoring config dict (no `status`/`config` wrapper), so it can be passed straight to `score --config <config.json>`.
+- The built config fills `required_skills` / `preferred_skills` (from `must_skills` / `preferred_skills`), `target_experience_years`, `target_degrees`, `language_requirements`, `visa_requirement`, `location`, `weights`, and `hard_filters`.
+- Only dimensions whose requirements are present in the JD are activated in `weights` (e.g. `language_match`, `work_authorization_match`, `location_match`).
+- Feed the `--jd-structured` output of the JD Parser skill directly; the CLI unwraps the `structured_data` key automatically.
 
 ## Scoring config keys
 
@@ -53,6 +98,10 @@ python .codex/skills/scorer/scripts/run_score.py --extracted <extracted.json> --
 ## Behavior notes
 
 - On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0.
+- The `score` subcommand auto-unwraps a build-config envelope passed as `--config`, and a CV parser envelope passed as `--extracted` (a pure `structured_data` dict also works).
+- Invalid `--extracted` input (no `structured_data`, and no `name`/`skills`/`education`/`experience`/`publications` fields) fails fast with an error envelope (exit 1) instead of scoring an empty profile.
+- A flat invocation without a subcommand (just `--extracted`/`--config`) defaults to the `score` subcommand (backward compatible).
+- `build-config` fails fast with an error envelope (exit 1) when the JD input is invalid (e.g. `structured_data` is null, or no usable JD requirement fields).
 - The REST endpoint `POST /api/v1/jobs/{job_id}/score` runs the exact same code path.
 
 ## Example
@@ -60,7 +109,13 @@ python .codex/skills/scorer/scripts/run_score.py --extracted <extracted.json> --
 See `examples/sample-extracted.json`, `examples/sample-config.json`, and `examples/sample-output.json` in this skill folder; reproduce with:
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py --extracted .codex/skills/scorer/examples/sample-extracted.json --config .codex/skills/scorer/examples/sample-config.json
+python .codex/skills/scorer/scripts/run_score.py score --extracted .codex/skills/scorer/examples/sample-extracted.json --config .codex/skills/scorer/examples/sample-config.json
+```
+
+`examples/sample-jd-structured.json` is the `structured_data` from the JD Parser sample output; build a config from it with:
+
+```bash
+python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured .codex/skills/scorer/examples/sample-jd-structured.json
 ```
 
 ## Future migration

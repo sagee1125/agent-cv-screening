@@ -1,0 +1,24 @@
+[
+  {
+    "rank": 1,
+    "name": "Alice Chen",
+    "total_score": 58.7,
+    "skill_match": 86.5,
+    "experience_match": 0.0,
+    "education_match": 100.0,
+    "research_quality": 30.0,
+    "tier": "Tier 3",
+    "suggestion_summary": "LOW-EXPERIENCE_MATCH:high; LOW-RESEARCH_QUALITY:high; MID-EXPERIENCE_QUALITY:medium"
+  },
+  {
+    "rank": 2,
+    "name": "Bob Lin",
+    "total_score": 72.4,
+    "skill_match": 80.0,
+    "experience_match": 60.0,
+    "education_match": 70.0,
+    "research_quality": 50.0,
+    "tier": "Tier 2",
+    "suggestion_summary": "MID-SKILL_MATCH:medium; LOW-RESEARCH_QUALITY:high"
+  }
+]
