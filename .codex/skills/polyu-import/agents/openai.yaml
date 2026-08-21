@@ -1,0 +1,4 @@
+interface:
+  display_name: "PolyU Job Import"
+  short_description: "Fetch PolyU job listings and JD text for parsing"
+  default_prompt: "Use $skill-polyu-import to fetch the PolyU job catalog or one job's JD text"

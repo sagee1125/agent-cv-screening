@@ -1,0 +1,132 @@
+{
+  "must_skills": [
+    {
+      "skill_id": "docker_1",
+      "display_name": "Docker",
+      "canonical_skill": "docker",
+      "priority_order": 1,
+      "weight": 1.0,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    },
+    {
+      "skill_id": "fastapi_2",
+      "display_name": "Fastapi",
+      "canonical_skill": "fastapi",
+      "priority_order": 2,
+      "weight": 1.0,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    },
+    {
+      "skill_id": "postgresql_3",
+      "display_name": "Postgresql",
+      "canonical_skill": "postgresql",
+      "priority_order": 3,
+      "weight": 1.0,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    },
+    {
+      "skill_id": "python_4",
+      "display_name": "Python",
+      "canonical_skill": "python",
+      "priority_order": 4,
+      "weight": 1.0,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    },
+    {
+      "skill_id": "sql_5",
+      "display_name": "Sql",
+      "canonical_skill": "sql",
+      "priority_order": 5,
+      "weight": 1.0,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    }
+  ],
+  "preferred_skills": [
+    {
+      "skill_id": "aws_1",
+      "display_name": "Aws",
+      "canonical_skill": "aws",
+      "priority_order": 1,
+      "weight": 0.6,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    },
+    {
+      "skill_id": "distributed_systems_2",
+      "display_name": "Distributed Systems",
+      "canonical_skill": "distributed_systems",
+      "priority_order": 2,
+      "weight": 0.6,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    },
+    {
+      "skill_id": "kubernetes_3",
+      "display_name": "Kubernetes",
+      "canonical_skill": "kubernetes",
+      "priority_order": 3,
+      "weight": 0.6,
+      "provenance": {
+        "source_sentence": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skills\n- Must have Docker\n- Nice to have: AWS, Kubernetes, Redis\n\nPreferred:\n- Experience with distributed systems\n- Kuberne",
+        "source_char_start": 0,
+        "source_char_end": 240,
+        "confidence": 0.75
+      }
+    }
+  ],
+  "language_requirements": [
+    {
+      "language": "English",
+      "level": "business",
+      "is_mandatory": false,
+      "provenance": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skil"
+    }
+  ],
+  "education_requirement": {
+    "minimum_degree": "none",
+    "field_of_study": null,
+    "is_mandatory": false,
+    "provenance": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skil"
+  },
+  "visa_requirement": {
+    "requirement_type": "unknown",
+    "target_region": null,
+    "provenance": "Senior Backend Engineer\n\nRequirements:\n- 3+ years of experience with Python and FastAPI\n- Strong SQL and PostgreSQL skil"
+  },
+  "experience_requirement": {
+    "minimum_years": 3
+  }
+}

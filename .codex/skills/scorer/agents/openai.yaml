@@ -1,4 +1,4 @@
 interface:
   display_name: "Candidate Scorer"
-  short_description: "Score and rank parsed candidates against a job config"
-  default_prompt: "Use $skill-scorer to score this extracted candidate profile: <extracted.json>"
+  short_description: "Score/rank candidates and build scoring configs from JD parser output"
+  default_prompt: "Use $skill-scorer to build a scoring config from this JD structured data (build-config), then score this extracted candidate profile: <extracted.json>"

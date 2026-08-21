@@ -1,0 +1,4 @@
+interface:
+  display_name: "Report Generator"
+  short_description: "Generate PDF/Excel screening reports from score results"
+  default_prompt: "Use $skill-report-gen to generate a report from <extracted.json> and <score.json>"
