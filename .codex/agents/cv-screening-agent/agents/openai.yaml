@@ -1,0 +1,9 @@
+# Entry interface for the CV Screening orchestrator agent (Codex / Cursor).
+interface:
+  display_name: "CV Screening Agent"
+  short_description: "End-to-end HR assistant — parse JD, screen CVs, rank candidates, export reports"
+  default_prompt: |
+    Use $agent-cv-screening-agent to screen candidates for this job.
+    Job source: <PolyU ref | pasted JD text | path to jd.txt | existing workspace id>
+    CVs: <file paths, folder path, or "not uploaded yet">
+    Goal: <e.g. rank all CVs, export top-10 Excel, explain why candidate X ranks lower>

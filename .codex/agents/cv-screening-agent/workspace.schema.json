@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cv-screening-agent/workspace.state.json",
+  "title": "CV Screening Agent Job Workspace State",
+  "description": "Tracks orchestrator progress, artifact paths, and checkpoint status for one screening job.",
+  "type": "object",
+  "required": ["workspace_id", "state", "created_at", "updated_at", "artifacts", "checkpoints"],
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "description": "Unique workspace folder name under data/agent-workspaces/"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["idle", "jd_sourced", "jd_parsed", "config_ready", "cvs_ingesting", "ranked", "exported"]
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "job": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "source": { "type": "string", "enum": ["polyu", "jd_text", "jd_file", "existing_workspace"] },
+        "external_ref": { "type": ["string", "null"] },
+        "position_title": { "type": ["string", "null"] }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "jd_raw": { "type": ["string", "null"] },
+        "jd_structured": { "type": ["string", "null"] },
+        "scoring_config": { "type": ["string", "null"] },
+        "ranking": { "type": ["string", "null"] },
+        "comparison_rows": { "type": ["string", "null"] },
+        "shortlist_report": { "type": ["string", "null"] }
+      }
+    },
+    "checkpoints": {
+      "type": "object",
+      "properties": {
+        "jd_review": { "$ref": "#/$defs/checkpoint" },
+        "config_review": { "$ref": "#/$defs/checkpoint" },
+        "export_review": { "$ref": "#/$defs/checkpoint" }
+      }
+    },
+    "cv_batch": {
+      "type": "object",
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "parsed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "score_version": { "type": "integer", "minimum": 1 },
+    "pending_intent": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "checkpoint": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pending", "confirmed", "skipped"] },
+        "confirmed_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+# Read-only workflow: explain why a candidate scored as they did.
+workflow_id: explain-candidate
+version: "1.0"
+description: "Answer HR questions about a candidate's score using structured evidence only"
+
+variables:
+  workspace: "${WORKSPACE_ROOT}"
+  candidate_stem: "${CANDIDATE_STEM}"
+
+inputs:
+  - name: candidate_stem
+    type: string
+    required: true
+    description: "Workspace stem matching cvs/{stem}.extracted.json and scores/{stem}.score.json"
+
+steps:
+
+  - id: load_artifacts
+    type: agent_action
+    requires:
+      - "${workspace}/scores/${candidate_stem}.score.json"
+      - "${workspace}/cvs/${candidate_stem}.extracted.json"
+      - "${workspace}/jd.structured.json"
+    read_only: true
+
+  - id: explain_from_score
+    type: agent_response
+    executor: read_structured_data
+    sources:
+      score: "${workspace}/scores/${candidate_stem}.score.json"
+      extracted: "${workspace}/cvs/${candidate_stem}.extracted.json"
+      jd: "${workspace}/jd.structured.json"
+    allowed_fields:
+      - total_score
+      - tier
+      - rejected
+      - rejection_reasons
+      - dimension_scores
+      - skill_match_details.hit
+      - skill_match_details.miss
+      - full_snapshot.interview_suggestions
+      - full_snapshot.hard_filter_status
+    forbidden:
+      - invent_evidence
+      - compare_on_protected_characteristics
+    response_template: |
+      Candidate: {name}
+      Total score: {total_score} ({tier})
+      Skill hits: {skill_hits}
+      Skill gaps: {skill_misses}
+      Interview suggestions: {interview_suggestions}
+      Evidence source: scores/{candidate_stem}.score.json
+
+  - id: compare_two_candidates
+    when: "comparison_target_stem is set"
+    type: agent_response
+    executor: read_structured_data
+    sources:
+      primary: "${workspace}/scores/${candidate_stem}.score.json"
+      secondary: "${workspace}/scores/${comparison_target_stem}.score.json"
+    rule: |
+      Compare only on dimension_scores and skill_match_details fields present in both files.
+      If a dimension is null or missing, say so explicitly.

@@ -1,0 +1,60 @@
+# PolyU-only import workflow: catalog browse → fetch → optional parse.
+workflow_id: import-polyu
+version: "1.0"
+description: "Fetch PolyU job listings or one job JD without running the full screening pipeline"
+
+variables:
+  workspace: "${WORKSPACE_ROOT}"
+  polyu_ref: "${POLYU_EXTERNAL_REF}"
+  detail_url: "${POLYU_DETAIL_URL}"
+
+steps:
+
+  - id: list_catalog
+    skill: polyu-import
+    command: catalog
+    cli: |
+      python .codex/skills/polyu-import/scripts/run_polyu_import.py catalog \
+        --output "${workspace}/polyu.catalog.json"
+    output:
+      path: "${workspace}/polyu.catalog.json"
+      envelope:
+        status: success
+        source: polyu
+        total: integer
+        items:
+          - job_code: string
+            external_ref: string
+            title: string
+            department: string
+            closing_date: "ISO-8601 | null"
+            detail_url: string
+
+  - id: fetch_jd_text
+    skill: polyu-import
+    command: fetch
+    when: "polyu_ref or detail_url"
+    cli: |
+      python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch \
+        --external-ref "${polyu_ref}" \
+        --detail-url "${detail_url}" \
+        --output "${workspace}/polyu.job.json"
+    output:
+      path: "${workspace}/polyu.job.json"
+      fields: [external_ref, title, department, detail_url, posting_date, jd_text]
+    side_effects:
+      - write_text: { path: "${workspace}/jd.raw.txt", from_field: jd_text }
+
+  - id: fetch_and_parse
+    skill: polyu-import
+    command: fetch-and-parse
+    when: "hr_wants_structured_jd"
+    cli: |
+      python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse \
+        --external-ref "${polyu_ref}" \
+        --output "${workspace}/jd.structured.json"
+    output:
+      path: "${workspace}/jd.structured.json"
+      envelope: polyu_fetch_and_parse_output
+    next_workflow: screen-job
+    next_from_step: build_scoring_config

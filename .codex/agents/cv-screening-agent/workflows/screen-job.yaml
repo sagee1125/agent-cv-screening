@@ -1,0 +1,510 @@
+# Full screening workflow: JD source → parse → config → CV batch → rank → export.
+# Every step maps to an existing skill CLI under .codex/skills/.
+# Run all commands from the repository root (orchestrator.runtime.cwd).
+workflow_id: screen-job
+version: "1.0"
+description: "End-to-end candidate screening for one job post"
+
+variables:
+  workspace: "${WORKSPACE_ROOT}"          # e.g. data/agent-workspaces/polyu-260818008-IE
+  position_title: "${POSITION_TITLE}"     # shown on reports; default from JD title
+  polyu_ref: "${POLYU_EXTERNAL_REF}"      # e.g. 260818008-IE
+  jd_text: "${JD_TEXT}"                   # inline JD when not using file/polyu
+  jd_file: "${JD_FILE}"                   # path to jd.txt
+  cv_paths: "${CV_PATHS}"                 # list of absolute or repo-relative PDF paths
+
+inputs:
+  - name: job_source
+    type: enum
+    values: [polyu_ref, jd_text, jd_file, existing_workspace]
+    required: true
+  - name: cv_paths
+    type: file[]
+    required: false
+  - name: position_title
+    type: string
+    required: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Envelope reference (accepted by downstream CLIs)
+# See backend/tests/unit/test_skill_cli_compat.py for regression coverage.
+# ─────────────────────────────────────────────────────────────────────────────
+envelopes:
+  jd_parser_output:
+    description: "Written by jd-parser or nested inside polyu fetch-and-parse"
+    schema:
+      status: "success | invalid_input | error"
+      parse_path: string
+      structured_data:
+        must_skills: "array of skill objects with provenance"
+        preferred_skills: "array"
+        language_requirements: "array | null"
+        education_requirement: "object | null"
+        visa_requirement: "object | null"
+        experience_requirement: "object | null"
+        location: "object | null"
+      error_message: "string | null"
+
+  polyu_fetch_and_parse_output:
+    description: "polyu-import fetch-and-parse --output file"
+    schema:
+      status: success
+      source: polyu
+      external_ref: string
+      title: string
+      department: string
+      detail_url: string
+      jd_text: string
+      structured_data: "{ same as jd_parser_output.structured_data }"
+      jd_parse: "{ full jd_parser_output envelope }"
+    accepted_by:
+      build-config: "unwraps structured_data, jd_parse.structured_data, or top-level requirement fields"
+
+  build_config_stdout:
+    description: "scorer build-config always prints this envelope to stdout"
+    schema:
+      status: success
+      config:
+        required_skills: "string[]"
+        preferred_skills: "string[]"
+        weights: object
+        hard_filters: object
+        tiers: "array"
+    file_output: "When --output is set, file contains ONLY the inner config dict (no status wrapper)"
+
+  cv_parser_output:
+    description: "cv-parser --output file"
+    schema:
+      file_hash: string
+      cache_hit: boolean
+      status: "success | fallback | error"
+      parse_path: "vision | vision_focus | text_fallback | rule_fallback | ..."
+      structured_data:
+        name: string
+        email: "string | null"
+        phone: "string | null"
+        skills: "string[]"
+        education: "array"
+        experience: "array"
+        publications: "array"
+      extraction_model: string
+      extraction_seed: 42
+      error_message: "string | null"
+    accepted_by:
+      score: "auto-unwraps structured_data key; pure structured_data dict also works"
+
+  score_output:
+    description: "scorer score --output file (plain score object, no wrapper)"
+    schema:
+      dimension_scores: object
+      total_score: number
+      tier: string
+      rejected: boolean
+      rejection_reasons: "string[]"
+      skill_match_details: object
+      full_snapshot: object
+
+  ranked_score_output:
+    description: "scorer score --rank --items ... --output file"
+    schema:
+      score: "{ score_output schema }"
+      ranking:
+        - candidate_id: string
+          total_score: number
+          rank: integer
+
+  rank_items_input:
+    description: "scorer score --rank --items file"
+    schema:
+      - candidate_id: string
+        total_score: number
+
+  comparison_rows_input:
+    description: "report-gen comparison --rows file"
+    schema:
+      - rank: integer
+        name: string
+        total_score: number
+        skill_match: number
+        experience_match: number
+        education_match: number
+        research_quality: number
+        tier: string
+        suggestion_summary: string
+
+  cli_error:
+    description: "All skills on failure"
+    stderr_schema:
+      status: error
+      error_message: string
+    exit_code: 1
+
+steps:
+
+  # ── 0. Initialize workspace ────────────────────────────────────────────────
+  - id: init_workspace
+    type: agent_action
+    description: "Create workspace folder and workspace.state.json"
+    actions:
+      - mkdir: "${workspace}"
+      - mkdir: "${workspace}/cvs"
+      - mkdir: "${workspace}/scores"
+      - mkdir: "${workspace}/reports"
+      - write_state: { state: idle }
+    outputs:
+      - "${workspace}/workspace.state.json"
+
+  # ── 1. Source JD ───────────────────────────────────────────────────────────
+  - id: source_jd_polyu
+    when: "job_source == polyu_ref"
+    skill: polyu-import
+    command: fetch-and-parse
+    cli: |
+      python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse \
+        --external-ref "${polyu_ref}" \
+        --output "${workspace}/jd.structured.json"
+    cwd: repository_root
+    requires_env: []
+    input_envelope: null
+    output:
+      path: "${workspace}/jd.structured.json"
+      envelope: polyu_fetch_and_parse_output
+    side_effects:
+      - write_text: { path: "${workspace}/jd.raw.txt", from_field: jd_text }
+      - update_state: { state: jd_parsed, job.source: polyu, job.external_ref: "${polyu_ref}", job.title: from_output.title }
+    on_error:
+      exit_code: 1
+      stderr: cli_error
+      action: fallback_polyu_paste_jd
+      message: "PolyU fetch failed. Ask HR to paste JD text and use source_jd_text instead."
+
+  - id: source_jd_text
+    when: "job_source == jd_text"
+    type: agent_action
+    actions:
+      - write_text: { path: "${workspace}/jd.raw.txt", content: "${jd_text}" }
+    next: parse_jd
+
+  - id: source_jd_file
+    when: "job_source == jd_file"
+    type: agent_action
+    actions:
+      - copy_file: { from: "${jd_file}", to: "${workspace}/jd.raw.txt" }
+    next: parse_jd
+
+  - id: source_jd_existing
+    when: "job_source == existing_workspace"
+    type: agent_action
+    requires:
+      - "${workspace}/jd.structured.json"
+    skip_if_present: true
+
+  # ── 2. Parse JD (text / file path only; polyu branch already parsed) ───────
+  - id: parse_jd
+    when: "job_source in [jd_text, jd_file]"
+    skill: jd-parser
+    command: parse
+    cli: |
+      python .codex/skills/jd-parser/scripts/run_jd_parse.py \
+        --jd-file "${workspace}/jd.raw.txt" \
+        --output "${workspace}/jd.structured.json"
+    cwd: repository_root
+    input_envelope: null
+    output:
+      path: "${workspace}/jd.structured.json"
+      envelope: jd_parser_output
+    update_state: { state: jd_parsed }
+    on_error:
+      exit_code: 1
+      stderr: cli_error
+      action: ask_clarification
+
+  # ── 3. Checkpoint: HR reviews parsed JD ────────────────────────────────────
+  - id: checkpoint_jd_review
+    type: checkpoint
+    checkpoint: jd_review
+    pause: true
+    present_to_hr:
+      - field: structured_data.must_skills
+        label: "Must-have skills"
+      - field: structured_data.preferred_skills
+        label: "Preferred skills"
+      - field: structured_data.language_requirements
+        label: "Language requirements"
+      - field: structured_data.experience_requirement
+        label: "Experience requirement"
+    hr_actions: [confirm, edit_via_chat, reparse]
+    on_confirm: build_scoring_config
+    update_state:
+      checkpoints.jd_review.status: confirmed
+
+  # ── 4. Build scoring config ────────────────────────────────────────────────
+  - id: build_scoring_config
+    skill: scorer
+    command: build-config
+    cli: |
+      python .codex/skills/scorer/scripts/run_score.py build-config \
+        --jd-structured "${workspace}/jd.structured.json" \
+        --output "${workspace}/scoring.config.json"
+    cwd: repository_root
+    input:
+      path: "${workspace}/jd.structured.json"
+      accepted_envelopes:
+        - jd_parser_output
+        - polyu_fetch_and_parse_output
+        - pure_structured_data
+      unwrap_rules:
+        - "If key jd_parse.structured_data exists, use it"
+        - "Else if key structured_data exists, use it"
+        - "Else use top-level object if must_skills/preferred_skills present"
+    output:
+      stdout_envelope: build_config_stdout
+      file:
+        path: "${workspace}/scoring.config.json"
+        format: "inner config dict only (no status wrapper)"
+    update_state:
+      state: config_ready
+      artifacts.scoring_config: scoring.config.json
+    on_error:
+      exit_code: 1
+      stderr: cli_error
+      message: "JD input invalid — structured_data null or no usable requirement fields"
+
+  # ── 5. Checkpoint: HR confirms weights / hard filters ──────────────────────
+  - id: checkpoint_config_review
+    type: checkpoint
+    checkpoint: config_review
+    pause: true
+    present_to_hr:
+      - read_json: "${workspace}/scoring.config.json"
+        fields: [required_skills, preferred_skills, weights, hard_filters, tiers]
+    hr_actions: [confirm, adjust_weights, apply_preset]
+    on_confirm: parse_cvs_batch
+    update_state:
+      checkpoints.config_review.status: confirmed
+
+  # ── 6. Batch parse CVs ─────────────────────────────────────────────────────
+  - id: parse_cvs_batch
+    when: "cv_paths is not empty"
+    type: foreach
+    foreach: cv_path in cv_paths
+    skill: cv-parser
+    command: parse
+    cli: |
+      python .codex/skills/cv-parser/scripts/run_cv_parse.py \
+        --file "${cv_path}" \
+        --jd-file "${workspace}/jd.raw.txt" \
+        --output "${workspace}/cvs/${stem}.extracted.json"
+    cwd: repository_root
+    requires_env: [ZAI_API_KEY, LLM_BASE_URL]
+    input_envelope: null
+    output:
+      path: "${workspace}/cvs/${stem}.extracted.json"
+      envelope: cv_parser_output
+    stem_rule: "basename of cv_path without .pdf extension, lowercased, spaces → underscores"
+    on_error:
+      exit_code: 1
+      stderr: cli_error
+      action: continue
+      record_failure:
+        path: "${workspace}/cvs/parse-failures.json"
+        entry: { file: "${cv_path}", error_message: from_stderr }
+    update_state:
+      state: cvs_ingesting
+      cv_batch.total: count(cv_paths)
+      cv_batch.parsed: count_success
+      cv_batch.failed: count_failures
+
+  # ── 7. Score each parsed CV ────────────────────────────────────────────────
+  - id: score_each_cv
+    when: "parse_cvs_batch produced at least one extracted file"
+    type: foreach
+    foreach: extracted in glob("${workspace}/cvs/*.extracted.json")
+    skill: scorer
+    command: score
+    cli: |
+      python .codex/skills/scorer/scripts/run_score.py score \
+        --extracted "${extracted}" \
+        --config "${workspace}/scoring.config.json" \
+        --output "${workspace}/scores/${stem}.score.json"
+    cwd: repository_root
+    input:
+      extracted:
+        path: "${extracted}"
+        accepted_envelopes: [cv_parser_output, pure_structured_data]
+        unwrap: structured_data
+      config:
+        path: "${workspace}/scoring.config.json"
+        accepted_envelopes: [build_config_stdout_inner, pure_config_dict]
+        unwrap: "if status==success and config key present, use config"
+    output:
+      path: "${workspace}/scores/${stem}.score.json"
+      envelope: score_output
+    stem_rule: "same stem as matching .extracted.json"
+    on_error:
+      exit_code: 1
+      stderr: cli_error
+      action: continue
+
+  # ── 8. Build rank-items.json (agent-side aggregation) ──────────────────────
+  - id: build_rank_items
+    type: agent_action
+    description: |
+      Aggregate per-candidate scores into rank-items.json for the scorer rank step.
+      No CLI — orchestrator writes JSON from score outputs + extracted names.
+    input_glob: "${workspace}/scores/*.score.json"
+    build:
+      path: "${workspace}/scores/rank-items.json"
+      schema: rank_items_input
+      per_file:
+        candidate_id: "${stem}"
+        total_score: "read .total_score from matching score file"
+    example: |
+      [
+        {"candidate_id": "alice_chen", "total_score": 58.7},
+        {"candidate_id": "bob_lin", "total_score": 72.4}
+      ]
+
+  # ── 9. Rank candidates ─────────────────────────────────────────────────────
+  - id: rank_candidates
+    skill: scorer
+    command: score
+    cli: |
+      python .codex/skills/scorer/scripts/run_score.py score \
+        --extracted "${workspace}/cvs/${first_extracted_stem}.extracted.json" \
+        --config "${workspace}/scoring.config.json" \
+        --rank \
+        --items "${workspace}/scores/rank-items.json" \
+        --output "${workspace}/scores/ranking.json"
+    cwd: repository_root
+    notes: |
+      --extracted is still required by the CLI but only used for the nested score object
+      when --rank is set; pass any valid extracted file from the batch (typically the
+      top-ranked candidate's file after a pre-sort, or the first successful parse).
+      The ranking list itself comes entirely from --items.
+    input:
+      items:
+        path: "${workspace}/scores/rank-items.json"
+        envelope: rank_items_input
+    output:
+      path: "${workspace}/scores/ranking.json"
+      envelope: ranked_score_output
+    update_state:
+      state: ranked
+      artifacts.ranking: scores/ranking.json
+
+  # ── 10. Build comparison rows (agent-side aggregation) ───────────────────────
+  - id: build_comparison_rows
+    type: agent_action
+    description: |
+      Build comparison-rows.json for report-gen from ranking + per-candidate scores.
+      No CLI — map fields per report-gen SKILL.md contract.
+    input:
+      ranking: "${workspace}/scores/ranking.json"
+      scores_glob: "${workspace}/scores/*.score.json"
+      extracted_glob: "${workspace}/cvs/*.extracted.json"
+    build:
+      path: "${workspace}/scores/comparison-rows.json"
+      schema: comparison_rows_input
+      per_ranked_item:
+        rank: "from ranking[].rank"
+        name: "from matching extracted.structured_data.name or candidate_id"
+        total_score: "from score.total_score"
+        skill_match: "from score.dimension_scores.skill_match"
+        experience_match: "from score.dimension_scores.experience_match"
+        education_match: "from score.dimension_scores.education_match"
+        research_quality: "from score.dimension_scores.research_quality"
+        tier: "from score.tier"
+        suggestion_summary: "join full_snapshot.interview_suggestions as rule_id:severity"
+    example: ".codex/skills/report-gen/examples/sample-comparison-rows.json"
+
+  # ── 11. Export Excel shortlist ─────────────────────────────────────────────
+  - id: export_comparison_excel
+    when: "hr_requests_export or auto_export"
+    skill: report-gen
+    command: comparison
+    cli: |
+      python .codex/skills/report-gen/scripts/run_report.py comparison \
+        --position "${position_title}" \
+        --rows "${workspace}/scores/comparison-rows.json" \
+        --output "${workspace}/reports/shortlist.xlsx"
+    cwd: repository_root
+    input:
+      path: "${workspace}/scores/comparison-rows.json"
+      envelope: comparison_rows_input
+    output:
+      stdout:
+        schema: { status: success, format: excel, output_path: string }
+      file: "${workspace}/reports/shortlist.xlsx"
+    update_state:
+      state: exported
+      artifacts.shortlist_report: reports/shortlist.xlsx
+
+  # ── 12. Export top-N PDF reports (optional foreach) ────────────────────────
+  - id: export_top_pdf
+    when: "hr_requests_pdf or top_n_pdf > 0"
+    type: foreach
+    foreach: row in top_n(comparison_rows, n=${top_n_pdf:-3})
+    skill: report-gen
+    command: candidate
+    cli: |
+      python .codex/skills/report-gen/scripts/run_report.py candidate \
+        --extracted "${workspace}/cvs/${candidate_stem}.extracted.json" \
+        --score "${workspace}/scores/${candidate_stem}.score.json" \
+        --position "${position_title}" \
+        --rank ${row.rank} \
+        --output "${workspace}/reports/${candidate_stem}.report.pdf"
+    cwd: repository_root
+    input:
+      extracted:
+        envelope: cv_parser_output
+        unwrap: structured_data
+      score:
+        envelope: score_output
+        also_accepts: ranked_score_output.score
+    output:
+      stdout: { status: success, format: pdf, output_path: string }
+      file: "${workspace}/reports/${candidate_stem}.report.pdf"
+
+outputs:
+  - "${workspace}/jd.structured.json"
+  - "${workspace}/scoring.config.json"
+  - "${workspace}/scores/ranking.json"
+  - "${workspace}/scores/comparison-rows.json"
+  - "${workspace}/reports/shortlist.xlsx"
+  - "${workspace}/cvs/parse-failures.json"
+  - "${workspace}/workspace.state.json"
+  - "${workspace}/agent.audit.jsonl"
+
+quick_reference:
+  full_polyu_pipeline: |
+    # 1. PolyU → structured JD
+    python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse \
+      --external-ref 260818008-IE --output data/agent-workspaces/demo/jd.structured.json
+
+    # 2. Build config (unwraps polyu envelope automatically)
+    python .codex/skills/scorer/scripts/run_score.py build-config \
+      --jd-structured data/agent-workspaces/demo/jd.structured.json \
+      --output data/agent-workspaces/demo/scoring.config.json
+
+    # 3. Parse + score one CV
+    python .codex/skills/cv-parser/scripts/run_cv_parse.py \
+      --file path/to/cv.pdf --jd-file data/agent-workspaces/demo/jd.raw.txt \
+      --output data/agent-workspaces/demo/cvs/alice.extracted.json
+    python .codex/skills/scorer/scripts/run_score.py score \
+      --extracted data/agent-workspaces/demo/cvs/alice.extracted.json \
+      --config data/agent-workspaces/demo/scoring.config.json \
+      --output data/agent-workspaces/demo/scores/alice.score.json
+
+    # 4. Rank (after writing rank-items.json)
+    python .codex/skills/scorer/scripts/run_score.py score \
+      --extracted data/agent-workspaces/demo/cvs/alice.extracted.json \
+      --config data/agent-workspaces/demo/scoring.config.json \
+      --rank --items data/agent-workspaces/demo/scores/rank-items.json \
+      --output data/agent-workspaces/demo/scores/ranking.json
+
+    # 5. Excel report
+    python .codex/skills/report-gen/scripts/run_report.py comparison \
+      --position "Assistant Officer" \
+      --rows data/agent-workspaces/demo/scores/comparison-rows.json \
+      --output data/agent-workspaces/demo/reports/shortlist.xlsx

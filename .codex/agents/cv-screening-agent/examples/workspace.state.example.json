@@ -1,0 +1,33 @@
+{
+  "workspace_id": "polyu-260818008-IE",
+  "state": "config_ready",
+  "created_at": "2026-08-24T06:00:00Z",
+  "updated_at": "2026-08-24T06:15:00Z",
+  "job": {
+    "title": "Assistant Officer",
+    "source": "polyu",
+    "external_ref": "260818008-IE",
+    "position_title": "Assistant Officer"
+  },
+  "artifacts": {
+    "jd_raw": "jd.raw.txt",
+    "jd_structured": "jd.structured.json",
+    "scoring_config": "scoring.config.json",
+    "ranking": null,
+    "comparison_rows": null,
+    "shortlist_report": null
+  },
+  "checkpoints": {
+    "jd_review": { "status": "confirmed", "confirmed_at": "2026-08-24T06:05:00Z" },
+    "config_review": { "status": "pending", "confirmed_at": null },
+    "export_review": { "status": "pending", "confirmed_at": null }
+  },
+  "cv_batch": {
+    "total": 0,
+    "parsed": 0,
+    "failed": 0,
+    "failures": []
+  },
+  "score_version": 1,
+  "pending_intent": null
+}

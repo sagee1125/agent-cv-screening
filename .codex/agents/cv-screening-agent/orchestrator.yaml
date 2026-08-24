@@ -1,0 +1,217 @@
+# CV Screening Agent — global orchestrator configuration.
+# Workflows live in workflows/*.yaml; behavioral guidance in SKILL.md.
+version: "1.0"
+agent_id: cv-screening-agent
+
+role:
+  persona: "Recruitment assistant (copilot, not decision maker)"
+  language: ["zh-HK", "zh-CN", "en"]
+  principles:
+    - "Decision support only; never auto-reject or auto-invite candidates"
+    - "LLM is used only for parsing (CV/JD); scoring and ranking are 100% deterministic"
+    - "Every explanation must cite structured evidence from score or JD provenance fields"
+  forbidden_actions:
+    - auto_reject_candidate
+    - auto_invite_candidate
+    - modify_scoring_weights_without_hr_confirmation
+    - cite_evidence_not_in_structured_output
+
+skills:
+  polyu-import:
+    skill_ref: $skill-polyu-import
+    cli: .codex/skills/polyu-import/scripts/run_polyu_import.py
+    commands: [catalog, fetch, fetch-and-parse]
+    writes_db: false
+    ai: false
+
+  jd-parser:
+    skill_ref: $skill-jd-parser
+    cli: .codex/skills/jd-parser/scripts/run_jd_parse.py
+    ai: optional
+    output_key: structured_data
+
+  scorer:
+    skill_ref: $skill-scorer
+    cli: .codex/skills/scorer/scripts/run_score.py
+    commands: [build-config, score]
+    ai: false
+
+  cv-parser:
+    skill_ref: $skill-cv-parser
+    cli: .codex/skills/cv-parser/scripts/run_cv_parse.py
+    ai: true
+    requires_env: [ZAI_API_KEY, LLM_BASE_URL]
+
+  report-gen:
+    skill_ref: $skill-report-gen
+    cli: .codex/skills/report-gen/scripts/run_report.py
+    commands: [candidate, comparison]
+    ai: false
+
+workspace:
+  root: data/agent-workspaces
+  layout:
+    jd_raw: jd.raw.txt
+    jd_structured: jd.structured.json
+    scoring_config: scoring.config.json
+    cvs_dir: cvs/
+    scores_dir: scores/
+    reports_dir: reports/
+    state: workspace.state.json
+    audit_log: agent.audit.jsonl
+    rank_items: scores/rank-items.json
+    ranking: scores/ranking.json
+    comparison_rows: scores/comparison-rows.json
+    failures: cvs/parse-failures.json
+
+state_machine:
+  initial: idle
+  states:
+    idle: { description: "No active job workspace" }
+    jd_sourced: { description: "JD text or PolyU ref obtained" }
+    jd_parsed: { description: "JD structured; awaiting HR review" }
+    config_ready: { description: "Scoring config built; awaiting HR confirm before CV ingest" }
+    cvs_ingesting: { description: "Batch CV parse and score in progress" }
+    ranked: { description: "Candidates scored and ranked" }
+    exported: { description: "Reports generated" }
+  transitions:
+    - { from: idle, on: source_jd, to: jd_sourced }
+    - { from: jd_sourced, on: parse_jd, to: jd_parsed }
+    - { from: jd_parsed, on: hr_confirm_jd, to: config_ready, requires_checkpoint: jd_review }
+    - { from: config_ready, on: hr_confirm_config, to: cvs_ingesting, requires_checkpoint: config_review }
+    - { from: cvs_ingesting, on: all_cvs_processed, to: ranked }
+    - { from: ranked, on: generate_reports, to: exported }
+
+checkpoints:
+  jd_review:
+    trigger_after: parse_jd
+    required: true
+    present: [must_skills, preferred_skills, language_requirements, provenance_summary]
+    hr_actions: [confirm, edit_via_chat, reparse]
+    on_confirm: build_scoring_config
+
+  config_review:
+    trigger_after: build_scoring_config
+    required: true
+    present: [weights, hard_filters, active_dimensions]
+    hr_actions: [confirm, adjust_weights, apply_preset]
+    on_confirm: start_cv_ingestion
+
+  export_review:
+    trigger_after: rank_candidates
+    required: false
+    present: [top_n_shortlist, fit_bands]
+    hr_actions: [export_excel, export_top_pdf, explain_candidate]
+
+intents:
+  parse:
+    examples:
+      - "幫我 parse 這份 JD"
+      - "從 PolyU 匯入 REF-xxx"
+    workflow: screen-job
+    start_step: source_jd
+
+  clarify:
+    examples:
+      - "語言要求是什麼？"
+      - "為什麼 Python 是 must skill？"
+    action: read_only
+    data_sources: [jd.structured.json]
+
+  edit:
+    examples:
+      - "把 Docker 改成 preferred"
+      - "加上 Kubernetes 為 must skill"
+    requires_confirmation: true
+    mutates: jd.structured.json
+    then: [build_config, checkpoint_config]
+
+  weight:
+    examples:
+      - "提高 language_match 權重"
+      - "用 engineering preset"
+    requires_confirmation: true
+    mutates: scoring.config.json
+    then: [recalculate]
+
+  explain:
+    examples:
+      - "為什麼張三比李四低？"
+      - "這個人的語言分為什麼低？"
+    action: read_only
+    workflow: explain-candidate
+    guardrail: explainability.source_fields_only
+
+  export:
+    examples:
+      - "出 top 10 Excel"
+      - "幫 #1 生成 PDF report"
+    workflow: screen-job
+    start_step: export_reports
+    requires_state: [ranked]
+
+guardrails:
+  explainability:
+    source_fields_only:
+      - dimension.reasoning
+      - dimension.evidence
+      - dimension.gaps
+      - eligibility.results
+      - skill_match_details.hit
+      - skill_match_details.miss
+      - full_snapshot.interview_suggestions
+    on_missing_evidence: "Say evidence not found in CV — do not invent."
+
+  privacy:
+    never_log: [email, phone, raw_cv_text]
+    contact_fields: local_only
+
+  determinism:
+    scoring: no_llm
+    recalc_requires: new_score_version
+
+  bias:
+    never_use_as_scoring_dimensions: [gender, age, ethnicity, photo_appearance]
+
+runtime:
+  cwd: repository_root
+  env:
+    required: [ZAI_API_KEY, LLM_BASE_URL]
+    optional: [JD_PARSER_MODE, CACHE_DIR, LLM_MODEL, LLM_VISION_MODEL]
+  fallbacks:
+    polyu_fetch_failed: ask_hr_paste_jd
+    cv_parse_failed: retry_once_then_flag
+    jd_parse_partial: clarification_prompts
+
+execution_modes:
+  cli:
+    description: "Offline agent, file-based workspace, no DB writes"
+    entry: skill CLI scripts under .codex/skills/
+    use_when: [codex, cursor_agent, batch_offline]
+
+  api:
+    description: "Online HR via frontend, DB persistence"
+    base_url: http://localhost:8000/api/v1
+    mappings:
+      parse_jd: POST /jobs/{id}/parse-jd
+      upload_cv: POST /candidates/upload
+      recalculate: POST /jobs/{id}/matching/recalculate
+      get_ranking: GET /jobs/{id}/candidates
+      candidate_detail: GET /jobs/{id}/matching/candidates/{candidate_id}
+    use_when: [frontend_ui, production_hr]
+
+routing_rules:
+  - match: "intent in [explain, clarify]"
+    executor: read_structured_data
+  - match: "intent in [parse_jd, parse_cv, build_config, rank, export]"
+    executor: skill_cli
+  - match: "intent in [edit, weight]"
+    executor: structured_mutation_with_confirmation
+  - match: "intent == freeform_chat"
+    executor: llm_with_grounding
+    grounding: workspace_artifacts_only
+
+workflows:
+  screen-job: workflows/screen-job.yaml
+  import-polyu: workflows/import-polyu.yaml
+  explain-candidate: workflows/explain-candidate.yaml
