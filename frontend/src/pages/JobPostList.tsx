@@ -1,12 +1,15 @@
 // Job Post list page: container that wires list, JD parser, PolyU sync, and create modal.
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { AgentChatDrawer } from "../components/AgentChat/AgentChatDrawer";
 import { Button } from "../components/ui/button";
 import { Spinner } from "../components/ui/spinner";
 import { JobListPanel } from "../components/JobBoard/JobListPanel";
 import { JDParserPanel } from "../components/JobBoard/JDParserPanel";
 import { JobPostCreate } from "../components/JobPostCreate";
 import { useConfirm } from "../components/Common/ConfirmProvider";
+import { useJobBoardParams } from "../hooks/useJobBoardParams";
+import { useJobPostDetail } from "../hooks/useJobPostDetail";
 import { useJobPosts } from "../hooks/useJobPosts";
 import { usePolyUSync } from "../hooks/usePolyUSync";
 import {
@@ -18,58 +21,67 @@ import type { JobPostStatus } from "../types";
 
 // Top-level page that lists Job Posts and orchestrates create/parse/sync actions.
 export function JobPostList() {
+  const { jobId, status, page, replaceParams } = useJobBoardParams();
   const {
     items,
     total,
-    page,
+    page: listPage,
     limit,
-    status,
+    status: listStatus,
     loading,
     error,
-    setStatus,
-    setPage,
     refresh,
-  } = useJobPosts("all");
+  } = useJobPosts(status, page);
+  const {
+    job: detailedJob,
+    loading: detailLoading,
+    error: detailError,
+    refresh: refreshDetail,
+  } = useJobPostDetail(jobId);
 
   const [workingJobId, setWorkingJobId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const confirm = useConfirm();
 
-  // Derive the selected job from items; fall back to the first item when the
-  // selection is missing or stale. No useEffect needed for selection sync.
+  // Prefer the dedicated detail fetch so the right pane still works off-page.
   const selectedJob = useMemo(() => {
-    if (selectedJobId && items.some((job) => job.id === selectedJobId)) {
-      return items.find((job) => job.id === selectedJobId) ?? null;
-    }
-    return items[0] ?? null;
-  }, [items, selectedJobId]);
+    if (detailedJob && detailedJob.id === jobId) return detailedJob;
+    return items.find((job) => job.id === jobId) ?? null;
+  }, [detailedJob, items, jobId]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / limit)),
     [limit, total]
   );
 
+  // When the URL has no jobId, pin the first visible card so refresh stays on it.
+  useEffect(() => {
+    if (loading || jobId || items.length === 0) return;
+    replaceParams({ jobId: items[0].id });
+  }, [items, jobId, loading, replaceParams]);
+
   // PolyU sync: refresh silently after each import, then a final refresh.
   const { syncing, progress, sync } = usePolyUSync({
     confirm,
-    onJobImported: (jobId) => {
-      setSelectedJobId(jobId);
+    onJobImported: (importedJobId) => {
+      replaceParams({ jobId: importedJobId, status: "all", page: 1 });
       // fire-and-forget: don't wait for the refresh to complete
       void refresh({ silent: true, page: 1, status: "all" });
     },
     onSyncComplete: (nextStatus, nextPage) => {
+      replaceParams({ status: nextStatus, page: nextPage });
       // fire-and-forget: don't wait for the refresh to complete
       void refresh({ silent: true, page: nextPage, status: nextStatus });
     },
   });
 
   const runWithWorking = useCallback(
-    async (jobId: string, action: () => Promise<unknown>) => {
-      setWorkingJobId(jobId);
+    async (targetJobId: string, action: () => Promise<unknown>) => {
+      setWorkingJobId(targetJobId);
       try {
         await action();
-        await refresh();
+        await Promise.all([refresh(), refreshDetail()]);
       } catch (actionError) {
         toast.error(
           actionError instanceof Error ? actionError.message : "Action failed.",
@@ -81,41 +93,75 @@ export function JobPostList() {
         setWorkingJobId(null);
       }
     },
-    [refresh]
+    [refresh, refreshDetail]
   );
 
   const handleDuplicate = useCallback(
-    (jobId: string) => {
-      void runWithWorking(jobId, () => duplicateJobPost(jobId));
+    (targetJobId: string) => {
+      void runWithWorking(targetJobId, () => duplicateJobPost(targetJobId));
     },
     [runWithWorking]
   );
 
   const handleArchive = useCallback(
-    (jobId: string) => {
-      void runWithWorking(jobId, () => deleteJobPost(jobId));
+    (targetJobId: string) => {
+      void runWithWorking(targetJobId, () => deleteJobPost(targetJobId));
     },
     [runWithWorking]
   );
 
   const handleToggleStatus = useCallback(
-    (jobId: string, nextStatus: JobPostStatus) => {
-      void runWithWorking(jobId, () =>
-        patchJobStatus(jobId, { status: nextStatus })
+    (targetJobId: string, nextStatus: JobPostStatus) => {
+      void runWithWorking(targetJobId, () =>
+        patchJobStatus(targetJobId, { status: nextStatus })
       );
     },
     [runWithWorking]
   );
 
+  // Reload list and detail after a JD save so both panes stay in sync.
+  const handleSaved = useCallback(async () => {
+    await Promise.all([refresh(), refreshDetail()]);
+  }, [refresh, refreshDetail]);
+
   // Reload the current list view, then clear the selected job after a hard delete.
   const handleDeleted = useCallback(
-    async (jobId: string) => {
+    async (deletedJobId: string) => {
       await refresh();
-      if (selectedJobId === jobId) {
-        setSelectedJobId(null);
+      if (jobId === deletedJobId) {
+        replaceParams({ jobId: null });
       }
     },
-    [refresh, selectedJobId]
+    [jobId, refresh, replaceParams]
+  );
+
+  // Write the clicked job into the URL without stacking history entries.
+  const handleSelect = useCallback(
+    (nextJobId: string) => {
+      replaceParams({ jobId: nextJobId });
+    },
+    [replaceParams]
+  );
+
+  const agentContext = useMemo(
+    () => ({
+      jobId,
+      jobTitle: selectedJob?.title ?? null,
+      jobDescription: selectedJob?.description ?? null,
+      jdParsedJson: selectedJob?.jdParsedJson ?? null,
+    }),
+    [jobId, selectedJob]
+  );
+
+  const agentBridge = useMemo(
+    () => ({
+      refreshJob: async () => {
+        await Promise.all([refresh(), refreshDetail()]);
+      },
+      selectJob: (nextJobId: string) => replaceParams({ jobId: nextJobId }),
+      openCandidate: (candidateId: string) => replaceParams({ candidateId }),
+    }),
+    [refresh, refreshDetail, replaceParams]
   );
 
   return (
@@ -155,16 +201,18 @@ export function JobPostList() {
           <JobListPanel
             items={items}
             total={total}
-            page={page}
+            page={listPage}
             totalPages={totalPages}
-            status={status}
+            status={listStatus}
             loading={loading}
             error={error}
-            selectedJobId={selectedJob?.id ?? null}
+            selectedJobId={jobId}
             workingJobId={workingJobId}
-            onSelect={setSelectedJobId}
-            onStatusChange={setStatus}
-            onPageChange={setPage}
+            onSelect={handleSelect}
+            onStatusChange={(nextStatus) =>
+              replaceParams({ status: nextStatus, page: 1 })
+            }
+            onPageChange={(nextPage) => replaceParams({ page: nextPage })}
             onDuplicate={handleDuplicate}
             onArchive={handleArchive}
             onToggleStatus={handleToggleStatus}
@@ -174,12 +222,16 @@ export function JobPostList() {
             <JDParserPanel
               key={selectedJob.id}
               job={selectedJob}
-              onSaved={refresh}
+              onSaved={handleSaved}
               onDeleted={handleDeleted}
             />
           ) : (
-            <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
-              Select a job card from the left list to view JD parser details.
+            <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-6 text-center text-sm text-slate-500">
+              {detailLoading
+                ? "Loading job details..."
+                : detailError
+                  ? detailError
+                  : "Select a job card from the left list to view JD parser details."}
             </div>
           )}
         </div>
@@ -188,9 +240,18 @@ export function JobPostList() {
         <JobPostCreate
           modalTitle="Create Job Post"
           onClose={() => setCreateOpen(false)}
-          onSaved={refresh}
+          onSaved={async (createdJobId) => {
+            replaceParams({ jobId: createdJobId });
+            await refresh();
+          }}
         />
       )}
+      <AgentChatDrawer
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        context={agentContext}
+        bridge={agentBridge}
+      />
     </main>
   );
 }

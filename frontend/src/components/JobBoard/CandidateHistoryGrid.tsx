@@ -1,10 +1,11 @@
 // Renders the server-side list of CVs previously uploaded for a job as clickable radar cards.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "../ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { FitLevelBadge } from "../CandidateList/FitLevelBadge";
 import { RadarChart } from "../CandidateMatching/RadarChart";
 import { CandidateMatchDetailModal } from "../CandidateMatching/CandidateMatchDetailModal";
+import { useJobBoardParams } from "../../hooks/useJobBoardParams";
 import { toRadarDimensions } from "../../utils/matching";
 import type { CandidateSummary } from "../../types";
 
@@ -40,8 +41,21 @@ export function CandidateHistoryGrid({
   candidates,
   loading = false,
 }: CandidateHistoryGridProps) {
+  const { candidateId, replaceParams } = useJobBoardParams();
   const [selectedCandidate, setSelectedCandidate] =
     useState<CandidateSummary | null>(null);
+
+  // Open the detail modal when the agent chat sets candidateId in the URL.
+  useEffect(() => {
+    if (!candidateId) {
+      setSelectedCandidate(null);
+      return;
+    }
+    const found = candidates.find(
+      (candidate) => candidate.candidateId === candidateId
+    );
+    if (found) setSelectedCandidate(found);
+  }, [candidateId, candidates]);
 
   if (candidates.length === 0) {
     return (
@@ -67,11 +81,15 @@ export function CandidateHistoryGrid({
             className="w-80 shrink-0 cursor-pointer transition-colors hover:border-sky-300"
             role="button"
             tabIndex={0}
-            onClick={() => setSelectedCandidate(candidate)}
+            onClick={() => {
+              setSelectedCandidate(candidate);
+              replaceParams({ candidateId: candidate.candidateId });
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 setSelectedCandidate(candidate);
+                replaceParams({ candidateId: candidate.candidateId });
               }
             }}
           >
@@ -137,7 +155,10 @@ export function CandidateHistoryGrid({
       <CandidateMatchDetailModal
         jobId={jobId}
         candidate={selectedCandidate}
-        onClose={() => setSelectedCandidate(null)}
+        onClose={() => {
+          setSelectedCandidate(null);
+          replaceParams({ candidateId: null });
+        }}
       />
     </div>
   );

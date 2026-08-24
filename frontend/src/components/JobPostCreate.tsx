@@ -1,3 +1,4 @@
+// Modal wrapper that creates a Job Post and reports the new id to the board.
 import { JobPostForm } from "../pages/JobPostForm";
 import { createJobPost } from "../services/jobService";
 import { Modal } from "./Common/Modal";
@@ -5,9 +6,10 @@ import { Modal } from "./Common/Modal";
 interface JobPostCreateProps {
   modalTitle: string;
   onClose: () => void;
-  onSaved?: () => Promise<void> | void;
+  onSaved?: (jobId: string) => Promise<void> | void;
 }
 
+// Renders the create-job modal and forwards the saved job id to the parent.
 export function JobPostCreate({
   modalTitle,
   onClose,
@@ -20,8 +22,8 @@ export function JobPostCreate({
         saveText="Save & Close"
         closeText="Close"
         onSubmit={async (payload) => {
-          await createJobPost(payload);
-          await onSaved?.();
+          const created = await createJobPost(payload);
+          await onSaved?.(created.id);
           onClose();
         }}
         onClose={onClose}

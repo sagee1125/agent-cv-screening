@@ -1,4 +1,5 @@
 // Left-side job list panel: status filter, list of job cards, and pagination controls.
+import { useLayoutEffect, useRef } from "react";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
@@ -48,6 +49,17 @@ export function JobListPanel({
   onArchive,
   onToggleStatus,
 }: JobListPanelProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Keep the selected card in view after refresh or deep-link.
+  useLayoutEffect(() => {
+    if (!selectedJobId || loading) return;
+    const selectedCard = listRef.current?.querySelector(
+      `[data-job-id="${CSS.escape(selectedJobId)}"]`
+    );
+    selectedCard?.scrollIntoView({ block: "nearest", behavior: "auto" });
+  }, [items, loading, selectedJobId]);
+
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="space-y-4">
@@ -90,10 +102,14 @@ export function JobListPanel({
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
         {!loading && !error ? (
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div
+            ref={listRef}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+          >
             {items.map((job) => (
               <div
                 key={job.id}
+                data-job-id={job.id}
                 role="button"
                 tabIndex={0}
                 onClick={() => onSelect(job.id)}
@@ -103,7 +119,7 @@ export function JobListPanel({
                     onSelect(job.id);
                   }
                 }}
-                className={`cursor-pointer rounded-xl transition ${
+                className={`scroll-mt-2 cursor-pointer rounded-xl transition ${
                   selectedJobId === job.id
                     ? "ring-2 ring-slate-500"
                     : "hover:ring-2 hover:ring-slate-300"

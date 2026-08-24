@@ -15,14 +15,14 @@ interface UseJobPostsState {
 
 const INITIAL_LIMIT = 12;
 
-// Fetch and paginate Job Posts, optionally without flashing the loading state.
-export function useJobPosts(initialStatus: JobPostStatus | "all" = "all") {
+/** Fetch and paginate Job Posts from URL-driven status and page. */
+export function useJobPosts(status: JobPostStatus | "all", page: number) {
   const [state, setState] = useState<UseJobPostsState>({
     items: [],
     total: 0,
-    page: 1,
+    page,
     limit: INITIAL_LIMIT,
-    status: initialStatus,
+    status,
     loading: true,
     error: null,
   });
@@ -32,8 +32,8 @@ export function useJobPosts(initialStatus: JobPostStatus | "all" = "all") {
   // Stable fetcher: takes explicit params and uses functional setState, so it has no state deps.
   const fetchJobPosts = useCallback(
     async (
-      status: JobPostStatus | "all",
-      page: number,
+      nextStatus: JobPostStatus | "all",
+      nextPage: number,
       silent = false
     ) => {
       const seq = ++requestSeqRef.current;
@@ -42,8 +42,8 @@ export function useJobPosts(initialStatus: JobPostStatus | "all" = "all") {
       }
       try {
         const response = await getJobPosts({
-          status,
-          page,
+          status: nextStatus,
+          page: nextPage,
           limit: INITIAL_LIMIT,
         });
         if (seq !== requestSeqRef.current) return;
@@ -53,7 +53,7 @@ export function useJobPosts(initialStatus: JobPostStatus | "all" = "all") {
           total: response.total,
           page: response.page,
           limit: response.limit,
-          status,
+          status: nextStatus,
           loading: false,
           error: silent ? prev.error : null,
         }));
@@ -71,26 +71,10 @@ export function useJobPosts(initialStatus: JobPostStatus | "all" = "all") {
     []
   );
 
-  // Initial mount load only; subsequent loads are driven by user actions.
+  // Reload whenever the URL-driven filter or page changes.
   useEffect(() => {
-    void fetchJobPosts(initialStatus, 1);
-  }, [fetchJobPosts, initialStatus]);
-
-  // Switch the status filter and reload page 1.
-  const setStatus = useCallback(
-    (status: JobPostStatus | "all") => {
-      void fetchJobPosts(status, 1);
-    },
-    [fetchJobPosts]
-  );
-
-  // Change the list page without resetting the status filter.
-  const setPage = useCallback(
-    (page: number) => {
-      void fetchJobPosts(state.status, page);
-    },
-    [fetchJobPosts, state.status]
-  );
+    void fetchJobPosts(status, page);
+  }, [fetchJobPosts, page, status]);
 
   // Reload Job Posts using optional silent/page/status overrides.
   const refresh = useCallback(
@@ -100,18 +84,16 @@ export function useJobPosts(initialStatus: JobPostStatus | "all" = "all") {
       status?: JobPostStatus | "all";
     }) => {
       return fetchJobPosts(
-        options?.status ?? state.status,
-        options?.page ?? state.page,
+        options?.status ?? status,
+        options?.page ?? page,
         options?.silent ?? false
       );
     },
-    [fetchJobPosts, state.page, state.status]
+    [fetchJobPosts, page, status]
   );
 
   return {
     ...state,
-    setStatus,
-    setPage,
     refresh,
   };
 }

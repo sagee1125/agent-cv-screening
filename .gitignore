@@ -13,6 +13,7 @@ frontend/dist/
 backend/data/
 data/cache/
 data/uploads/
+data/agent-workspaces/
 
 # Throwaway dev scripts created during testing
 backend/tmp_*.py
