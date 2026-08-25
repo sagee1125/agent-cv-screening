@@ -1,4 +1,4 @@
-﻿# Agent CV Screening — Backend Summary (Presentation)
+# Agent CV Screening — Backend Summary (Presentation)
 
 ## 0. One-line pitch
 
