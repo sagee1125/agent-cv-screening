@@ -11,8 +11,7 @@ frontend/dist/
 *.tsbuildinfo
 # Local runtime output (backend scripts, eval artifacts)
 backend/data/
-data/cache/
-data/uploads/
+data/
 
 # Throwaway dev scripts created during testing
 backend/tmp_*.py

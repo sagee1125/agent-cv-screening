@@ -198,14 +198,14 @@ flowchart LR
 
 - **Seven Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts (including **`pipeline`** end-to-end orchestrator).
 - **`backend/app/skills/`** as single source of truth for REST + CLI (`cv_parse`, `jd_parse`, `score`, `report`, `polyu_import`).
-- **Chainable offline pipeline**: manual step chain or **`pipeline` skill** one-shot (`polyu/jd → build-config → cv-parse → score → report-gen`).
+- **Chainable offline pipeline**: manual step chain or **`pipeline` skill** one-shot (`polyu/jd → build-config → cv-parse → score → report-gen`), with L1 phase 1 **partial success**, per-candidate retries, `--resume`, and `need_input` when JD/CVs/position are missing.
 - **Envelope unwrapping + fail-fast** on scorer, report-gen, and build-config inputs.
 - **CLI compat tests** in `test_skill_cli_compat.py` (including stubbed PolyU network).
 
 ### Still needed
 
 1. **Self-contained skills** — merge `backend/app/skills/*` and wrapped services into each `.codex/skills/*` folder (`TODO(agent-migration)` in code and skill docs).
-2. **Orchestrator agent** — top-level agent (e.g. `cv-screening-agent`) with `agents/*.yaml` that plans beyond the existing `pipeline` skill (batch runs, retries, feedback loops).
+2. **Orchestrator agent (L1 phase 2)** — top-level screening-agent loop (`ask_user` / `retry_failed`) on top of the pipeline; L1 phase 1 isolation/retries/resume already live in the `pipeline` skill. L2 feedback weight tuning remains later.
 3. **Agent data access** — optional DB helpers or file-based job/candidate storage for multi-CV batch runs.
 4. **Runtime config** — document / centralize env (ZAI_API_KEY, LLM_BASE_URL, JD_PARSER_MODE) for agent runs.
 5. **Evaluation & guardrails** — extend `backend/scripts/eval_jd_parsers.py`; add CV parser accuracy and full pipeline regression tests.

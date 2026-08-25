@@ -28,36 +28,41 @@ python .codex/skills/pipeline/scripts/run_pipeline.py \
   --output-dir data/pipeline_out
 ```
 
-| flag | meaning |
-|---|---|
-| **JD source (choose one)** | |
-| `--jd-file <txt>` | JD text file; parsed with the jd-parser skill |
-| `--jd-json <json>` | Already-parsed JD (jd-parser output, polyu-parsed output, or pure `structured_data`); skips parsing |
-| `--polyu-ref <REF>` | PolyU external ref; fetched + parsed with the polyu-import skill (network) |
-| `--polyu-detail-url <URL>` | PolyU detail URL fallback used together with `--polyu-ref` |
-| **Candidates** | |
-| `--cv <pdf>` (repeatable) | CV PDF to parse and score via the cv-parser skill |
-| `--extracted <json>` (repeatable) | Already-extracted candidate JSON; skips cv-parser |
-| **Reports** | |
-| `--position <title>` | Job title shown on reports (required unless `--skip-reports`) |
-| `--engine <legacy\|matching>` | Scoring engine: `legacy` (default, ScorerService) or `matching` (six-dimension engine that renders the modal-style radar/interview PDF) |
-| `--reference-date <YYYY-MM-DD>` | Reference date for the matching engine (default: today) |
-| `--skip-reports` | Score + rank only; skip PDF/Excel generation |
-| `--output-dir <dir>` | Output directory for intermediate JSONs and reports (default `data/pipeline_out`) |
+| flag                              | meaning                                                                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **JD source (choose one)**        |                                                                                                                                         |
+| `--jd-file <txt>`                 | JD text file; parsed with the jd-parser skill                                                                                           |
+| `--jd-json <json>`                | Already-parsed JD (jd-parser output, polyu-parsed output, or pure `structured_data`); skips parsing                                     |
+| `--polyu-ref <REF>`               | PolyU external ref; fetched + parsed with the polyu-import skill (network)                                                              |
+| `--polyu-detail-url <URL>`        | PolyU detail URL fallback used together with `--polyu-ref`                                                                              |
+| **Candidates**                    |                                                                                                                                         |
+| `--cv <pdf>` (repeatable)         | CV PDF to parse and score via the cv-parser skill                                                                                       |
+| `--extracted <json>` (repeatable) | Already-extracted candidate JSON; skips cv-parser                                                                                       |
+| **Reports**                       |                                                                                                                                         |
+| `--position <title>`              | Job title shown on reports (required unless `--skip-reports`)                                                                           |
+| `--engine <legacy\|matching>`     | Scoring engine: `legacy` (default, ScorerService) or `matching` (six-dimension engine that renders the modal-style radar/interview PDF) |
+| `--reference-date <YYYY-MM-DD>`   | Reference date for the matching engine (default: today)                                                                                 |
+| `--skip-reports`                  | Score + rank only; skip PDF/Excel generation                                                                                            |
+| `--output-dir <dir>`              | Output directory for intermediate JSONs and reports (default `data/pipeline_out`)                                                       |
+| **L1 reliability**                |                                                                                                                                         |
+| `--max-retries <N>`               | Extra attempts per candidate step after the first (default `2`)                                                                         |
+| `--resume`                        | Skip JD parse / CV parse / score when usable artifacts already exist in `--output-dir`                                                  |
+| `--fail-fast`                     | Abort the batch on the first per-candidate failure (legacy all-or-nothing behavior)                                                     |
 
 ## What it runs
 
 1. **JD source**: `polyu fetch-and-parse` (if `--polyu-ref`/`--polyu-detail-url`), or `jd-parser` on `--jd-file`, or reuses `--jd-json` as-is.
 2. **Config**: `scorer build-config --jd-structured <jd json> --output config.json`.
-3. **Extraction**: `cv-parser --file <cv> [--jd-file jd-context.txt] --output extracted-<i>.json` per `--cv`.
-4. **Scoring**: `scorer score --extracted extracted-<i>.json --config config.json --output score-<i>.json` per candidate.
-5. **Ranking**: candidates sorted by `total_score` descending, `rank` 1..N.
-6. **Reports**: `report-gen candidate` PDF one-pager per candidate + `report-gen comparison` Excel across all ranked candidates.
+3. **Extraction**: `cv-parser --file <cv> [--jd-file jd-context.txt] --output extracted-<slug>.json` per `--cv` (`slug` is the source filename stem). One CV failing does not stop the others unless `--fail-fast`.
+4. **Scoring**: `scorer score --extracted extracted-<slug>.json --config config.json --output score-<slug>.json` per successful parse (matching engine writes `detail-<slug>.json`).
+5. **Ranking**: successful candidates sorted by `total_score` descending, `rank` 1..N.
+6. **Reports**: PDF one-pager per successful candidate + Excel across those rows only.
 
 ## Engine modes
 
 - **`legacy` (default)**: `scorer build-config` + `scorer score` -> `dimension_scores` + `interview_suggestions`. PDF radar is drawn from `dimension_scores`.
 - **`matching`**: `scorer match` per candidate -> the same radar/interview-question detail payload the frontend candidate-match modal shows (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions` with per-dimension reasoning/gaps, `interview_questions`). PDFs render the modal content: radar chart, dimension details, and suggested interview questions. The Excel rows map `core_skill_match` / `relevant_experience` / `education_certification` / `evidence_impact` to the standard comparison columns.
+
 ## Output manifest
 
 stdout prints a JSON manifest:
@@ -65,6 +70,7 @@ stdout prints a JSON manifest:
 ```json
 {
   "status": "success",
+  "engine": "legacy",
   "output_dir": ".../data/pipeline_out",
   "jd_source": ".../data/pipeline_out/jd-parse.json",
   "config_json": ".../data/pipeline_out/config.json",
@@ -80,12 +86,15 @@ stdout prints a JSON manifest:
       "report_pdf": "..."
     }
   ],
-  "reports": {"comparison_xlsx": "..."}
+  "failures": [],
+  "ask": null,
+  "reports": { "comparison_xlsx": "..." }
 }
 ```
 
-- Intermediate files (`jd-parse.json`, `config.json`, `extracted-*.json`, `score-*.json`, `rows.json`) are kept in `--output-dir` for inspection and re-runs.
-- On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0.
+- `status` is `success` (everyone succeeded), `partial_success` (at least one candidate succeeded and at least one failed), `error` (JD/config hard-fail or zero candidates succeeded), or `need_input` (missing JD, CVs, or `--position`).
+- Intermediate files (`jd-parse.json`, `config.json`, `extracted-<slug>.json`, `score-<slug>.json`, `manifest.json`, `rows.json`) are kept in `--output-dir` for inspection and `--resume`.
+- Exit codes: `0` for `success` / `partial_success`; `2` for `need_input` (stdout JSON with `missing` + `questions`); `1` for `error` (stderr JSON).
 
 ## Behavior notes
 
@@ -93,6 +102,8 @@ stdout prints a JSON manifest:
 - `--jd-file` text is written to `jd-context.txt` and passed to the cv-parser as JD context.
 - `--jd-json` from `polyu fetch-and-parse` supplies its `jd_text` as CV context; from `jd-parser` there is no original text, so no JD context is passed to cv-parser.
 - `--polyu-detail-url` is only accepted together with `--polyu-ref` (catalog fallback); it cannot be combined with `--jd-file` or `--jd-json`.
+- Per-candidate steps (CV parse, score/match, PDF) retry `--max-retries` extra times; JD fetch/parse and `build-config` remain batch-hard failures.
+- `--resume` skips a step when the target JSON in `--output-dir` already loads as an object.
 - No DB writes, no REST API calls — this is the offline equivalent of the web demo flow.
 
 ## Offline example (no LLM, no network)
