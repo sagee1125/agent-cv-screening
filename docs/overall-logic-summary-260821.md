@@ -1,6 +1,4 @@
-﻿# Agent CV Screening — Summary
-
-> English | Concise | Module-by-module, tech stack, AI parts → skills, agent roadmap
+# Agent CV Screening — Backend Summary (Presentation)
 
 ## 0. One-line pitch
 
@@ -112,7 +110,6 @@ flowchart LR
 | `scorer`       | `run_score.py`        | `score_candidate_skill`, `rank_candidates_skill`, `build_scoring_config_from_jd`       | ❌ deterministic                                 |
 | `report-gen`   | `run_report.py`       | `generate_candidate_report_skill`, `generate_comparison_report_skill`                  | ❌ reportlab / openpyxl                          |
 | `polyu-import` | `run_polyu_import.py` | `list_polyu_catalog_skill`, `fetch_polyu_job_skill`, `fetch_and_parse_polyu_job_skill` | ❌ httpx scrape; parse step uses jd-parser       |
-| `pipeline`     | `run_pipeline.py`     | chains polyu-import, jd-parser, cv-parser, scorer, report-gen skill CLIs                | ✅ cv-parser step uses LLM when parsing PDFs      |
 | `write-prd`    | (docs)                | —                                                                                      | ✅ LLM-assisted PRD                              |
 
 > Each skill has `SKILL.md`, `agents/openai.yaml`, `scripts/_bootstrap.py` (repo-root cwd + `backend/` on `sys.path`), and examples. CLI scripts call the **same** functions as the REST API where applicable; PolyU skill does **not** write to DB (REST `/sync-polyu/*` still persists jobs).
@@ -139,12 +136,6 @@ flowchart LR
 ```
 
 ```bash
-# One command (pipeline skill) — legacy or matching engine
-python .codex/skills/pipeline/scripts/run_pipeline.py \
-  --jd-file jd.txt --cv cv1.pdf --cv cv2.pdf \
-  --position "Backend Engineer" --output-dir data/pipeline_out
-
-# Manual chain (same steps as pipeline skill)
 # Option A: JD from PolyU
 python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse --external-ref <REF> --output polyu.json
 python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured polyu.json --output config.json
@@ -187,7 +178,7 @@ Regression coverage: `backend/tests/unit/test_skill_cli_compat.py` (CLI ↔ `app
 
 ```mermaid
 flowchart LR
-    A["✅ Today: REST + frontend + 7 CLI skills<br/>+ app/skills shared layer"] --> B["Step 1: self-contained skills<br/>(move services into .codex/skills)"]
+    A["✅ Today: REST + frontend + 6 CLI skills<br/>+ app/skills shared layer"] --> B["Step 1: self-contained skills<br/>(move services into .codex/skills)"]
     B --> C["Step 2: orchestrator agent YAML<br/>(cv-screening-agent)"]
     C --> D["Step 3: agent data layer<br/>(file store or DB helpers)"]
     D --> E["Step 4: evals + guardrails<br/>(CV accuracy, full pipeline eval)"]
@@ -196,16 +187,16 @@ flowchart LR
 
 ### Done (since initial roadmap)
 
-- **Seven Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts (including **`pipeline`** end-to-end orchestrator).
+- **Six Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts.
 - **`backend/app/skills/`** as single source of truth for REST + CLI (`cv_parse`, `jd_parse`, `score`, `report`, `polyu_import`).
-- **Chainable offline pipeline**: manual step chain or **`pipeline` skill** one-shot (`polyu/jd → build-config → cv-parse → score → report-gen`).
+- **Chainable offline pipeline**: polyu/jd → build-config → cv-parse → score → report-gen (JSON files between steps).
 - **Envelope unwrapping + fail-fast** on scorer, report-gen, and build-config inputs.
 - **CLI compat tests** in `test_skill_cli_compat.py` (including stubbed PolyU network).
 
 ### Still needed
 
 1. **Self-contained skills** — merge `backend/app/skills/*` and wrapped services into each `.codex/skills/*` folder (`TODO(agent-migration)` in code and skill docs).
-2. **Orchestrator agent** — top-level agent (e.g. `cv-screening-agent`) with `agents/*.yaml` that plans beyond the existing `pipeline` skill (batch runs, retries, feedback loops).
+2. **Orchestrator agent** — top-level agent (e.g. `cv-screening-agent`) with `agents/*.yaml` that plans the pipeline end-to-end instead of manual shell chaining.
 3. **Agent data access** — optional DB helpers or file-based job/candidate storage for multi-CV batch runs.
 4. **Runtime config** — document / centralize env (ZAI_API_KEY, LLM_BASE_URL, JD_PARSER_MODE) for agent runs.
 5. **Evaluation & guardrails** — extend `backend/scripts/eval_jd_parsers.py`; add CV parser accuracy and full pipeline regression tests.

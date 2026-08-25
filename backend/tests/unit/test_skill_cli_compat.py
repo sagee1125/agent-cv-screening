@@ -30,7 +30,6 @@ SCRIPT_NAMES = {
     "scorer": "run_score.py",
     "report-gen": "run_report.py",
     "polyu-import": "run_polyu_import.py",
-    "pipeline": "run_pipeline.py",
 }
 
 
@@ -609,58 +608,3 @@ def test_cv_parser_cli_wraps_skill_function(tmp_path, monkeypatch, capsys) -> No
     assert exit_code == 0
     assert cli_json == fake_result
     assert calls == [(str(cv_path), "Some JD context")]
-
-
-def test_pipeline_rejects_orphan_polyu_detail_url(tmp_path, monkeypatch, capsys) -> None:
-    """--polyu-detail-url without --polyu-ref fails fast instead of overriding --jd-file."""
-    module = _import_script("pipeline")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            module.__file__,
-            "--jd-file",
-            str(tmp_path / "jd.txt"),
-            "--polyu-detail-url",
-            "https://jobs.polyu.edu.hk/job_detail.php?job=123",
-            "--extracted",
-            str(REPORT_GEN_SAMPLE_EXTRACTED_PATH),
-            "--skip-reports",
-        ],
-    )
-    exit_code = module.main()
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    err = json.loads(captured.err)
-    assert err["status"] == "error"
-    assert "polyu-detail-url" in err["error_message"]
-
-
-def test_pipeline_matching_offline_skip_reports(tmp_path, monkeypatch, capsys) -> None:
-    """Pipeline matching engine runs end-to-end with pre-parsed JD + extracted JSON (no LLM)."""
-    module = _import_script("pipeline")
-    out_dir = tmp_path / "pipeline_out"
-    exit_code, manifest = _run_cli(
-        module,
-        [
-            "--jd-json",
-            str(SAMPLE_JD_STRUCTURED_PATH),
-            "--extracted",
-            str(REPORT_GEN_SAMPLE_EXTRACTED_PATH),
-            "--engine",
-            "matching",
-            "--skip-reports",
-            "--output-dir",
-            str(out_dir),
-        ],
-        monkeypatch,
-        capsys,
-    )
-    assert exit_code == 0
-    assert manifest["status"] == "success"
-    assert manifest["engine"] == "matching"
-    assert manifest["candidates"][0]["detail_json"]
-    assert manifest["candidates"][0]["score_json"] is None
-    row = manifest["candidates"][0]
-    assert row["total_score"] >= 0
-    assert (out_dir / "detail-1.json").is_file()
