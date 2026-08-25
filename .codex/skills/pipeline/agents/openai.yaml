@@ -1,0 +1,4 @@
+interface:
+  display_name: "Screening Pipeline"
+  short_description: "Run the full screening pipeline end-to-end (JD -> config -> CVs -> score -> reports)"
+  default_prompt: "Use $skill-pipeline to run the whole candidate screening pipeline for: <jd + cvs>"

@@ -1,96 +1,122 @@
-"""CLI entry point for the report-gen skill (agent-facing).
+---
+name: report-gen
+description: "Generate candidate PDF one-pager or Excel comparison reports from parsed CV data and scorer output by running the project Reporter service directly via CLI. Use when: (1) a scored candidate needs a PDF report, (2) multiple ranked candidates need an Excel comparison, or (3) completing the agent pipeline after scoring."
+---
 
-Subcommands:
-    candidate    Generate a one-page PDF report for a scored candidate.
-    comparison   Generate an Excel comparison report for ranked candidates.
+# Report Generator Skill
 
-Example (from repository root):
-    python .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --score score.json --position "Backend Engineer" --output report.pdf
-    python .codex/skills/report-gen/scripts/run_report.py comparison --position "Backend Engineer" --rows rows.json --output comparison.xlsx
-"""
-from __future__ import annotations
+Generate a one-page PDF report for a scored candidate, or an Excel comparison report for multiple ranked candidates, by running the project Reporter service directly as a Python script (no HTTP, no DB).
 
-import argparse
-import json
-import sys
-from pathlib import Path
+## Prerequisites
 
-import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+Install the backend Python dependencies from the repository root:
 
-from app.skills.report import generate_candidate_report_skill, generate_comparison_report_skill
+```bash
+pip install -r backend/requirements.txt
+```
 
+Run all commands from the repository root so `_bootstrap.py` can locate `backend/app`.
 
-# Load a JSON file (BOM-tolerant) into a dict or list.
-def _read_json(path: str) -> object:
-    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+## Pipeline
 
+JD text → **jd-parser** → **build-config** → **score** → **report-gen** → PDF / Excel.
 
-# Generate a one-page PDF report for one scored candidate.
-def _run_candidate(args: argparse.Namespace) -> int:
-    try:
-        extracted = _read_json(args.extracted)
-        score = _read_json(args.score)
-        result = generate_candidate_report_skill(
-            extracted_data=extracted,
-            score_result=score,
-            position_name=args.position,
-            candidate_name=args.name,
-            rank=args.rank,
-            output_path=args.output,
-        )
-    except Exception as exc:  # surface errors to the agent instead of a traceback
-        print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
-        return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+```bash
+# 1. Score a candidate (scorer skill)
+python .codex/skills/scorer/scripts/run_score.py score \
+  --extracted extracted.json --config config.json --output score.json
 
+# 2. Generate the candidate PDF one-pager
+python .codex/skills/report-gen/scripts/run_report.py candidate \
+  --extracted extracted.json --score score.json --position "Backend Engineer" --rank 1 --output candidate-report.pdf
 
-# Generate an Excel comparison report from ranked candidate rows.
-def _run_comparison(args: argparse.Namespace) -> int:
-    try:
-        rows = _read_json(args.rows)
-        if not isinstance(rows, list):
-            raise ValueError("--rows must contain a JSON array of candidate rows")
-        result = generate_comparison_report_skill(
-            position_name=args.position,
-            rows=rows,
-            output_path=args.output,
-        )
-    except Exception as exc:  # surface errors to the agent instead of a traceback
-        print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
-        return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+# 3. Generate the Excel comparison (ranked rows)
+python .codex/skills/report-gen/scripts/run_report.py comparison \
+  --position "Backend Engineer" --rows rows.json --output comparison.xlsx
+```
 
+## Run
 
-# Build the argparse CLI with candidate and comparison subcommands.
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate candidate PDF or Excel comparison reports.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+### `candidate` — one-page PDF report
 
-    candidate_parser = subparsers.add_parser("candidate", help="Generate a one-page PDF report for a scored candidate.")
-    candidate_parser.add_argument("--extracted", required=True, help="Path to JSON file with CV Parser structured_data.")
-    candidate_parser.add_argument("--score", required=True, help="Path to JSON file with scorer output.")
-    candidate_parser.add_argument("--position", required=True, help="Job position name shown on the report.")
-    candidate_parser.add_argument("--name", default=None, help="Optional candidate name override.")
-    candidate_parser.add_argument("--rank", type=int, default=0, help="Optional candidate rank shown on the report.")
-    candidate_parser.add_argument("--output", required=True, help="Path to write the PDF report file.")
-    candidate_parser.set_defaults(func=_run_candidate)
+```bash
+python .codex/skills/report-gen/scripts/run_report.py candidate \
+  --extracted <extracted.json> \
+  --score <score.json> \
+  --position "<job title>" \
+  [--name "Override Name"] \
+  [--rank 1] \
+  --output <report.pdf>
+```
 
-    comparison_parser = subparsers.add_parser("comparison", help="Generate an Excel comparison report for ranked candidates.")
-    comparison_parser.add_argument("--position", required=True, help="Job position name shown on the report.")
-    comparison_parser.add_argument("--rows", required=True, help="Path to JSON file with a list of candidate rows.")
-    comparison_parser.add_argument("--output", required=True, help="Path to write the XLSX report file.")
-    comparison_parser.set_defaults(func=_run_comparison)
-    return parser
+| flag | meaning |
+|---|---|
+| `--extracted` (required) | JSON file with CV Parser `structured_data` (name, education, experience) |
+| `--score` (required) | JSON file with Scorer output (`total_score`, `tier`, `dimension_scores`, `skill_match_details`, `full_snapshot`); a ranked `{"score": {...}, "ranking": [...]}` envelope is auto-unwrapped |
+| `--position` (required) | Job position name shown on the report |
+| `--name` (optional) | Override candidate name; defaults to `extracted_data.name` or `Unknown` |
+| `--rank` (optional) | Candidate rank shown on the report (default `0`) |
+| `--output` (required) | Path to write the PDF report file |
 
+### `comparison` — Excel comparison report
 
-# Parse argv and dispatch to the selected subcommand.
-def main() -> int:
-    parser = _build_parser()
-    args = parser.parse_args()
-    return args.func(args)
+```bash
+python .codex/skills/report-gen/scripts/run_report.py comparison \
+  --position "<job title>" \
+  --rows <rows.json> \
+  --output <report.xlsx>
+```
 
+| flag | meaning |
+|---|---|
+| `--position` (required) | Job position name shown on the report |
+| `--rows` (required) | JSON file with a list of ranked candidate rows |
+| `--output` (required) | Path to write the XLSX report file |
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+## Input JSON fields
+
+### `--score` (candidate)
+
+- `total_score` (number), `tier` (string)
+- `dimension_scores` (object) — `skill_match` is used as the hit rate (same as the REST endpoint)
+- `skill_match_details` (object) — `hit` / `miss` arrays (or `full_snapshot.skill_match_details`)
+- `full_snapshot.interview_suggestions` (array) — or top-level `interview_suggestions`
+
+### `--rows` (comparison)
+
+Each row uses the same fields as the REST `/reports/comparison` endpoint:
+
+`rank`, `name`, `total_score`, `skill_match`, `experience_match`, `education_match`, `research_quality`, `tier`, `suggestion_summary`
+
+## Output
+
+- stdout prints a JSON result: `{"status": "success", "format": "pdf" | "excel", "output_path": "..."}`
+- `--output` is the report file path (`.pdf` / `.xlsx`), not a JSON path
+- On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0
+
+## Integration with the Scorer skill
+
+Feed the Scorer skill output directly as `--score`:
+
+- Without `--rank`: `run_score.py score --output score.json` writes a plain score object (`total_score`, `dimension_scores`, `skill_match_details`, `full_snapshot`) that works as-is.
+- With `--rank`: the scorer writes `{"score": {...}, "ranking": [...]}`; the report-gen CLI auto-unwraps the top-level `score` key before generating the PDF.
+- `--extracted` may also be a CV Parser full output; its `structured_data` dict is auto-unwrapped.
+- Invalid score input (no `total_score`, and no `full_snapshot.dimension_scores`) fails fast: the CLI prints `{"status": "error", "error_message": "..."}` to stderr and exits 1 — no silent zero-score PDF.
+
+## Example
+
+```bash
+python .codex/skills/report-gen/scripts/run_report.py candidate \
+  --extracted .codex/skills/report-gen/examples/sample-extracted.json \
+  --score .codex/skills/report-gen/examples/sample-score.json \
+  --position "Backend Engineer" --rank 1 --output /tmp/candidate-report.pdf
+
+python .codex/skills/report-gen/scripts/run_report.py comparison \
+  --position "Backend Engineer" \
+  --rows .codex/skills/report-gen/examples/sample-comparison-rows.json \
+  --output /tmp/comparison.xlsx
+```
+
+## Future migration
+
+TODO(agent-migration): When the legacy REST API (traditional frontend) is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
