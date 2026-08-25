@@ -1,0 +1,4 @@
+interface:
+  display_name: "Screening Agent (L1)"
+  short_description: "Run pipeline with ask/retry loop and resumable state"
+  default_prompt: "Use $skill-screening-agent to run screening with L1 behavior (need_input + retries + partial success handling) for: <jd + cvs>"
