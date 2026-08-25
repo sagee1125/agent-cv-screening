@@ -1,6 +1,6 @@
 ---
 name: scorer
-description: "Score an extracted candidate profile against a scoring config (five dimension scores, weighted total, tier, rejection reasons, interview suggestions), build scoring configs from JD parser output, and rank candidates by running the project Scorer Python service directly via CLI. Use when: (1) a parsed candidate profile needs scoring, (2) ranking multiple candidates, (3) a scoring config needs to be built from a JD, or (4) a user asks to run the Scorer skill or replicate the /jobs/{id}/score logic offline."
+description: "Score an extracted candidate profile against a scoring config (five dimension scores, weighted total, tier, rejection reasons, interview suggestions), build scoring configs from JD parser output, rank candidates, or run the deterministic matching engine (radar + interview questions) by running the project Scorer Python service directly via CLI. Use when: (1) a parsed candidate profile needs scoring, (2) ranking multiple candidates, (3) a scoring config needs to be built from a JD, (4) radar/interview-question matching detail is needed for a report, or (5) a user asks to run the Scorer skill or replicate the /jobs/{id}/score logic offline."
 ---
 
 # Scorer Skill
@@ -66,6 +66,32 @@ Output JSON:
 - Only dimensions whose requirements are present in the JD are activated in `weights` (e.g. `language_match`, `work_authorization_match`, `location_match`).
 - Feed the `--jd-structured` output of the JD Parser skill directly; the CLI unwraps the `structured_data` key automatically.
 
+### `match` - run the deterministic matching engine (radar + interview questions)
+
+Runs the same pure six-dimension engine the frontend candidate-match modal uses. The output detail payload (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions`, `top_strengths`, `key_gaps`, `interview_questions`) feeds `report-gen candidate --detail` to render the modal-style PDF.
+
+```bash
+python .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd_structured.json> --cv-extracted <extracted.json> [--reference-date YYYY-MM-DD] [--output detail.json]
+```
+
+| flag | meaning |
+|---|---|
+| `--jd-structured` (required) | JD parser output (auto-unwrapped) or pure `structured_data` |
+| `--cv-extracted` (required) | CV parser output (auto-unwrapped) or pure `structured_data` |
+| `--reference-date` (optional) | Reference date used for experience/recency (default: today) |
+| `--output` (optional) | Write the raw detail JSON (no envelope) so it feeds `report-gen candidate --detail` |
+
+- Deterministic, no LLM, no DB.
+- With `--output`, the file contains ONLY the inner detail dict, ready for `report-gen candidate --detail`.
+
+Example:
+
+```bash
+python .codex/skills/scorer/scripts/run_score.py match \
+  --jd-structured .codex/skills/scorer/examples/sample-jd-structured.json \
+  --cv-extracted .codex/skills/scorer/examples/sample-extracted.json \
+  --output detail.json
+```
 ## Scoring config keys
 
 | key | type | default |

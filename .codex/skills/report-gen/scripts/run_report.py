@@ -6,6 +6,7 @@ Subcommands:
 
 Example (from repository root):
     python .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --score score.json --position "Backend Engineer" --output report.pdf
+    python .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --detail detail.json --position "Assistant Facilities Officer" --output report.pdf
     python .codex/skills/report-gen/scripts/run_report.py comparison --position "Backend Engineer" --rows rows.json --output comparison.xlsx
 """
 from __future__ import annotations
@@ -25,11 +26,14 @@ def _read_json(path: str) -> object:
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
 
-# Generate a one-page PDF report for one scored candidate.
+# Generate a one-page PDF report for one scored candidate (optionally with matching detail).
 def _run_candidate(args: argparse.Namespace) -> int:
     try:
+        if not args.score and not args.detail:
+            raise ValueError("at least one of --score or --detail is required")
         extracted = _read_json(args.extracted)
-        score = _read_json(args.score)
+        score = _read_json(args.score) if args.score else None
+        detail = _read_json(args.detail) if args.detail else None
         result = generate_candidate_report_skill(
             extracted_data=extracted,
             score_result=score,
@@ -37,6 +41,7 @@ def _run_candidate(args: argparse.Namespace) -> int:
             candidate_name=args.name,
             rank=args.rank,
             output_path=args.output,
+            detail_result=detail,
         )
     except Exception as exc:  # surface errors to the agent instead of a traceback
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -70,7 +75,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     candidate_parser = subparsers.add_parser("candidate", help="Generate a one-page PDF report for a scored candidate.")
     candidate_parser.add_argument("--extracted", required=True, help="Path to JSON file with CV Parser structured_data.")
-    candidate_parser.add_argument("--score", required=True, help="Path to JSON file with scorer output.")
+    candidate_parser.add_argument("--score", default=None, help="Path to JSON file with scorer output (optional when --detail is given).")
+    candidate_parser.add_argument("--detail", default=None, help="Optional path to matching detail JSON (radar_dimensions, interview_questions, eligibility).")
     candidate_parser.add_argument("--position", required=True, help="Job position name shown on the report.")
     candidate_parser.add_argument("--name", default=None, help="Optional candidate name override.")
     candidate_parser.add_argument("--rank", type=int, default=0, help="Optional candidate rank shown on the report.")

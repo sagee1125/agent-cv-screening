@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "engine": "legacy",
+  "output_dir": "data/pipeline_out",
+  "jd_source": "data/pipeline_out/jd-parse.json",
+  "config_json": "data/pipeline_out/config.json",
+  "candidates": [
+    {
+      "rank": 1,
+      "name": "Alice Chen",
+      "source": "cv1.pdf",
+      "total_score": 85.2,
+      "tier": "Tier 1",
+      "extracted_json": "data/pipeline_out/extracted-1.json",
+      "score_json": "data/pipeline_out/score-1.json",
+      "detail_json": null,
+      "report_pdf": "data/pipeline_out/report-1-Alice_Chen.pdf"
+    }
+  ],
+  "reports": {
+    "comparison_xlsx": "data/pipeline_out/comparison.xlsx"
+  }
+}

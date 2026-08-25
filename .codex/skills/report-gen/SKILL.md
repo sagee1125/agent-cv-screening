@@ -5,7 +5,7 @@ description: "Generate candidate PDF one-pager or Excel comparison reports from 
 
 # Report Generator Skill
 
-Generate a one-page PDF report for a scored candidate, or an Excel comparison report for multiple ranked candidates, by running the project Reporter service directly as a Python script (no HTTP, no DB).
+Generate a candidate PDF report with a radar profile, dimension details, and suggested interview questions (mirroring the frontend candidate-match modal), or an Excel comparison report for multiple ranked candidates, by running the project Reporter service directly as a Python script (no HTTP, no DB).
 
 ## Prerequisites
 
@@ -52,7 +52,8 @@ python .codex/skills/report-gen/scripts/run_report.py candidate \
 | flag | meaning |
 |---|---|
 | `--extracted` (required) | JSON file with CV Parser `structured_data` (name, education, experience) |
-| `--score` (required) | JSON file with Scorer output (`total_score`, `tier`, `dimension_scores`, `skill_match_details`, `full_snapshot`); a ranked `{"score": {...}, "ranking": [...]}` envelope is auto-unwrapped |
+| `--score` (optional) | JSON file with Scorer output (`total_score`, `tier`, `dimension_scores`, `skill_match_details`, `full_snapshot`); a ranked `{"score": {...}, "ranking": [...]}` envelope is auto-unwrapped. Required when `--detail` is not given |
+| `--detail` (optional) | Matching-engine detail JSON (radar_dimensions, interview_questions, eligibility, evidence_confidence, fit_band, top_strengths, key_gaps) — the same payload the frontend candidate-match modal shows. When given, the PDF renders a radar chart + dimension details + suggested interview questions |
 | `--position` (required) | Job position name shown on the report |
 | `--name` (optional) | Override candidate name; defaults to `extracted_data.name` or `Unknown` |
 | `--rank` (optional) | Candidate rank shown on the report (default `0`) |
@@ -82,6 +83,17 @@ python .codex/skills/report-gen/scripts/run_report.py comparison \
 - `skill_match_details` (object) — `hit` / `miss` arrays (or `full_snapshot.skill_match_details`)
 - `full_snapshot.interview_suggestions` (array) — or top-level `interview_suggestions`
 
+### `--detail` (candidate, optional)
+
+Matching-engine output (from `scorer match` or the REST match-detail endpoint):
+
+- `match_score` (number), `fit_band` (string), `evidence_confidence` (number)
+- `radar_dimensions` (array) - each with `label`, `score` (or null), `status`, `normalized_weight`, `reasoning.summary`, `gaps[]`
+- `interview_questions` (array) - each with `question`, `priority`, `template_id`
+- `eligibility` (object) - `status` + `results[]`
+- `top_strengths` / `key_gaps` (string arrays)
+
+When `--detail` is given, the PDF shows the frontend modal content: radar chart, dimension details (score/status/weight/reasoning/gaps), and suggested interview questions. Without it, the PDF falls back to the scorer `dimension_scores` radar and `interview_suggestions`.
 ### `--rows` (comparison)
 
 Each row uses the same fields as the REST `/reports/comparison` endpoint:

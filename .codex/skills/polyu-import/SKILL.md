@@ -97,6 +97,8 @@ Output combines fetch metadata with the JD parser result:
 
 PolyU JD text feeds directly into the JD parser and the rest of the screening pipeline:
 
+> Tip: you can also run the whole chain in one command with the `pipeline` skill (`.codex/skills/pipeline`).
+
 ```bash
 # 1. Fetch + parse one PolyU job into structured JD requirements
 python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse --external-ref <REF> --output polyu-parsed.json
