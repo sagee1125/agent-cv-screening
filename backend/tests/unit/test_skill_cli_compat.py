@@ -663,4 +663,4 @@ def test_pipeline_matching_offline_skip_reports(tmp_path, monkeypatch, capsys) -
     assert manifest["candidates"][0]["score_json"] is None
     row = manifest["candidates"][0]
     assert row["total_score"] >= 0
-    assert (out_dir / "detail-1.json").is_file()
+    assert (out_dir / "detail-sample-extracted.json").is_file()

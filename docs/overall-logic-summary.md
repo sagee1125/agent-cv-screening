@@ -1,7 +1,5 @@
 ﻿# Agent CV Screening — Summary
 
-> English | Concise | Module-by-module, tech stack, AI parts → skills, agent roadmap
-
 ## 0. One-line pitch
 
 An **AI-powered CV screening system**: parse a Job Description + candidate CVs (PDF) into structured data, score & rank candidates with **fully deterministic logic**, and export PDF/Excel reports — with a privacy-first, cacheable LLM pipeline. The same logic runs via **REST (frontend)** or **offline agent CLI skills** (Codex / future orchestrator).
@@ -105,15 +103,16 @@ flowchart LR
 
 ### Skill inventory
 
-| Skill folder   | CLI script            | Wraps (`backend/app/skills/`)                                                          | AI?                                              |
-| -------------- | --------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `cv-parser`    | `run_cv_parse.py`     | `parse_cv_skill`                                                                       | ✅ LLM (vision + text fallback)                  |
-| `jd-parser`    | `run_jd_parse.py`     | `parse_jd_skill`                                                                       | ✅ optional (hybrid/qwen); default rule = no LLM |
-| `scorer`       | `run_score.py`        | `score_candidate_skill`, `rank_candidates_skill`, `build_scoring_config_from_jd`       | ❌ deterministic                                 |
-| `report-gen`   | `run_report.py`       | `generate_candidate_report_skill`, `generate_comparison_report_skill`                  | ❌ reportlab / openpyxl                          |
-| `polyu-import` | `run_polyu_import.py` | `list_polyu_catalog_skill`, `fetch_polyu_job_skill`, `fetch_and_parse_polyu_job_skill` | ❌ httpx scrape; parse step uses jd-parser       |
-| `pipeline`     | `run_pipeline.py`     | chains polyu-import, jd-parser, cv-parser, scorer, report-gen skill CLIs                | ✅ cv-parser step uses LLM when parsing PDFs      |
-| `write-prd`    | (docs)                | —                                                                                      | ✅ LLM-assisted PRD                              |
+| Skill folder      | CLI script            | Wraps (`backend/app/skills/`)                                                          | AI?                                              |
+| ----------------- | --------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `cv-parser`       | `run_cv_parse.py`     | `parse_cv_skill`                                                                       | ✅ LLM (vision + text fallback)                  |
+| `jd-parser`       | `run_jd_parse.py`     | `parse_jd_skill`                                                                       | ✅ optional (hybrid/qwen); default rule = no LLM |
+| `scorer`          | `run_score.py`        | `score_candidate_skill`, `rank_candidates_skill`, `build_scoring_config_from_jd`       | ❌ deterministic                                 |
+| `report-gen`      | `run_report.py`       | `generate_candidate_report_skill`, `generate_comparison_report_skill`                  | ❌ reportlab / openpyxl                          |
+| `polyu-import`    | `run_polyu_import.py` | `list_polyu_catalog_skill`, `fetch_polyu_job_skill`, `fetch_and_parse_polyu_job_skill` | ❌ httpx scrape; parse step uses jd-parser       |
+| `pipeline`        | `run_pipeline.py`     | chains polyu-import, jd-parser, cv-parser, scorer, report-gen skill CLIs               | ✅ cv-parser step uses LLM when parsing PDFs     |
+| `screening-agent` | `run_agent.py`        | orchestrates pipeline rounds (`need_input`/partial retry/`resume`)                     | ⚙️ rule-based loop (no extra LLM decisions)      |
+| `write-prd`       | (docs)                | —                                                                                      | ✅ LLM-assisted PRD                              |
 
 > Each skill has `SKILL.md`, `agents/openai.yaml`, `scripts/_bootstrap.py` (repo-root cwd + `backend/` on `sys.path`), and examples. CLI scripts call the **same** functions as the REST API where applicable; PolyU skill does **not** write to DB (REST `/sync-polyu/*` still persists jobs).
 
@@ -196,16 +195,16 @@ flowchart LR
 
 ### Done (since initial roadmap)
 
-- **Seven Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts (including **`pipeline`** end-to-end orchestrator).
+- **Eight Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts (including **`pipeline`** end-to-end orchestration and **`screening-agent`** L1 retry loop).
 - **`backend/app/skills/`** as single source of truth for REST + CLI (`cv_parse`, `jd_parse`, `score`, `report`, `polyu_import`).
-- **Chainable offline pipeline**: manual step chain or **`pipeline` skill** one-shot (`polyu/jd → build-config → cv-parse → score → report-gen`).
+- **Chainable offline pipeline**: manual step chain or **`pipeline` skill** one-shot (`polyu/jd → build-config → cv-parse → score → report-gen`), with L1 phase 1 **partial success**, per-candidate retries, `--resume`, and `need_input` when JD/CVs/position are missing.
 - **Envelope unwrapping + fail-fast** on scorer, report-gen, and build-config inputs.
 - **CLI compat tests** in `test_skill_cli_compat.py` (including stubbed PolyU network).
 
 ### Still needed
 
 1. **Self-contained skills** — merge `backend/app/skills/*` and wrapped services into each `.codex/skills/*` folder (`TODO(agent-migration)` in code and skill docs).
-2. **Orchestrator agent** — top-level agent (e.g. `cv-screening-agent`) with `agents/*.yaml` that plans beyond the existing `pipeline` skill (batch runs, retries, feedback loops).
+2. **Orchestrator agent evolution (post-L1)** — extend `screening-agent` from rule-loop retries to richer planning (`ask_user` UX, smarter retry classification, batch continuation policies). L2 feedback weight tuning remains later.
 3. **Agent data access** — optional DB helpers or file-based job/candidate storage for multi-CV batch runs.
 4. **Runtime config** — document / centralize env (ZAI_API_KEY, LLM_BASE_URL, JD_PARSER_MODE) for agent runs.
 5. **Evaluation & guardrails** — extend `backend/scripts/eval_jd_parsers.py`; add CV parser accuracy and full pipeline regression tests.
