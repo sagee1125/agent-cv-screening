@@ -45,7 +45,7 @@ python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-text "<jd text>"
 ## Behavior notes
 
 - On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0.
-- The REST endpoints `POST /api/v1/jobs` and `POST /api/v1/jobs/{id}/parse-jd` run the exact same code path.
+- The REST endpoints `POST /api/v1/jobs` and `POST /api/v1/jobs/{id}/parse-jd` share the same rule parser. Hybrid/qwen LLM enrichment stays on the REST adapter only.
 
 ## Example
 
@@ -55,6 +55,6 @@ See `examples/sample-jd.txt` and `examples/sample-output.json` in this skill fol
 python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file .codex/skills/jd-parser/examples/sample-jd.txt
 ```
 
-## Future migration
+## Ownership
 
-TODO(agent-migration): When the legacy REST API (traditional frontend) is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
+`src/jd_parser/` is the rule-parser source of truth. `backend/app/services/jd_parser/providers/` keeps hybrid/qwen LLM backup for REST.

@@ -1,3 +1,4 @@
+# Re-exports skill functions for REST; leaf logic is moving into .codex/skills/.
 """Skill orchestration layer.
 
 Single source of truth shared by two entry points:
@@ -6,11 +7,10 @@ Single source of truth shared by two entry points:
 
 Both call the same functions here, so HTTP and Skill paths stay compatible.
 
-TODO(agent-migration): When the legacy REST API / traditional frontend is
-deprecated, make each skill self-contained by moving this orchestration logic
-(and the services it wraps in backend/app/services/*) into the corresponding
-skill folder (.codex/skills/<name>/). The integrated agent then runs the whole
-pipeline in-process without the API.
+TODO(agent-migration): Leaf skills (cv-parser, jd-parser, scorer, report-gen, polyu-import)
+now own their domain packages. This module re-exports them for REST. JD hybrid/qwen
+enrichment remains backend-only.
+
 """
 from app.skills.cv_parse import parse_cv_skill
 from app.skills.jd_parse import parse_jd_skill

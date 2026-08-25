@@ -20,7 +20,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
-from app.skills.polyu_import import (
+from polyu_import.skill import (
     fetch_and_parse_polyu_job_skill,
     fetch_polyu_job_skill,
     list_polyu_catalog_skill,
@@ -106,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ref_group = parse_parser.add_mutually_exclusive_group(required=True)
     ref_group.add_argument("--external-ref", default=None, help="PolyU Ref. No. to look up in the catalog.")
     ref_group.add_argument("--detail-url", default=None, help="Direct job_detail.php URL.")
-    parse_parser.add_argument("--mode", choices=["rule", "hybrid", "qwen"], default=None, help="JD parser mode (rule/hybrid/qwen); defaults to settings.jd_parser_mode.")
+    parse_parser.add_argument("--mode", choices=["rule", "hybrid", "qwen"], default="rule", help="JD parse mode. The skill CLI always uses rule; hybrid/qwen are REST-only.")
     parse_parser.add_argument("--output", default=None, help="Optional path to write the JSON result (default: stdout).")
     parse_parser.set_defaults(func=_run_fetch_and_parse)
     return parser

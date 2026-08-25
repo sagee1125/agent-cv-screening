@@ -129,6 +129,6 @@ python .codex/skills/report-gen/scripts/run_report.py comparison \
   --output /tmp/comparison.xlsx
 ```
 
-## Future migration
+## Ownership
 
-TODO(agent-migration): When the legacy REST API (traditional frontend) is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
+`src/report_gen/` is the source of truth. REST re-exports the same report functions.

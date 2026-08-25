@@ -7,7 +7,7 @@ from typing import Any
 
 from app.config import settings
 from app.core.llm_client import LLMClient
-from app.services.jd_parser.providers.base import JDEnrichmentProvider, JDEnrichmentResult
+from jd_parser.providers.base import JDEnrichmentProvider, JDEnrichmentResult
 
 logger = logging.getLogger(__name__)
 

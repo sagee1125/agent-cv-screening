@@ -88,7 +88,7 @@ def test_jd_parser_cli_matches_skill_function(tmp_path, monkeypatch, capsys) -> 
     exit_code, cli_json = _run_cli(module, ["--jd-file", str(jd_file)], monkeypatch, capsys)
     assert exit_code == 0
 
-    api_json = asyncio.run(parse_jd_skill(SAMPLE_JD))
+    api_json = asyncio.run(parse_jd_skill(SAMPLE_JD, mode="rule"))
     assert cli_json == api_json
     assert cli_json["structured_data"]["must_skills"]  # sanity: non-empty parse
 
@@ -463,8 +463,8 @@ POLYU_DETAIL_HTML = """
 
 # Install async network stubs on the polyu-import skill module using the PolyU HTML fixtures.
 def _stub_polyu_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.skills.polyu_import as polyu_skill
-    from app.services.polyu_jobs import parse_detail_html, parse_listing_html
+    import polyu_import.skill as polyu_skill
+    from polyu_import.jobs import parse_detail_html, parse_listing_html
 
     async def fake_listings():
         return parse_listing_html(POLYU_LISTING_HTML)
@@ -507,14 +507,14 @@ def test_polyu_fetch_and_parse_includes_top_level_structured_data(monkeypatch) -
 
 def test_polyu_fetch_and_parse_fails_on_invalid_jd_parse(tmp_path, monkeypatch, capsys) -> None:
     """fetch-and-parse exits 1 with an error envelope when the JD parser fails."""
-    import app.skills.jd_parse as jd_parse_mod
+    import jd_parser.skill as jd_skill
 
     _stub_polyu_network(monkeypatch)
 
-    async def fake_parse(jd_text: str, *, parser: Any = None, mode: str | None = None) -> dict[str, Any]:
+    async def fake_parse(jd_text: str, *, parser: Any = None, mode: str | None = None, enrichment_provider: Any = None) -> dict[str, Any]:
         return {"status": "invalid_input", "structured_data": None, "error_message": "empty JD"}
 
-    monkeypatch.setattr(jd_parse_mod, "parse_jd_skill", fake_parse)
+    monkeypatch.setattr(jd_skill, "parse_jd", fake_parse)
     module = _import_script("polyu-import")
     monkeypatch.setattr(sys, "argv", [module.__file__, "fetch-and-parse", "--external-ref", "260818008-IE"])
     exit_code = module.main()

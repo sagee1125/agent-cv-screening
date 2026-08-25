@@ -1,29 +1,24 @@
-"""Shared bootstrap for skill CLI scripts.
-
-- Adds the backend directory to sys.path so `app.*` imports work from any cwd.
-- Changes the working directory to the repository root so `.env`, `data/...`,
-  and other repo-relative paths resolve consistently.
-"""
+# Shared bootstrap for the jd-parser CLI: skill packages on path, cwd at repo root.
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 
-def _find_repo_root(start: Path) -> Path:
-    # Walk up until we find the directory containing backend/app.
+# Locates .codex/skills/_shared/src so screening_core can be imported.
+def _prepend_shared_src(start: Path) -> None:
     for parent in (start, *start.parents):
-        if (parent / "backend" / "app").is_dir():
-            return parent
-    raise RuntimeError("Could not locate repository root (backend/app not found).")
+        shared_src = parent / ".codex" / "skills" / "_shared" / "src"
+        if shared_src.is_dir():
+            if str(shared_src) not in sys.path:
+                sys.path.insert(0, str(shared_src))
+            return
+    raise RuntimeError("Could not locate .codex/skills/_shared/src")
 
 
-REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
-BACKEND_DIR = REPO_ROOT / "backend"
+_prepend_shared_src(Path(__file__).resolve().parent)
 
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+from screening_core.bootstrap import chdir_repo_root, ensure_skill_imports
 
-if (REPO_ROOT / ".env").exists():
-    os.chdir(REPO_ROOT)
+REPO_ROOT = ensure_skill_imports()
+chdir_repo_root(REPO_ROOT)

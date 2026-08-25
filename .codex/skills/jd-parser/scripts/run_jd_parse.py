@@ -1,9 +1,4 @@
-"""CLI entry point for the JD Parser skill (agent-facing).
-
-Example (from repository root):
-    python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt
-    python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-text "Requirements: Python, SQL"
-"""
+# CLI entry point for the JD Parser skill (agent-facing).
 from __future__ import annotations
 
 import argparse
@@ -12,15 +7,17 @@ import json
 import sys
 from pathlib import Path
 
-import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+import _bootstrap  # noqa: F401  (sets sys.path + cwd before skill imports)
 
-from app.skills.jd_parse import parse_jd_skill
+from jd_parser.skill import parse_jd_skill
 
 
+# Runs parse_jd_skill for one JD text payload.
 async def _run(jd_text: str) -> dict:
     return await parse_jd_skill(jd_text=jd_text)
 
 
+# Parses CLI flags, runs the skill, and writes JSON to a file or stdout.
 def main() -> int:
     parser = argparse.ArgumentParser(description="Parse a JD into structured skill/requirement data.")
     group = parser.add_mutually_exclusive_group(required=True)

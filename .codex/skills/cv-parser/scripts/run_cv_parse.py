@@ -1,8 +1,4 @@
-"""CLI entry point for the CV Parser skill (agent-facing).
-
-Example (from repository root):
-    python .codex/skills/cv-parser/scripts/run_cv_parse.py --file data/resume.pdf --jd-file jd.txt
-"""
+# CLI entry point for the CV Parser skill (agent-facing).
 from __future__ import annotations
 
 import argparse
@@ -11,15 +7,17 @@ import json
 import sys
 from pathlib import Path
 
-import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+import _bootstrap  # noqa: F401  (sets sys.path + cwd before skill imports)
 
-from app.skills.cv_parse import parse_cv_skill
+from cv_parser.skill import parse_cv_skill
 
 
+# Runs parse_cv_skill for one file and optional JD context.
 async def _run(file_path: str, jd_text: str | None) -> dict:
     return await parse_cv_skill(file_path=file_path, jd_text=jd_text)
 
 
+# Parses CLI flags, runs the skill, and writes JSON to a file or stdout.
 def main() -> int:
     parser = argparse.ArgumentParser(description="Parse a CV PDF into structured candidate data.")
     parser.add_argument("--file", required=True, help="Path to the CV PDF file.")
