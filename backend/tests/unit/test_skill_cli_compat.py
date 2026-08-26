@@ -647,6 +647,7 @@ def test_pipeline_matching_offline_skip_reports(tmp_path, monkeypatch, capsys) -
             str(SAMPLE_JD_STRUCTURED_PATH),
             "--extracted",
             str(REPORT_GEN_SAMPLE_EXTRACTED_PATH),
+            "--trust-extracted",
             "--engine",
             "matching",
             "--skip-reports",

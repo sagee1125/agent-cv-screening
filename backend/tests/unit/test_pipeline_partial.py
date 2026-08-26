@@ -94,7 +94,7 @@ def test_pipeline_need_input_missing_jd(tmp_path, monkeypatch, capsys) -> None:
     extracted.write_text(json.dumps({"name": "Alice"}), encoding="utf-8")
     exit_code, out, _err = _run_cli(
         module,
-        ["--extracted", str(extracted), "--skip-reports"],
+        ["--extracted", str(extracted), "--skip-reports", "--output-dir", str(tmp_path)],
         monkeypatch,
         capsys,
     )
@@ -131,7 +131,7 @@ def test_pipeline_need_input_missing_position(tmp_path, monkeypatch, capsys) -> 
     extracted.write_text(json.dumps({"name": "Alice"}), encoding="utf-8")
     exit_code, out, _err = _run_cli(
         module,
-        ["--jd-json", str(jd), "--extracted", str(extracted)],
+        ["--jd-json", str(jd), "--extracted", str(extracted), "--output-dir", str(tmp_path)],
         monkeypatch,
         capsys,
     )

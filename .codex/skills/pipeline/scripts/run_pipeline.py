@@ -24,6 +24,7 @@ Example (from repository root):
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
@@ -32,6 +33,8 @@ from datetime import date
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+from screening_core.input_policy import validate_extracted_reference, validate_path, validate_reference
+from jas_import.fetch import cv_filename_for_url, download_to, fetch_jd_text
 
 REPO_ROOT = _bootstrap.REPO_ROOT
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -153,16 +156,35 @@ def _record_failure(args: argparse.Namespace, failures: list[Failure], failure: 
         raise RuntimeError(failure.error_message)
 
 
+# Rejects inline content and non-allowlisted references at the entry point.
+def _enforce_input_policy(args: argparse.Namespace, out_dir: Path) -> None:
+    for flag, value in (("--jd-file", args.jd_file), ("--jd-json", args.jd_json)):
+        if value:
+            validate_reference(value, flag=flag)
+    for value in args.cv:
+        validate_reference(value, flag="--cv")
+    for value in args.extracted:
+        validate_extracted_reference(value, out_dir=out_dir, trusted=args.trust_extracted, flag="--extracted")
+    if args.polyu_detail_url:
+        validate_reference(args.polyu_detail_url, flag="--polyu-detail-url")
+    if args.jd_url:
+        validate_reference(args.jd_url, flag="--jd-url")
+    for value in args.cv_url:
+        validate_reference(value, flag="--cv-url")
+    if args.cookie_file:
+        validate_path(args.cookie_file, flag="--cookie-file")
+
+
 def _collect_need_input(args: argparse.Namespace) -> None:
     """Raise NeedInputError when JD, candidates, or report position are missing."""
     missing: list[str] = []
     questions: list[str] = []
-    if not args.jd_file and not args.jd_json and not args.polyu_ref:
+    if not args.jd_file and not args.jd_json and not args.polyu_ref and not args.jd_url:
         missing.append("jd")
-        questions.append("Provide a JD via --jd-file, --jd-json, or --polyu-ref.")
-    if not args.cv and not args.extracted:
+        questions.append("Provide a JD via --jd-file, --jd-json, --polyu-ref, or --jd-url.")
+    if not args.cv and not args.extracted and not args.cv_url:
         missing.append("candidates")
-        questions.append("Provide at least one CV (--cv) or extracted profile (--extracted).")
+        questions.append("Provide at least one CV (--cv), CV URL (--cv-url), or extracted profile (--extracted).")
     if not args.skip_reports and not args.position:
         missing.append("position")
         questions.append("Provide --position for reports, or pass --skip-reports.")
@@ -549,23 +571,57 @@ def _build_manifest(
     return exit_code
 
 
+# Resolves a private scratch directory for downloaded files.
+def _resolve_scratch_dir(scratch_dir: str) -> Path:
+    path = Path(scratch_dir)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# Fetches URL inputs into local files and returns downloaded CV paths.
+def _resolve_url_inputs(args: argparse.Namespace, out_dir: Path) -> list[Path]:
+    downloaded_cvs: list[Path] = []
+    if args.jd_url:
+        jd_text = asyncio.run(fetch_jd_text(args.jd_url, cookie_file=args.cookie_file))
+        dest = out_dir / "jd-from-url.txt"
+        dest.write_text(jd_text, encoding="utf-8")
+        args.jd_file = str(dest)
+    if args.cv_url:
+        scratch = _resolve_scratch_dir(args.scratch_dir)
+        for url in args.cv_url:
+            dest = scratch / cv_filename_for_url(url)
+            asyncio.run(download_to(url, dest, cookie_file=args.cookie_file))
+            args.cv.append(str(dest))
+            downloaded_cvs.append(dest)
+    return downloaded_cvs
+
+
 def _run_pipeline(args: argparse.Namespace) -> int:
     """Execute every pipeline step and print a result manifest to stdout."""
     if args.polyu_detail_url and not args.polyu_ref:
         raise RuntimeError("--polyu-detail-url is only valid together with --polyu-ref")
-    _collect_need_input(args)
 
     out_dir = Path(args.output_dir)
     if not out_dir.is_absolute():
         out_dir = REPO_ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    failures: list[Failure] = []
-    jd_source, jd_text = _resolve_jd_source(args, out_dir)
-    candidates = _parse_candidates(args, out_dir, jd_text, failures)
-    if args.engine == "matching":
-        return _run_matching_engine(args, out_dir, jd_source, candidates, failures)
-    return _run_legacy_engine(args, out_dir, jd_source, candidates, failures)
+    _enforce_input_policy(args, out_dir)
+    _collect_need_input(args)
+    downloaded_cvs = _resolve_url_inputs(args, out_dir)
+    try:
+        failures: list[Failure] = []
+        jd_source, jd_text = _resolve_jd_source(args, out_dir)
+        candidates = _parse_candidates(args, out_dir, jd_text, failures)
+        if args.engine == "matching":
+            return _run_matching_engine(args, out_dir, jd_source, candidates, failures)
+        return _run_legacy_engine(args, out_dir, jd_source, candidates, failures)
+    finally:
+        if not args.keep_cvs:
+            for path in downloaded_cvs:
+                path.unlink(missing_ok=True)
 
 
 def _print_need_input(exc: NeedInputError) -> int:
@@ -586,11 +642,17 @@ def main() -> int:
     source.add_argument("--jd-file", default=None, help="JD text file; parsed with the jd-parser skill.")
     source.add_argument("--jd-json", default=None, help="Existing parsed JD JSON (jd-parser output, polyu-parsed output, or pure structured_data).")
     source.add_argument("--polyu-ref", default=None, help="PolyU external ref; fetched and parsed with the polyu-import skill.")
+    source.add_argument("--jd-url", default=None, help="JAS records page URL to fetch and parse as JD text.")
     parser.add_argument("--polyu-detail-url", default=None, help="PolyU detail URL fallback used with --polyu-ref.")
     parser.add_argument("--engine", choices=("legacy", "matching"), default="legacy", help="Scoring engine: legacy scorer (default) or matching engine with radar/interview detail.")
     parser.add_argument("--reference-date", default=None, help="Reference date YYYY-MM-DD used by the matching engine (default: today).")
     parser.add_argument("--cv", action="append", default=[], metavar="FILE", help="CV PDF to parse and score; repeatable.")
+    parser.add_argument("--cv-url", action="append", default=[], metavar="URL", help="JAS CV file URL to download (repeatable).")
     parser.add_argument("--extracted", action="append", default=[], metavar="FILE", help="Existing extracted candidate JSON; skips cv-parser; repeatable.")
+    parser.add_argument("--trust-extracted", action="store_true", help="Allow --extracted profiles from outside --output-dir (trusted, pre-masked data only).")
+    parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt used for authenticated JAS fetches.")
+    parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
+    parser.add_argument("--keep-cvs", action="store_true", help="Keep CVs downloaded from --cv-url after the run.")
     parser.add_argument("--position", default=None, help="Job title shown on reports (required unless --skip-reports).")
     parser.add_argument("--output-dir", default="data/pipeline_out", help="Directory for intermediate JSONs and reports (default data/pipeline_out).")
     parser.add_argument("--skip-reports", action="store_true", help="Score/rank only; skip PDF and Excel generation.")

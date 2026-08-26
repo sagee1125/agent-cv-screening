@@ -1,0 +1,4 @@
+interface:
+  display_name: "PolyU Job Application System Import"
+  short_description: "Parse internal JAS records pages into JD text and candidate appno/CV URLs"
+  default_prompt: "Use $skill-jas-import to parse JAS records HTML into JD text and candidate CV references"

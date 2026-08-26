@@ -46,6 +46,16 @@ def _proc(code: int, payload: dict) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(["pipeline"], code, "", text)
 
 
+# Creates placeholder input files required by the input-policy guard.
+def _materialize(tmp_path, *names) -> None:
+    for name in names:
+        path = tmp_path / name
+        if name.endswith(".json"):
+            path.write_text("{}", encoding="utf-8")
+        else:
+            path.write_bytes(b"%PDF")
+
+
 # Verifies need_input from pipeline is returned directly with exit code 2.
 def test_agent_passthrough_need_input(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
@@ -62,6 +72,7 @@ def test_agent_passthrough_need_input(tmp_path, monkeypatch, capsys) -> None:
 # Verifies a successful pipeline first round ends the orchestration loop.
 def test_agent_success_first_round(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
+    _materialize(tmp_path, "jd.json", "cv.json")
     responses = [_proc(0, {"status": "success", "candidates": [{"name": "A"}], "failures": [], "ask": None})]
     monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: responses.pop(0))
     code, out, _err = _run_cli(
@@ -82,6 +93,7 @@ def test_agent_success_first_round(tmp_path, monkeypatch, capsys) -> None:
 # Verifies partial_success triggers a second resume round that can recover to success.
 def test_agent_retries_partial_success_rounds(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
+    _materialize(tmp_path, "jd.json", "good.pdf", "bad.pdf")
     calls: list[list[str]] = []
 
     def fake_run(cmd, *args, **kwargs):
@@ -131,6 +143,7 @@ def test_agent_retries_partial_success_rounds(tmp_path, monkeypatch, capsys) -> 
 # Verifies partial_success with no retryable stage ends immediately.
 def test_agent_stops_when_partial_has_no_retryable_failures(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
+    _materialize(tmp_path, "jd.json", "cv.json")
     responses = [
         _proc(
             0,
@@ -158,6 +171,7 @@ def test_agent_stops_when_partial_has_no_retryable_failures(tmp_path, monkeypatc
 # Verifies known permanent errors do not trigger another orchestration round.
 def test_agent_stops_when_failure_message_is_non_retryable(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
+    _materialize(tmp_path, "jd.json", "x.pdf")
     calls: list[list[str]] = []
     responses = [
         _proc(
@@ -202,6 +216,7 @@ def test_agent_stops_when_failure_message_is_non_retryable(tmp_path, monkeypatch
 # Verifies known transient failures are retried in another round.
 def test_agent_retries_when_failure_message_is_transient(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
+    _materialize(tmp_path, "jd.json", "x.pdf")
     calls: list[list[str]] = []
 
     def fake_run(cmd, *args, **kwargs):
@@ -245,6 +260,7 @@ def test_agent_retries_when_failure_message_is_transient(tmp_path, monkeypatch, 
 # Verifies hard errors bubble up with exit code 1 and stderr JSON.
 def test_agent_surfaces_hard_error(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script()
+    _materialize(tmp_path, "jd.json", "cv.json")
     responses = [_proc(1, {"status": "error", "error_message": "config failed"})]
     monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: responses.pop(0))
     code, _out, err = _run_cli(
