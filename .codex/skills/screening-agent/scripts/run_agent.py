@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+from screening_core.input_policy import validate_extracted_reference, validate_path, validate_reference
 
 REPO_ROOT = _bootstrap.REPO_ROOT
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -112,6 +113,8 @@ def _pipeline_cmd(args: argparse.Namespace, out_dir: Path, resume: bool) -> list
         cmd.append("--fail-fast")
     if args.skip_reports:
         cmd.append("--skip-reports")
+    if getattr(args, "trust_extracted", False):
+        cmd.append("--trust-extracted")
     if args.reference_date:
         cmd += ["--reference-date", args.reference_date]
     if args.position:
@@ -124,10 +127,20 @@ def _pipeline_cmd(args: argparse.Namespace, out_dir: Path, resume: bool) -> list
         cmd += ["--polyu-ref", args.polyu_ref]
         if args.polyu_detail_url:
             cmd += ["--polyu-detail-url", args.polyu_detail_url]
+    elif getattr(args, "jd_url", None):
+        cmd += ["--jd-url", args.jd_url]
     for item in args.cv:
         cmd += ["--cv", item]
+    for url in getattr(args, "cv_url", []) or []:
+        cmd += ["--cv-url", url]
     for item in args.extracted:
         cmd += ["--extracted", item]
+    if getattr(args, "cookie_file", None):
+        cmd += ["--cookie-file", args.cookie_file]
+    if getattr(args, "scratch_dir", None):
+        cmd += ["--scratch-dir", args.scratch_dir]
+    if getattr(args, "keep_cvs", False):
+        cmd.append("--keep-cvs")
     return cmd
 
 
@@ -280,6 +293,28 @@ def _run_loop(args: argparse.Namespace) -> tuple[int, dict]:
     return EXIT_ERROR, _final_payload("error", out_dir, runs, latest)
 
 
+# Validates path/URL inputs under the PII-safe input contract.
+def _validate_input_policy(args: argparse.Namespace) -> None:
+    for flag, value in (("--jd-file", args.jd_file), ("--jd-json", args.jd_json)):
+        if value:
+            validate_reference(value, flag=flag)
+    for value in args.cv:
+        validate_reference(value, flag="--cv")
+    out_dir = _resolve_output_dir(args.output_dir)
+    for value in args.extracted:
+        validate_extracted_reference(
+            value, out_dir=out_dir, trusted=getattr(args, "trust_extracted", False), flag="--extracted"
+        )
+    if args.polyu_detail_url:
+        validate_reference(args.polyu_detail_url, flag="--polyu-detail-url")
+    if getattr(args, "jd_url", None):
+        validate_reference(args.jd_url, flag="--jd-url")
+    for value in getattr(args, "cv_url", []) or []:
+        validate_reference(value, flag="--cv-url")
+    if getattr(args, "cookie_file", None):
+        validate_path(args.cookie_file, flag="--cookie-file")
+
+
 # Validates top-level argument relationships before loop execution.
 def _validate_args(args: argparse.Namespace) -> None:
     if args.polyu_detail_url and not args.polyu_ref:
@@ -297,8 +332,10 @@ def _build_parser() -> argparse.ArgumentParser:
     source.add_argument("--jd-file", default=None, help="JD text file for the pipeline.")
     source.add_argument("--jd-json", default=None, help="Parsed JD JSON file for the pipeline.")
     source.add_argument("--polyu-ref", default=None, help="PolyU external reference for JD fetch-and-parse.")
+    source.add_argument("--jd-url", default=None, help="JAS records page URL to fetch and parse as JD text.")
     parser.add_argument("--polyu-detail-url", default=None, help="PolyU detail URL fallback used with --polyu-ref.")
     parser.add_argument("--cv", action="append", default=[], metavar="FILE", help="Candidate CV file (repeatable).")
+    parser.add_argument("--cv-url", action="append", default=[], metavar="URL", help="JAS CV file URL to download (repeatable).")
     parser.add_argument(
         "--extracted",
         action="append",
@@ -306,6 +343,14 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Extracted candidate profile JSON (repeatable).",
     )
+    parser.add_argument(
+        "--trust-extracted",
+        action="store_true",
+        help="Allow --extracted profiles from outside --output-dir (trusted, pre-masked data only).",
+    )
+    parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt used for authenticated JAS fetches.")
+    parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
+    parser.add_argument("--keep-cvs", action="store_true", help="Keep CVs downloaded from --cv-url after the run.")
     parser.add_argument("--position", default=None, help="Job title shown on reports.")
     parser.add_argument("--engine", choices=("legacy", "matching"), default="legacy", help="Scoring engine for pipeline.")
     parser.add_argument("--reference-date", default=None, help="Reference date used by matching engine.")
@@ -354,6 +399,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         _validate_args(args)
+        _validate_input_policy(args)
         # Planner resume_run already retries; keep a single L1 round unless the user set --max-rounds.
         if args.planner == "llm" and args.max_rounds is None:
             args.max_rounds = 1

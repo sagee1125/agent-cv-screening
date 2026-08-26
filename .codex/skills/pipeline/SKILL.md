@@ -131,3 +131,49 @@ flowchart LR
 ## Ownership
 
 Pipeline only orchestrates sibling skill CLIs. Domain logic lives in those skills, not in `backend/`.
+
+
+## Input policy (PII boundary)
+
+This skill only accepts **file paths or allowlisted http(s) URLs** as JD/CV inputs.
+
+- Inline content is refused: base64 blobs, `data:` URIs, pasted text, and
+  over-length strings cause an immediate `{"status":"error",...}` envelope
+  with exit code 1, before any parsing or network call.
+- `--cv`, `--jd-file`, `--jd-json`, and `--extracted` must point to
+  **existing files**; missing paths are rejected with exit code 1.
+- `--polyu-detail-url` must be an http(s) URL whose host is allowlisted
+  (default: `jobs.polyu.edu.hk`).
+- Do **not** parse file content and pass it in — give the agent the path or
+  URL instead. This keeps candidate PII out of the host conversation
+  (PIPL/GDPR friendly).
+- `--extracted` profiles must live inside `--output-dir` (agent scratch) unless
+  `--trust-extracted` is passed for trusted, pre-masked data from elsewhere.
+
+Enforcement lives in `.codex/skills/_shared/src/screening_core/input_policy.py`.
+
+
+## Live fetch (Phase 1 skeleton)
+
+The pipeline can also accept JAS URLs directly and download them locally before
+running the same offline chain:
+
+```bash
+python .codex/skills/pipeline/scripts/run_pipeline.py \
+  --jd-url "https://jobs.polyu.edu.hk/internal/records.php?refno=260818001" \
+  --cv-url "https://jobs.polyu.edu.hk/internal/file.php?t=cv&id=123456&refno=260818001" \
+  --cookie-file data/jas_cookies.txt \
+  --position "Project Associate"
+```
+
+- `--jd-url` fetches the records page and parses it into JD text
+  (`jd-from-url.txt` in `--output-dir`).
+- `--cv-url` (repeatable) downloads each CV into `--scratch-dir`
+  (default `data/jas_scratch`) named by application no. Downloads are removed
+  after the run by default; pass `--keep-cvs` to retain them.
+- `--cookie-file` reads a Netscape `cookies.txt` on disk; cookies are never
+  accepted as CLI arguments (they would leak into process lists / the host).
+- URL hosts are allowlisted (`jobs.polyu.edu.hk`) by the input policy; the
+  initial URL, every redirect, and parsed CV URLs are all validated.
+- This skeleton is unit-tested with mocks; it cannot be validated against the
+  real JAS until internal access or an HR-run session is available.

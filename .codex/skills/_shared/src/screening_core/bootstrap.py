@@ -13,6 +13,7 @@ _SKILL_SRC_DIRS = (
     ("scorer", "src"),
     ("report-gen", "src"),
     ("polyu-import", "src"),
+    ("jas-import", "src"),
 )
 
 

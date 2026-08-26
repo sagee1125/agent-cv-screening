@@ -1,0 +1,132 @@
+# Fetches JAS pages and CV files over HTTP with an optional local cookie jar.
+from __future__ import annotations
+
+import re
+from typing import Any
+from html import unescape
+from pathlib import Path
+from urllib.parse import parse_qs, urljoin, urlparse
+
+import httpx
+
+from jas_import.records import build_jd_text, parse_job_html
+from jas_import.skill import job_payload_from_html
+from screening_core.input_policy import validate_url
+
+DEFAULT_TIMEOUT = 30.0
+DOWNLOAD_TIMEOUT = 60.0
+MAX_REDIRECTS = 5
+_SAFE_EXTENSIONS = {".pdf", ".doc", ".docx"}
+
+
+# Load cookies from a Netscape cookies.txt file into an httpx.Cookies object.
+def load_cookie_file(path: str | Path) -> httpx.Cookies:
+    cookies = httpx.Cookies()
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if line.startswith("#HttpOnly_"):
+                line = line.removeprefix("#HttpOnly_")
+            elif not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                domain, _subdomains, path_value, _secure, _expiry, name, value = parts[:7]
+                cookies.set(name, value, domain=domain, path=path_value or "/")
+    return cookies
+
+
+# Performs one authenticated GET while validating every redirect target.
+async def _request(url: str, cookie_file: str | Path | None, timeout: float) -> httpx.Response:
+    cookies = load_cookie_file(cookie_file) if cookie_file else None
+    current_url = validate_url(url, flag="request URL")
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, cookies=cookies) as client:
+        for _redirect in range(MAX_REDIRECTS + 1):
+            response = await client.get(current_url)
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    raise ValueError(f"redirect response from {current_url} had no location")
+                current_url = validate_url(urljoin(str(response.url), location), flag="redirect URL")
+                continue
+            response.raise_for_status()
+            validate_url(str(response.url), flag="final response URL")
+            return response
+    raise ValueError(f"too many redirects while fetching {url}")
+
+
+# Fetches an HTML page, optionally authenticated with a local cookie jar.
+async def fetch_html(url: str, *, cookie_file: str | Path | None = None, timeout: float = DEFAULT_TIMEOUT) -> str:
+    response = await _request(url, cookie_file, timeout)
+    return response.text
+
+
+# Downloads a file (e.g. a CV) to the given destination path.
+async def download_to(
+    url: str,
+    dest: str | Path,
+    *,
+    cookie_file: str | Path | None = None,
+    timeout: float = DOWNLOAD_TIMEOUT,
+) -> Path:
+    response = await _request(url, cookie_file, timeout)
+    if not response.content:
+        raise ValueError(f"empty download from {url}")
+    path = Path(dest)
+    path.write_bytes(response.content)
+    return path
+
+
+# Strips HTML tags into plain text (fallback for non-JAS pages).
+def html_to_text(raw_html: str) -> str:
+    text = re.sub(r"(?is)<script[^>]*>.*?</script>", "", raw_html)
+    text = re.sub(r"(?is)<style[^>]*>.*?</style>", "", text)
+    text = re.sub(r"(?is)<form[^>]*>.*?</form>", "", text)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|h1|h2|h3|li|tr)>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text).replace("\xa0", " ")
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# Fetches a JAS records page and returns only its structured JD text.
+async def fetch_jd_text(url: str, *, cookie_file: str | Path | None = None) -> str:
+    html = await fetch_html(url, cookie_file=cookie_file)
+    detail = parse_job_html(html)
+    if detail.fields:
+        return build_jd_text(detail)
+    raise ValueError("JAS page did not contain a recognizable job advertisement table")
+
+
+# Fetches a JAS records page and returns the full job payload (JD + candidates).
+async def fetch_job_payload(url: str, *, cookie_file: str | Path | None = None) -> dict[str, Any]:
+    html = await fetch_html(url, cookie_file=cookie_file)
+    payload = job_payload_from_html(html)
+    if not payload.get("refno"):
+        raise ValueError(f"URL did not look like a JAS records page: {url}")
+    if not (payload.get("jd_text") or "").strip():
+        raise ValueError("JAS page did not contain a recognizable job advertisement table")
+    return payload
+
+
+# Derives a safe local filename for a downloaded CV from its URL.
+def cv_filename_for_url(url: str, *, fallback_ext: str = ".pdf") -> str:
+    parsed = urlparse(url)
+    appno = parse_qs(parsed.query).get("id", [None])[0]
+    stem = (appno or Path(parsed.path).stem or "cv").strip()
+    stem = re.sub(r"[^A-Za-z0-9_-]", "_", stem) or "cv"
+    ext = Path(parsed.path).suffix.lower()
+    if ext not in _SAFE_EXTENSIONS:
+        ext = fallback_ext
+    return f"{stem}{ext}"
+
+
+__all__ = [
+    "cv_filename_for_url",
+    "download_to",
+    "fetch_html",
+    "fetch_jd_text",
+    "fetch_job_payload",
+    "html_to_text",
+    "load_cookie_file",
+]

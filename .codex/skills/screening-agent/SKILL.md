@@ -85,3 +85,37 @@ The script prints one JSON envelope with `runs[]` history and the final pipeline
 - `ask_user.missing` is allowlisted to `jd` / `candidates` / `position`.
 - Skill/pipeline JD parse is **rule-only**. REST may still inject hybrid/qwen providers.
 - `pipeline` remains the source of truth for ranking, reports, and failure details.
+
+
+## Input policy (PII boundary)
+
+This skill only accepts **file paths or allowlisted http(s) URLs** as JD/CV inputs.
+
+- Inline content is refused: base64 blobs, `data:` URIs, pasted text, and
+  over-length strings cause an immediate `{"status":"error",...}` envelope
+  with exit code 1, before any parsing or network call.
+- `--cv`, `--jd-file`, `--jd-json`, and `--extracted` must point to
+  **existing files**; missing paths are rejected with exit code 1.
+- `--polyu-detail-url` must be an http(s) URL whose host is allowlisted
+  (default: `jobs.polyu.edu.hk`).
+- Do **not** parse file content and pass it in — give the agent the path or
+  URL instead. This keeps candidate PII out of the host conversation
+  (PIPL/GDPR friendly).
+- `--extracted` profiles must live inside `--output-dir` (agent scratch) unless
+  `--trust-extracted` is passed for trusted, pre-masked data from elsewhere.
+
+Enforcement lives in `.codex/skills/_shared/src/screening_core/input_policy.py`.
+
+
+## Live fetch (Phase 1 skeleton)
+
+`screening-agent` forwards the live-fetch flags to the pipeline:
+
+- `--jd-url` — JAS records page URL to fetch and parse as JD text.
+- `--cv-url <URL>` (repeatable) — JAS CV file URLs to download.
+- `--cookie-file <path>` — local Netscape `cookies.txt` for authenticated fetches.
+- `--scratch-dir <dir>` — where downloaded CVs are saved (default `data/jas_scratch`).
+- `--keep-cvs` — retain downloaded CVs; they are removed after the run by default.
+
+The same allowlist and cookie rules as the pipeline apply; see the pipeline
+SKILL.md "Live fetch" section for details.

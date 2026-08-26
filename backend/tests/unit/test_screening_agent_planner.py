@@ -297,6 +297,8 @@ def test_format_planner_error_unwraps_ssl() -> None:
 def test_cli_planner_llm_flag(tmp_path, monkeypatch, capsys) -> None:
     agent = _import_agent()
     planner = _import_planner()
+    (tmp_path / "jd.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "cv.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         planner,
         "_default_complete_json",
