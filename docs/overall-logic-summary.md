@@ -1,56 +1,154 @@
 ﻿# Agent CV Screening — Summary
 
-## 0. One-line pitch
+## 0. Product vision
 
-An **AI-powered CV screening system**: parse a Job Description + candidate CVs (PDF) into structured data, score & rank candidates with **fully deterministic logic**, and export PDF/Excel reports — with a privacy-first, cacheable LLM pipeline. The same logic runs via **REST (frontend)** or **offline agent CLI skills** (Codex / future orchestrator).
+**Primary goal:** an **embeddable CV screening execution layer** for agent hosts (Codex, Cursor, and similar). The **host** runs the conversation; **this repo** runs deterministic screening.
+
+| Layer                                            | Owner           | Responsibility                                                                                                             |
+| ------------------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Host** (Codex / Cursor / future HR chat shell) | Platform        | Natural-language dialogue, file pickers, clarifying questions, explaining results to the user                              |
+| **This repo**                                    | Screening agent | Parse JD + CVs, score & rank with **reproducible logic**, generate PDF/Excel, surface `need_input` when inputs are missing |
+
+**Target user:** HR and recruiters **without a technical background**. They should not run terminals, read JSON, or configure pipelines. They talk to the host; the host invokes skills / `screening-agent` / `pipeline` on their behalf.
+
+**Web application (FastAPI + frontend):** **not the primary product.** It remains a **compatibility path** for stepwise UI, DB persistence, PolyU job-board sync, and demos. New product work should favor **host-embeddable skills** first; extend the web stack only when it does not block that path.
+
+**One-line pitch:** Host-guided CV screening for non-technical HR — chat in the host, **deterministic parse → score → rank → report** in this repo via Codex skills and `screening-agent`.
 
 ---
 
 ## 1. End-to-end architecture
 
 ```mermaid
-flowchart LR
-    U[HR / Recruiter UI] -->|JD text| J[JD Parser]
-    U -->|CV PDF| C[CV Parser]
-    U -->|"One-click import"| P[PolyU jobs scraper]
-    J -->|"structured JD"| SB[Scoring-Config Builder]
-    C -->|"structured profile"| M[Skill Matcher]
+flowchart TB
+    subgraph host [Host — conversation layer]
+        HR[HR / Recruiter<br/>no CLI required]
+        HST[Codex / Cursor / chat shell]
+        HR <-->|natural language| HST
+    end
+    subgraph embed [This repo — deterministic execution]
+        SK[Leaf skills<br/>cv-parser jd-parser scorer report-gen polyu-import]
+        PIPE[pipeline skill]
+        SA[screening-agent<br/>L1 retry + need_input]
+        SK --> PIPE
+        PIPE --> SA
+    end
+    subgraph compat [Compatibility — not primary]
+        WEB[Web UI + REST API]
+        DB[(PostgreSQL)]
+    end
+    HST -->|invoke skills / run_agent| SA
+    HST -->|optional| WEB
+    WEB --> DB
+    WEB -.->|same skill packages| SK
+    SA --> J[JD Parser]
+    SA --> C[CV Parser]
+    SA --> P[PolyU import]
+    J --> SB[Scoring-Config Builder]
+    C --> M[Skill Matcher]
     SB --> S[Scorer / Ranker]
     M --> S
     S --> R[Reports PDF/Excel/JSON]
-    S --> F[Feedback log + analytics]
-    T[Skill Taxonomy YAML] -.->|synonyms/relations| J
+    S --> F[Feedback log]
+    T[Skill Taxonomy YAML] -.-> J
     T -.-> M
+    SA -->|need_input / manifest JSON| HST
+    HST -->|files paths answers| SA
+    style host fill:#f3e8ff
+    style embed fill:#e8f4fc
+    style compat fill:#f5f5f5
     style J fill:#ffe8cc
     style C fill:#ffe8cc
-    style SB fill:#d0ebff
-    style M fill:#d0ebff
-    style S fill:#d0ebff
+    style SA fill:#d0ebff
 ```
 
-**Dual entry points (same services, two paths):**
+**Division of intelligence:**
 
-| Path                 | Entry                                                              | Use case                                       |
-| -------------------- | ------------------------------------------------------------------ | ---------------------------------------------- |
-| **REST API**         | `backend/app/api/routes/*` → `backend/app/services/*`              | Traditional frontend, DB persistence           |
-| **Agent CLI skills** | `.codex/skills/*/scripts/*.py` → `backend/app/skills/*` → services | Offline agent pipeline, no HTTP / no DB writes |
+| Concern                                     | Host (conversation) | This repo (execution)                          |
+| ------------------------------------------- | ------------------- | ---------------------------------------------- |
+| Ask for missing JD, CVs, job title          | ✅ primary          | surfaces `need_input` + `ask` hints            |
+| Explain scores and tiers to HR              | ✅ primary          | returns structured JSON + report paths         |
+| Choose when to retry after transient errors | ✅ in production    | L1 rules + optional dev planner                |
+| Parse PDF / extract profile                 | ❌                  | ✅ cv-parser (LLM inside bounded extract step) |
+| Score, rank, tier                           | ❌ never LLM        | ✅ pure Python                                 |
+| Generate PDF / Excel                        | ❌                  | ✅ report-gen                                  |
 
-- **FastAPI backend** (`backend/app/main.py`) exposes `/api/v1` routes: candidates, jobs, scoring, reports, feedback.
-- **PostgreSQL 15 + async SQLAlchemy** store jobs, candidates, resumes, extracted data, scoring configs/results, feedback, skill taxonomy (JSONB columns).
-- **Key design rule:** the LLM is used **only** for parsing (CV/JD); matching, scoring and ranking are **100% deterministic** (no LLM) and reproducible (`temperature=0`, `seed=42`, MD5-based caching).
+### Entry points (priority order)
+
+| Priority | Path              | Entry                                                                           | Role                                           |
+| -------- | ----------------- | ------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **P0**   | **Host + skills** | Host reads `SKILL.md`, runs `.codex/skills/*/scripts/*.py` or `screening-agent` | **Primary** — HR-facing product                |
+| **P1**   | **Pipeline CLI**  | `run_pipeline.py` → leaf skill CLIs                                             | Dev, CI, host subprocess chain                 |
+| **P2**   | **REST + web UI** | `backend/app/api/routes/*` → skill shims → DB                                   | Compatibility, persistence, legacy stepwise UI |
+
+- **FastAPI backend** (`backend/app/main.py`): `/api/v1` for candidates, jobs, scoring, matching, reports, feedback — **secondary** to host embedding.
+- **PostgreSQL 15 + async SQLAlchemy**: optional persistence for the web path; host/file-based runs do not require DB writes.
+- **Shared runtime** (`.codex/skills/_shared/src/screening_core/`): bootstrap, config, LLM client, taxonomy, hash cache. `backend/app/core/*` and `backend/app/config.py` re-export `screening_core`.
+- **Shared LLM client** (`screening_core.llm_client`): Zhipu `zai-sdk`, OS certificate store for TLS, `temperature=0` / `seed=42`, JSON repair pass.
+
+**Where the LLM is allowed (and where it is not):**
+
+| Layer                           | LLM?                          | What it may do                                            | Who typically triggers it |
+| ------------------------------- | ----------------------------- | --------------------------------------------------------- | ------------------------- |
+| **Host conversation**           | ✅ (host model)               | Dialogue, clarification, summarization for HR             | Codex / Cursor            |
+| CV parse                        | ✅ required for vision/text   | Extract structured profile (privacy-redacted)             | cv-parser skill           |
+| JD parse                        | ⚙️ optional (`hybrid`/`qwen`) | Refine skills on top of rule parser                       | REST or future skill move |
+| screening-agent `--planner llm` | ⚙️ optional                   | Dev / fallback tool picker when host does not orchestrate | CLI only today            |
+| Matching / scoring / ranking    | ❌ never                      | Pure Python; reproducible                                 | scorer skill              |
+| Reports                         | ❌ never                      | reportlab / openpyxl                                      | report-gen skill          |
+
+In the **target HR product**, the host’s model handles conversation; this repo’s optional `--planner llm` is **not** a second chat agent for end users — it is a bounded orchestration helper. Scores and tiers are never rewritten by any planner.
+
+The in-repo planner **cannot** invent file paths, change weights, or rewrite scores. Paths come from host-supplied CLI flags or prior host actions; `run_screening` / `resume_run` ignore extra tool arguments.
+
+### HR journey (host-mediated)
+
+```mermaid
+sequenceDiagram
+    participant HR as HR user
+    participant Host as Codex / Cursor
+    participant Agent as screening-agent + pipeline
+    participant Skills as leaf skills
+
+    HR->>Host: Screen these CVs for this job
+    Host->>HR: Please upload the JD and CV PDFs
+    HR->>Host: files + job title
+    Host->>Agent: run_agent --jd-file ... --cv ... --position ...
+    Agent->>Skills: pipeline rounds parse score report
+    Skills-->>Agent: manifest success or need_input
+    alt need_input
+        Agent-->>Host: status need_input ask missing fields
+        Host->>HR: Which position title should I use?
+        HR->>Host: answer
+        Host->>Agent: resume_run / rerun with flags
+    else success
+        Agent-->>Host: ranking scores report paths JSON
+        Host->>HR: Plain-language summary + links to PDFs
+    end
+```
 
 ---
 
 ## 2. Modules & tech stack
 
-| #   | Module                       | What it does                                                                 | Tech                                                                                                                     |
-| --- | ---------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 1   | **API / Web layer**          | REST endpoints, DI, startup migrations, CORS, error handling                 | FastAPI, uvicorn, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic, Docker Compose                                   |
-| 2   | **CV Parser**                | PDF → structured candidate data (multimodal, privacy-first)                  | PyMuPDF, pypdf, pdfplumber, RapidOCR (ONNX), OpenCV, GLiNER, zai-sdk (Zhipu AI `glm-4v-flash` / `glm-4-flash`), tenacity |
-| 3   | **JD Parser**                | JD → must/preferred skills, languages, education, visa, experience (3 modes) | PyYAML, regex, zai-sdk; optional torch/transformers (Qwen3-0.6B)                                                         |
-| 4   | **Skill Taxonomy + Matcher** | Canonicalize skills, synonym & parent/child matching                         | PyYAML (`data/taxonomy/skill_taxonomy.yaml`), SQLAlchemy sync                                                            |
-| 5   | **Scorer / Ranker**          | 8-dimension score, weighted total, tiers, hard filters, ranking              | Pure Python + `Decimal` (no LLM)                                                                                         |
-| 6   | **Reports & Integrations**   | PDF one-pager, Excel comparison, PolyU job import, feedback analytics        | reportlab, openpyxl, httpx/requests, regex                                                                               |
+Modules are listed in **product priority** (embeddable execution first, web compatibility last).
+
+| #   | Module                             | Product role                                                                 | Tech                                                                                                            |
+| --- | ---------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 1   | **Codex skills + screening-agent** | **Primary embed surface** — `SKILL.md` contracts + CLIs for hosts            | `.codex/skills/*`, `screening_core`, subprocess pipeline                                                        |
+| 2   | **CV Parser**                      | PDF → structured candidate data (multimodal, privacy-first)                  | PyMuPDF, pypdf, pdfplumber, RapidOCR (ONNX), OpenCV, GLiNER, zai-sdk (`glm-4v-flash` / `glm-4-flash`), tenacity |
+| 3   | **JD Parser**                      | JD → must/preferred skills, languages, education, visa, experience (3 modes) | PyYAML, regex, zai-sdk; optional torch/transformers (Qwen3-0.6B)                                                |
+| 4   | **Skill Taxonomy + Matcher**       | Canonicalize skills, synonym & parent/child matching                         | PyYAML (`data/taxonomy/skill_taxonomy.yaml`), SQLAlchemy sync                                                   |
+| 5   | **Scorer / Ranker**                | Two engines: **legacy** 8-dimension score, or **matching** 6-dimension radar | Pure Python + `Decimal` (no LLM)                                                                                |
+| 6   | **Reports & Integrations**         | PDF one-pager, Excel comparison, PolyU job import                            | reportlab, openpyxl, httpx/requests, regex                                                                      |
+| 7   | **API / Web layer**                | **Compatibility** — REST, DB, frontend stepwise UI                           | FastAPI, uvicorn, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic, Docker Compose                          |
+
+**Scoring engines** (both deterministic; chosen with `--engine` on pipeline / screening-agent):
+
+| Engine     | Dimensions                                                                                   | Typical output                                              |
+| ---------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `legacy`   | 8: skill, experience, education, research, experience quality, language, work auth, location | `dimension_scores`, `total_score`, `tier`, interview hints  |
+| `matching` | 6: core skill, relevant experience, seniority, evidence impact, education/cert, job-specific | `match_score`, `fit_band`, radar, eligibility, interview Qs |
 
 ---
 
@@ -99,32 +197,61 @@ flowchart LR
 
 ---
 
-## 5. Codex skills (agent CLI layer)
+## 5. Codex skills — embed contract for hosts
+
+`.codex/skills/` is the **primary integration surface** for Codex, Cursor, and similar hosts. Each skill ships:
+
+- **`SKILL.md`** — when to invoke, inputs/outputs, example commands (what the host agent reads).
+- **`scripts/*.py`** — deterministic CLI entry points the host runs via shell / tool use.
+- **`src/<pkg>/`** (leaf skills) — implementation; no dependency on `backend/` imports.
+
+Hosts should **not** expose raw JSON envelopes to HR; they translate manifests, scores, and `need_input` into natural language. This repo returns **structured, auditable artifacts** (`output_dir/`, PDF paths, exit codes).
+
+### Skill autonomy — current status
+
+**Yes for the five leaf execution skills.** Domain logic now lives in `.codex/skills/*/src/`; each CLI bootstraps via `_bootstrap.py` → `screening_core.bootstrap.ensure_skill_imports()` (repo root + `sys.path`, no `backend/` import in skill code). `backend/app/services/*` and `backend/app/skills/*` are **compatibility shims** that re-export the same packages for REST.
+
+| Category              | Skills                                                           | `src/` package?          | Notes                                                                         |
+| --------------------- | ---------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| **Leaf (autonomous)** | `cv-parser`, `jd-parser`, `scorer`, `report-gen`, `polyu-import` | ✅ each has `src/<pkg>/` | Source of truth for parse / score / report / PolyU fetch                      |
+| **Shared runtime**    | `_shared`                                                        | ✅ `screening_core/`     | bootstrap, config, LLM client, taxonomy, hash cache — not a user-facing skill |
+| **Orchestrator**      | `pipeline`, `screening-agent`                                    | ❌ scripts only          | Chain sibling CLIs (`subprocess` or L1 loop); no duplicate domain logic       |
+| **Docs**              | `write-prd`                                                      | ❌                       | PRD template + skill contract; no Python package                              |
+
+**Not yet moved into skill packages (REST / DB layer only):**
+
+| Piece                                     | Location                                    | CLI / agent impact                                                                  |
+| ----------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| JD **hybrid / qwen** enrichment providers | `backend/app/services/jd_parser/providers/` | Skill CLI + pipeline use **rule** JD parse; REST `parse_jd_skill` injects providers |
+| Matching **persistence / recalc**         | `backend/app/services/matching_service.py`  | REST + DB; offline pipeline uses `scorer.matching` in-process                       |
+| Taxonomy **DB sync**                      | `backend/app/services/taxonomy_sync.py`     | REST startup; skills read `data/taxonomy/skill_taxonomy.yaml` directly              |
+
+**Packaging gap (optional follow-up):** skills are autonomous in _code ownership_, but still expect repo layout + bootstrap rather than installable `pyproject.toml` wheels.
 
 ### Skill inventory
 
-| Skill folder      | CLI script            | Wraps (`backend/app/skills/`)                                                          | AI?                                              |
-| ----------------- | --------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `cv-parser`       | `run_cv_parse.py`     | `parse_cv_skill`                                                                       | ✅ LLM (vision + text fallback)                  |
-| `jd-parser`       | `run_jd_parse.py`     | `parse_jd_skill`                                                                       | ✅ optional (hybrid/qwen); default rule = no LLM |
-| `scorer`          | `run_score.py`        | `score_candidate_skill`, `rank_candidates_skill`, `build_scoring_config_from_jd`       | ❌ deterministic                                 |
-| `report-gen`      | `run_report.py`       | `generate_candidate_report_skill`, `generate_comparison_report_skill`                  | ❌ reportlab / openpyxl                          |
-| `polyu-import`    | `run_polyu_import.py` | `list_polyu_catalog_skill`, `fetch_polyu_job_skill`, `fetch_and_parse_polyu_job_skill` | ❌ httpx scrape; parse step uses jd-parser       |
-| `pipeline`        | `run_pipeline.py`     | chains polyu-import, jd-parser, cv-parser, scorer, report-gen skill CLIs               | ✅ cv-parser step uses LLM when parsing PDFs     |
-| `screening-agent` | `run_agent.py`        | orchestrates pipeline rounds (`need_input`/partial retry/`resume`)                     | ⚙️ rule-based loop (no extra LLM decisions)      |
-| `write-prd`       | (docs)                | —                                                                                      | ✅ LLM-assisted PRD                              |
+| Skill folder      | CLI script            | Package (`src/`)                                                  | AI?                                                     |
+| ----------------- | --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------- |
+| `cv-parser`       | `run_cv_parse.py`     | `cv_parser/`                                                      | ✅ LLM (vision + text fallback)                         |
+| `jd-parser`       | `run_jd_parse.py`     | `jd_parser/` (rule parser; hybrid/qwen providers REST-only)       | ❌ CLI rule; REST ⚙️ hybrid/qwen                        |
+| `scorer`          | `run_score.py`        | `scorer/` including `matching/` engine + `skill_matcher`          | ❌ deterministic                                        |
+| `report-gen`      | `run_report.py`       | `report_gen/`                                                     | ❌ reportlab / openpyxl                                 |
+| `polyu-import`    | `run_polyu_import.py` | `polyu_import/` (CLI JD parse = rule)                             | ❌ httpx scrape                                         |
+| `pipeline`        | `run_pipeline.py`     | orchestrator — chains leaf skill CLIs                             | ✅ when CV PDFs are parsed                              |
+| `screening-agent` | `run_agent.py`        | orchestrator — pipeline rounds + `planner.py` for `--planner llm` | ⚙️ rules / ✅ planner LLM (scoring still deterministic) |
+| `write-prd`       | (docs)                | —                                                                 | ✅ LLM-assisted PRD (authoring, not runtime)            |
 
-> Each skill has `SKILL.md`, `agents/openai.yaml`, `scripts/_bootstrap.py` (repo-root cwd + `backend/` on `sys.path`), and examples. CLI scripts call the **same** functions as the REST API where applicable; PolyU skill does **not** write to DB (REST `/sync-polyu/*` still persists jobs).
+### REST shim layer (`backend/app/skills/`) — compatibility only
 
-### Shared skill orchestration (`backend/app/skills/`)
+Thin adapters for FastAPI routes; implementations import from skill packages (not vice versa).
 
-| Module            | Purpose                                          |
-| ----------------- | ------------------------------------------------ |
-| `cv_parse.py`     | CV PDF → structured profile                      |
-| `jd_parse.py`     | JD text → structured requirements                |
-| `score.py`        | Score, rank, `build_scoring_config_from_jd`      |
-| `report.py`       | PDF one-pager + Excel comparison                 |
-| `polyu_import.py` | PolyU catalog / detail fetch + optional JD parse |
+| Module            | Purpose                                        |
+| ----------------- | ---------------------------------------------- |
+| `cv_parse.py`     | Re-export `cv_parser.skill`                    |
+| `jd_parse.py`     | Rule skill + inject hybrid/qwen providers      |
+| `score.py`        | Re-export `scorer.skill` / `ScorerService`     |
+| `report.py`       | Re-export `report_gen.skill`                   |
+| `polyu_import.py` | Fetch via skill; parse may use REST `jd_parse` |
 
 ### Offline agent pipeline (file-based, no DB)
 
@@ -133,7 +260,7 @@ flowchart LR
     P[polyu-import<br/>fetch-and-parse] --> BC[scorer<br/>build-config]
     J[jd-parser] --> BC
     BC --> CV[cv-parser]
-    CV --> SC[scorer<br/>score]
+    CV --> SC[scorer<br/>score or match]
     SC --> RG[report-gen<br/>candidate PDF]
 ```
 
@@ -170,50 +297,148 @@ python .codex/skills/report-gen/scripts/run_report.py candidate --extracted extr
 
 Regression coverage: `backend/tests/unit/test_skill_cli_compat.py` (CLI ↔ `app.skills.*` parity + pipeline stubs).
 
-### Still optional to extract as standalone skills
+### Optional future splits (already bundled in leaf skills today)
 
-| Part                            | Skill?                                                          |
-| ------------------------------- | --------------------------------------------------------------- |
-| Local OCR (scanned CVs)         | 🔧 could extract `cv-ocr` (bundled in cv-parser today)          |
-| Local PII / name detection      | 🔧 could extract `cv-pii-redact`                                |
-| Local Qwen JD extractor         | 🔧 could extract `jd-qwen` (mode on jd-parser / polyu `--mode`) |
-| Skill taxonomy + matching alone | 🔧 could extract `skill-matcher` (bundled in scorer today)      |
-| Feedback analytics              | 🔧 future skill / agent step                                    |
+| Part                       | Today                                             | Optional split                       |
+| -------------------------- | ------------------------------------------------- | ------------------------------------ |
+| Local OCR (scanned CVs)    | `cv_parser/ocr.py`                                | `cv-ocr` skill                       |
+| Local PII / name detection | `cv_parser/pii.py`, `local_ner.py`                | `cv-pii-redact` skill                |
+| Local Qwen JD extractor    | backend `providers/qwen.py`                       | move into `jd-parser` for CLI parity |
+| Skill taxonomy + matcher   | `scorer/skill_matcher.py` + `_shared/taxonomy.py` | `skill-matcher` skill                |
+| Feedback analytics         | REST `feedback` routes                            | future skill / agent step            |
 
 ---
 
-## 6. Turning the whole project into one agent — roadmap
+## 6. Screening agent — execution orchestrator (host complements conversation)
+
+`screening-agent` is the **recommended host entry** for full runs. It sits on `pipeline` and returns envelopes HR hosts can interpret (`success`, `partial_success`, `need_input`, `error`). It does **not** replace the host’s chat model.
+
+**Production pattern:** host = conversation + file handling; `screening-agent --planner rules` = deterministic retries and `need_input` signaling.
+
+**Dev / no-host pattern:** `--planner llm` uses an in-repo tool picker when no external host orchestrates turns.
+
+```mermaid
+flowchart TD
+    IN[CLI flags + optional --goal] --> MODE{--planner}
+    MODE -->|rules default| L1[L1 rule loop]
+    MODE -->|llm| PL[LLM planner loop]
+    PL -->|"JSON {tool, arguments, reason}"| T{Allowlisted tool}
+    T -->|run_screening / resume_run| L1
+    T -->|ask_user| ASK[status need_input]
+    T -->|get_run_status| ST[read agent-state.json]
+    T -->|finish| OUT[return last screening result]
+    L1 --> PIPE[pipeline skill]
+    PIPE --> MAN[manifest: success / partial_success / need_input / error]
+    MAN --> DEC{Retry?}
+    DEC -->|transient failures + rounds left| L1
+    DEC -->|success / hard error / max rounds| OUT
+    ASK --> OUT
+```
+
+### 6.1 `--planner rules` (default, no extra LLM)
+
+Deterministic L1 loop in `run_agent.py`:
+
+1. Build the pipeline command from CLI flags (JD source, CVs / extracted JSON, engine, output dir).
+2. Run pipeline; persist `output_dir/agent-state.json` (`round`, `retry_decision`, `runs[]`).
+3. Classify the envelope:
+   - `need_input` → stop, exit `2`, `ask` lists missing JD / candidates / position.
+   - `success` → stop, exit `0`.
+   - `partial_success` → retry with `--resume` if failures look transient and `--max-rounds` is not exhausted.
+   - hard `error` → stop, exit `1`.
+4. Retry policy is `stage + error-message` based (`cv-parse` / `score` / `match` / `report-gen` / `comparison`). Transient hints (timeout, 429, 5xx) retry; SSL, missing files, auth, invalid input do not.
+
+### 6.2 `--planner llm` (in-repo tool picker — not the HR chat agent)
+
+Implemented in `.codex/skills/screening-agent/scripts/planner.py`. **Target product:** host model orchestrates; this mode is for **development, testing, or hosts without tool routing**. Each turn the model must return one JSON object:
+
+```json
+{ "tool": "run_screening", "arguments": {}, "reason": "inputs look complete" }
+```
+
+| Tool             | Effect                                                                     |
+| ---------------- | -------------------------------------------------------------------------- |
+| `run_screening`  | Call the L1 loop with the original CLI paths (`resume` always false)       |
+| `resume_run`     | Same L1 loop with pipeline `--resume` (reuse artifacts in `output_dir`)    |
+| `ask_user`       | Stop with `need_input`; `missing` allowlisted to jd / candidates / position |
+| `get_run_status` | Read compact `agent-state.json`; envelope status is `status_read`          |
+| `finish`         | Last in-memory result, or rebuild from `agent-state.json`                  |
+
+**Planner runtime:**
+
+- Shared `LLMClient` (`glm-4-flash`, `response_format=json_object`, `temperature=0`, `seed=42`); one client reused across turns.
+- Context per turn: boolean/count CLI snapshot (no secrets or full paths) + compact redacted history.
+- `--max-rounds` defaults to `1` in llm mode so planner `resume_run` does not stack on a second L1 round.
+- Unknown tools are recorded as `invalid` and the loop continues (budget `--planner-max-steps`, default 8).
+- Terminal statuses `success` / `need_input` / `error` after `run_screening` / `resume_run` / `ask_user` stop the loop immediately. `partial_success` is **not** terminal so the model can choose `resume_run`.
+- Envelope adds `planner: "llm"` and `planner_steps`. Audit file: `output_dir/planner-state.json`.
+
+```bash
+# L1 rules (default)
+python .codex/skills/screening-agent/scripts/run_agent.py \
+  --jd-file jd.txt --cv cv1.pdf --cv cv2.pdf \
+  --position "Backend Engineer" --output-dir data/pipeline_out
+
+# LLM planner (needs ZAI_API_KEY + LLM_BASE_URL)
+python .codex/skills/screening-agent/scripts/run_agent.py \
+  --planner llm \
+  --goal "Screen these candidates and retry transient parse failures." \
+  --jd-json .codex/skills/scorer/examples/sample-jd-structured.json \
+  --extracted .codex/skills/report-gen/examples/sample-extracted.json \
+  --position "Backend Engineer" \
+  --skip-reports \
+  --output-dir data/agent_planner_out
+```
+
+Offline sample path (no PDF parse): `--jd-json` + `--extracted` + `--skip-reports` still exercises planner + L1 + scorer. Use `--planner rules` if the planner LLM call cannot reach Zhipu (TLS/network).
+
+Tests: `backend/tests/unit/test_screening_agent_cli.py` (L1) and `test_screening_agent_planner.py` (tool allowlist, ask/resume/finish, mocked LLM).
+
+---
+
+## 7. Roadmap — embeddable agent for non-technical HR
 
 ```mermaid
 flowchart LR
-    A["✅ Today: REST + frontend + 7 CLI skills<br/>+ app/skills shared layer"] --> B["Step 1: self-contained skills<br/>(move services into .codex/skills)"]
-    B --> C["Step 2: orchestrator agent YAML<br/>(cv-screening-agent)"]
-    C --> D["Step 3: agent data layer<br/>(file store or DB helpers)"]
-    D --> E["Step 4: evals + guardrails<br/>(CV accuracy, full pipeline eval)"]
-    E --> F["Step 5: feedback loop<br/>(tune weights from feedback_logs)"]
+    A["✅ Today: autonomous leaf skills<br/>pipeline + screening-agent"] --> B["Step 1: host-ready packaging<br/>SKILL.md polish pip install"]
+    B --> C["Step 2: HR via host only<br/>need_input UX no terminal"]
+    C --> D["Step 3: run artifacts<br/>file store session dirs"]
+    D --> E["Step 4: evals + guardrails"]
+    E --> F["Step 5: feedback loop"]
+    G[Web REST UI] -.->|compatibility only| A
 ```
 
-### Done (since initial roadmap)
+### Done (foundation for host embedding)
 
-- **Eight Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts (including **`pipeline`** end-to-end orchestration and **`screening-agent`** L1 retry loop).
-- **`backend/app/skills/`** as single source of truth for REST + CLI (`cv_parse`, `jd_parse`, `score`, `report`, `polyu_import`).
-- **Chainable offline pipeline**: manual step chain or **`pipeline` skill** one-shot (`polyu/jd → build-config → cv-parse → score → report-gen`), with L1 phase 1 **partial success**, per-candidate retries, `--resume`, and `need_input` when JD/CVs/position are missing.
+- **Eight Codex skills** under `.codex/skills/` with CLI entry points and `SKILL.md` contracts — **primary embed surface**.
+- **Autonomous leaf skills:** `cv-parser`, `jd-parser`, `scorer`, `report-gen`, `polyu-import` own `src/` packages; `screening_core` owns shared config / LLM / taxonomy / cache. `backend/app/services/*`, `backend/app/skills/*`, and `backend/app/core/*` are shims for REST compatibility.
+- **JD hybrid/qwen** enrichment providers remain backend-only (`backend/app/services/jd_parser/providers/`); skill CLI and pipeline use rule JD parse.
+- **`pipeline` skill**: one-shot `polyu/jd → build-config → cv-parse → score|match → report-gen`, with **partial success**, per-candidate retries, `--resume`, and `need_input`.
+- **`screening-agent` L1**: multi-round retry over pipeline, `agent-state.json`, retry classification, **`need_input` bridge for hosts**.
+- **`--planner llm`**: allowlisted tool picker for dev / fallback orchestration; scores remain deterministic.
+- **Matching engine** (`--engine matching`) as a second deterministic scorer (radar + interview questions).
 - **Envelope unwrapping + fail-fast** on scorer, report-gen, and build-config inputs.
-- **CLI compat tests** in `test_skill_cli_compat.py` (including stubbed PolyU network).
+- **CLI / agent tests**: `test_skill_cli_compat.py`, `test_screening_agent_cli.py`, `test_screening_agent_planner.py`.
+- **Web + REST**: functional compatibility layer (DB, PolyU sync UI, stepwise demo) — **not the primary HR product**.
 
-### Still needed
+### Still needed (host-first)
 
-1. **Self-contained skills** — merge `backend/app/skills/*` and wrapped services into each `.codex/skills/*` folder (`TODO(agent-migration)` in code and skill docs).
-2. **Orchestrator agent evolution (post-L1)** — extend `screening-agent` from rule-loop retries to richer planning (`ask_user` UX, smarter retry classification, batch continuation policies). L2 feedback weight tuning remains later.
-3. **Agent data access** — optional DB helpers or file-based job/candidate storage for multi-CV batch runs.
-4. **Runtime config** — document / centralize env (ZAI_API_KEY, LLM_BASE_URL, JD_PARSER_MODE) for agent runs.
-5. **Evaluation & guardrails** — extend `backend/scripts/eval_jd_parsers.py`; add CV parser accuracy and full pipeline regression tests.
-6. **Feedback loop** — agent consumes `feedback_logs` analytics to suggest scoring weight / config adjustments.
-7. **Deprecate legacy REST/frontend path** (optional) — thin API or remove routes marked `TODO(agent-migration)` when agent is primary.
+1. **Host-ready packaging** — `pyproject.toml` / install docs so Codex/Cursor can depend on skills without manual `PYTHONPATH`; keep `SKILL.md` examples copy-paste safe for agents.
+2. **HR `need_input` contract** — stable `ask` / `missing` fields and plain-language templates hosts can surface; no CLI flags exposed to HR users.
+3. **Session artifacts** — predictable `output_dir` layout (ranking JSON, report paths, `agent-state.json`) for hosts to attach or open files in the chat UI.
+4. **JD enrichment parity** — move hybrid/qwen providers into `jd-parser` skill if CLI should match REST modes.
+5. **Runtime config for hosts** — single doc for env (`ZAI_API_KEY`, `LLM_BASE_URL`, `JD_PARSER_MODE`) via `screening_core.config`; host setup wizard, not `.env` editing by HR.
+6. **Evaluation & guardrails** — CV parser accuracy and full pipeline regression; hosts should not ship silent quality regressions.
+7. **Feedback loop** — skill or host step to consume `feedback_logs` and suggest weight adjustments (deterministic apply still in scorer).
+8. **Web path maintenance** — thin REST shim over skills; avoid new HR-only features **only** in frontend when the host path should get them first.
 
-### Known limits (agent path)
+### Known limits (host + execution split)
 
-- **PolyU fetch** requires HTTPS to `jobs.polyu.edu.hk`; TLS/CA issues must be fixed at OS level (do not disable cert verification in code).
+- **Host must own conversation** — this repo does not ship a production HR chat UI; `need_input` is structured hints, not rendered forms.
+- **In-repo planner is not the product chat agent** — it cannot add CVs, invent paths, or edit scores; `--goal` is hint text only.
+- **`--planner llm` needs network to Zhipu** when used; TLS/CA issues must be fixed at OS level. Prefer host orchestration + `--planner rules` for HR flows.
+- **PolyU fetch** requires HTTPS to `jobs.polyu.edu.hk`; same TLS rule as above (do not disable cert verification in code).
 - **PolyU HTML** parsing depends on current page structure (`ITS_clickableTableRow`, `<main>`); site redesign may break listing/detail parsers.
 - **PDF report fields** — `ReporterService` expects experience `title` / `start_date`; some CV extractions use `job_title` / `period` (same limitation as REST).
-- **polyu-import** does not persist jobs; REST `/api/v1/jobs/sync-polyu/*` remains the path for DB import + frontend job board.
+- **polyu-import** does not persist jobs; REST `/api/v1/jobs/sync-polyu/*` remains the compatibility path for DB import + job board UI.
+- **REST + frontend** do not call `screening-agent` today; converging them behind the same host-oriented envelopes is optional compatibility work, not the main roadmap.

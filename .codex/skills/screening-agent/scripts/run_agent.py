@@ -1,4 +1,4 @@
-# Runs a deterministic L1 screening-agent loop on top of the pipeline skill.
+# Runs a deterministic L1 screening-agent loop, or an LLM planner over the same tools.
 from __future__ import annotations
 
 import argparse
@@ -284,8 +284,10 @@ def _run_loop(args: argparse.Namespace) -> tuple[int, dict]:
 def _validate_args(args: argparse.Namespace) -> None:
     if args.polyu_detail_url and not args.polyu_ref:
         raise RuntimeError("--polyu-detail-url is only valid together with --polyu-ref")
-    if args.max_rounds < 1:
+    if args.max_rounds is not None and args.max_rounds < 1:
         raise RuntimeError("--max-rounds must be >= 1")
+    if args.planner_max_steps < 1:
+        raise RuntimeError("--planner-max-steps must be >= 1")
 
 
 # Parses command-line arguments for the screening-agent loop.
@@ -316,19 +318,60 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Retries per candidate stage inside each pipeline run.",
     )
-    parser.add_argument("--max-rounds", type=int, default=2, metavar="N", help="Max screening-agent rounds.")
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max L1 rounds (default 2 for rules, 1 for --planner llm).",
+    )
     parser.add_argument("--resume", action="store_true", help="Start the first round with pipeline --resume enabled.")
     parser.add_argument("--fail-fast", action="store_true", help="Pass through to pipeline --fail-fast behavior.")
+    parser.add_argument(
+        "--planner",
+        choices=("rules", "llm"),
+        default="rules",
+        help="rules = L1 retry loop (default); llm = LLM chooses run/resume/ask/finish.",
+    )
+    parser.add_argument(
+        "--planner-max-steps",
+        type=int,
+        default=8,
+        metavar="N",
+        help="Max LLM planner turns (default 8). Ignored for --planner rules.",
+    )
+    parser.add_argument(
+        "--goal",
+        default=None,
+        help="Optional natural-language goal for --planner llm. File paths still come from CLI flags.",
+    )
     return parser
 
 
-# Entrypoint: runs the L1 screening-agent loop and prints JSON output.
+# Entrypoint: runs the L1 loop or the LLM planner and prints JSON output.
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     try:
         _validate_args(args)
-        code, payload = _run_loop(args)
+        # Planner resume_run already retries; keep a single L1 round unless the user set --max-rounds.
+        if args.planner == "llm" and args.max_rounds is None:
+            args.max_rounds = 1
+        elif args.max_rounds is None:
+            args.max_rounds = 2
+        if args.planner == "llm":
+            import planner as planner_mod
+
+            code, payload = planner_mod.run_llm_planner(
+                args,
+                run_loop=_run_loop,
+                resolve_output_dir=_resolve_output_dir,
+                exit_ok=EXIT_OK,
+                exit_error=EXIT_ERROR,
+                exit_need_input=EXIT_NEED_INPUT,
+            )
+        else:
+            code, payload = _run_loop(args)
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         stream = sys.stdout if code in {EXIT_OK, EXIT_NEED_INPUT} else sys.stderr
         print(text, file=stream)

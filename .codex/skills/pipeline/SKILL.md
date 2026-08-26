@@ -128,6 +128,6 @@ flowchart LR
     E --> F["report-gen PDF / Excel"]
 ```
 
-## Future migration
+## Ownership
 
-TODO(agent-migration): When the legacy REST API is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
+Pipeline only orchestrates sibling skill CLIs. Domain logic lives in those skills, not in `backend/`.

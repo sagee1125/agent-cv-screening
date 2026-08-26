@@ -18,7 +18,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
-from app.skills.report import generate_candidate_report_skill, generate_comparison_report_skill
+from report_gen.skill import generate_candidate_report_skill, generate_comparison_report_skill
 
 
 # Load a JSON file (BOM-tolerant) into a dict or list.

@@ -144,6 +144,6 @@ python .codex/skills/scorer/scripts/run_score.py score --extracted .codex/skills
 python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured .codex/skills/scorer/examples/sample-jd-structured.json
 ```
 
-## Future migration
+## Ownership
 
-TODO(agent-migration): When the legacy REST API (traditional frontend) is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
+`src/scorer/` is the source of truth (legacy scorer, skill matcher, candidate matching). REST re-exports the same functions.

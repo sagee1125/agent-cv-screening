@@ -7,19 +7,19 @@ from typing import Any
 import pymupdf
 import pytest
 
-from app.services.cv_parser import local_ner as local_ner_module
-from app.services.cv_parser import CVParserService
-from app.services.cv_parser.pdf_utils import (
+from cv_parser import local_ner as local_ner_module
+from cv_parser import CVParserService
+from cv_parser.pdf_utils import (
     extract_with_pymupdf,
     render_redacted_pdf_pages_as_data_urls,
 )
-from app.services.cv_parser.ocr import LocalCVDocument, extract_local_cv_document
-from app.services.cv_parser.pii import (
+from cv_parser.ocr import LocalCVDocument, extract_local_cv_document
+from cv_parser.pii import (
     contact_values_for_redaction,
     detect_contact_entities,
     mask_pii_text,
 )
-from app.services.cv_parser.service import PARSER_CACHE_VERSION
+from cv_parser.service import PARSER_CACHE_VERSION
 
 
 class DummyCache:
@@ -281,7 +281,7 @@ def test_normalize_schema_routes_language_tokens_to_languages() -> None:
 
 # Verifies structured skill objects carry canonical_skill and skill_id.
 def test_normalize_skill_items_builds_structured_objects() -> None:
-    from app.services.cv_parser.helpers import normalize_skill_items
+    from cv_parser.helpers import normalize_skill_items
 
     skills = normalize_skill_items(["Python", "pytorch", "Python"])
     assert [skill["canonical_skill"] for skill in skills] == ["python", "pytorch"]
@@ -292,7 +292,7 @@ def test_normalize_skill_items_builds_structured_objects() -> None:
 
 # Verifies month-name and MM/YYYY date tokens parse into ISO YYYY-MM.
 def test_parse_cv_date_handles_multiple_formats() -> None:
-    from app.services.cv_parser.helpers import parse_cv_date
+    from cv_parser.helpers import parse_cv_date
 
     assert parse_cv_date("Jan 2021") == "2021-01"
     assert parse_cv_date("January 2021") == "2021-01"
@@ -305,7 +305,7 @@ def test_parse_cv_date_handles_multiple_formats() -> None:
 
 # Verifies the matcher accepts structured skill dicts and folds in skills_used.
 def test_skill_matcher_accepts_structured_skills_and_skills_used() -> None:
-    from app.core.taxonomy import SkillTaxonomyLoader
+    from screening_core.taxonomy import SkillTaxonomyLoader
     from app.services.skill_matcher import SkillMatcherService
 
     taxonomy = SkillTaxonomyLoader("data/taxonomy/skill_taxonomy.yaml")
@@ -323,7 +323,7 @@ def test_skill_matcher_accepts_structured_skills_and_skills_used() -> None:
 
 # Verifies the scorer matches degrees via degree_level and falls back to substring.
 def test_scorer_matches_degree_by_level_and_substring_fallback() -> None:
-    from app.core.taxonomy import SkillTaxonomyLoader
+    from screening_core.taxonomy import SkillTaxonomyLoader
     from app.services.scorer import ScorerService
     from app.services.skill_matcher import SkillMatcherService
 
@@ -376,7 +376,7 @@ def test_normalize_schema_produces_p1_fields() -> None:
 
 # Verifies work authorization fallback infers status from sponsorship cues.
 def test_normalize_work_authorization_infers_status_from_raw() -> None:
-    from app.services.cv_parser.helpers import normalize_work_authorization
+    from cv_parser.helpers import normalize_work_authorization
 
     assert normalize_work_authorization("Require visa sponsorship")["status"] == "requires_sponsorship"
     assert normalize_work_authorization("Authorized to work in the US")["status"] == "has_work_permit"
@@ -417,7 +417,7 @@ def test_apply_content_fallback_recovers_p1_sections() -> None:
 
 # Verifies project skills_used count toward skill matching via additional_skills.
 def test_scorer_folds_project_skills_into_match() -> None:
-    from app.core.taxonomy import SkillTaxonomyLoader
+    from screening_core.taxonomy import SkillTaxonomyLoader
     from app.services.scorer import ScorerService
     from app.services.skill_matcher import SkillMatcherService
 

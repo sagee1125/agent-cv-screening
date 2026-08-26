@@ -1,4 +1,5 @@
+# Codex UI metadata for the screening-agent skill (rules loop + LLM planner).
 interface:
-  display_name: "Screening Agent (L1)"
-  short_description: "Run pipeline with ask/retry loop and resumable state"
-  default_prompt: "Use $skill-screening-agent to run screening with L1 behavior (need_input + retries + partial success handling) for: <jd + cvs>"
+  display_name: "Screening Agent (L1 + LLM planner)"
+  short_description: "Rule retry loop or LLM planner over run/resume/ask; scoring stays deterministic"
+  default_prompt: "Use $skill-screening-agent. Prefer --planner llm when the user describes a screening goal in natural language; otherwise use the default L1 rules loop. Never let the model change scores."

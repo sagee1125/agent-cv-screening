@@ -9,9 +9,11 @@ Run the project CV Parser service directly as a Python script (no HTTP).
 
 ## Prerequisites
 
-- Backend dependencies installed: `pip install -r backend/requirements.txt`.
+- Python dependencies: `pip install -r backend/requirements.txt` (parser still uses the same packages).
 - `.env` at repo root with `ZAI_API_KEY` and `LLM_BASE_URL` (the parser calls the Zhipu LLM).
 - Run every command from the repository root.
+
+The parser implementation lives in this skill (`src/cv_parser/`), not in `backend/`. Shared LLM/settings/taxonomy code is `.codex/skills/_shared/src/screening_core/`. FastAPI re-exports the same functions.
 
 ## Run
 
@@ -68,6 +70,6 @@ python .codex/skills/cv-parser/scripts/run_cv_parse.py --file .codex/skills/cv-p
 
 Parsing requires the live LLM, so no sample output is bundled; the first run prints the result to stdout (or write it with `--output`).
 
-## Future migration
+## Ownership
 
-TODO(agent-migration): When the legacy REST API (traditional frontend) is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
+`src/cv_parser/` is the source of truth. `backend/app/services/cv_parser` and `backend/app/skills/cv_parse.py` re-export the same functions for the REST API.

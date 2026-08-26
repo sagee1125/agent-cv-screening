@@ -1,16 +1,17 @@
-# Publishes the stable public API for candidate matching consumers.
-from .config_builder import build_matching_config
-from .contracts import (
+# Compatibility shim: candidate matching lives in the scorer skill.
+from scorer.matching import *  # noqa: F403
+from scorer.matching import (
     ALGORITHM_VERSION,
+    CandidateMatchingService,
     DEFAULT_WEIGHTS,
     DIMENSION_IDS,
     EffectiveConfig,
     MatchingConfigError,
     SCHEMA_VERSION,
+    build_matching_config,
+    match_candidate,
+    rank_candidates,
 )
-from .engine import match_candidate
-from .ranker import rank_candidates
-from .service import CandidateMatchingService
 
 __all__ = [
     "ALGORITHM_VERSION",

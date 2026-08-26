@@ -24,7 +24,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
-from app.skills.score import build_scoring_config_from_jd, rank_candidates_skill, score_candidate_skill
+from scorer.skill import build_scoring_config_from_jd, rank_candidates_skill, score_candidate_skill
 
 _SUBCOMMANDS = ("score", "build-config", "match")
 # Requirement keys that make a JD structured_data payload usable for config building.
@@ -141,14 +141,11 @@ def _run_build_config(args: argparse.Namespace) -> int:
 
 def _load_taxonomy_related() -> Any:
     # Build the taxonomy-backed related-skill resolver used by the REST matching path.
-    from app.core.taxonomy import SkillTaxonomyLoader
+    from screening_core.taxonomy import SkillTaxonomyLoader
+    from screening_core.paths import taxonomy_yaml_path
 
-    yaml_candidates = [
-        _bootstrap.REPO_ROOT / "data" / "taxonomy" / "skill_taxonomy.yaml",
-        _bootstrap.REPO_ROOT / "backend" / "data" / "taxonomy" / "skill_taxonomy.yaml",
-    ]
-    yaml_path = next((path for path in yaml_candidates if path.is_file()), None)
-    if yaml_path is None:
+    yaml_path = taxonomy_yaml_path()
+    if not yaml_path.is_file():
         return None
     loader = SkillTaxonomyLoader(str(yaml_path))
     loader.load()
@@ -195,7 +192,7 @@ def _normalize_experience_dates(extracted: dict) -> dict:
 def _run_match(args: argparse.Namespace) -> int:
     # Run the deterministic matching engine and emit the modal-style radar/interview detail payload.
     try:
-        from app.services.candidate_matching.service import CandidateMatchingService
+        from scorer.matching.service import CandidateMatchingService
         jd_structured = _load_jd_structured(args.jd_structured)
         cv_extracted = _normalize_experience_dates(_unwrap_extracted_data(_read_json(args.cv_extracted)))
         reference_date = args.reference_date or date.today().isoformat()

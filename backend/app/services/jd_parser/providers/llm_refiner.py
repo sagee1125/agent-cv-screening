@@ -6,11 +6,11 @@ from typing import Any
 
 from app.config import settings
 from app.core.llm_client import LLMClient
-from app.services.jd_parser.prompts import (
+from jd_parser.prompts import (
     JD_SKILL_REFINER_SYSTEM_PROMPT,
     build_jd_skill_refiner_user_prompt,
 )
-from app.services.jd_parser.providers.base import (
+from jd_parser.providers.base import (
     JDEnrichmentProvider,
     JDEnrichmentResult,
     build_refined_skill_items,

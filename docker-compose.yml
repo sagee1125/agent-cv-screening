@@ -47,6 +47,9 @@ services:
     volumes:
       - ./data:/app/data
       - ./backend:/app
+      # Skill packages live next to the repo, not inside backend/. Required after
+      # the cv-parser / screening_core move so FastAPI can import them.
+      - ./.codex:/app/.codex
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
   # Frontend is local-only (`cd frontend && npm run dev`) so Windows Docker bind
   # mounts do not break Vite HMR. Uncomment this service to serve the UI from Compose.

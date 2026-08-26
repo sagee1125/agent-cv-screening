@@ -134,6 +134,6 @@ Full pipeline: `polyu fetch-and-parse → scorer build-config → cv-parse → s
 }
 ```
 
-## Future migration
+## Ownership
 
-TODO(agent-migration): When the legacy REST API (traditional frontend) is deprecated, merge the shared logic currently in `backend/app/skills/` (and the services it wraps) into this folder so this skill becomes fully self-contained and can be composed into a single integrated agent pipeline.
+`src/polyu_import/` is the source of truth for fetch/catalog. CLI JD parse is rule-only; REST `fetch_and_parse` may still apply hybrid/qwen.
