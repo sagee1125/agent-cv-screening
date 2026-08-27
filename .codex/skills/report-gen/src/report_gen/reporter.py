@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,13 +12,57 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-# Register the built-in CJK font so Chinese candidate content renders correctly.
-if "STSong-Light" not in pdfmetrics.getRegisteredFontNames():
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+# Registers a TrueType/TTC face if the file exists and the family is not already loaded.
+def _register_ttf(family: str, path: Path, subfont_index: int = 0) -> bool:
+    if family in pdfmetrics.getRegisteredFontNames():
+        return True
+    if not path.is_file():
+        return False
+    try:
+        pdfmetrics.registerFont(TTFont(family, str(path), subfontIndex=subfont_index))
+        return True
+    except Exception:
+        return False
 
-_CJK = "STSong-Light"
+
+# Registers a ReportLab CID face so CJK still renders when system fonts are missing.
+def _register_cid(family: str) -> None:
+    if family not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(UnicodeCIDFont(family))
+
+
+# Loads Microsoft YaHei for body text, with Hangul/CID fallbacks for CJK coverage.
+def _register_cjk_stack() -> tuple[str, str]:
+    _register_cid("STSong-Light")
+    _register_cid("HYGothic-Medium")
+    fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    yahei = _register_ttf("MicrosoftYaHei", fonts_dir / "msyh.ttc", 0) or _register_ttf(
+        "MicrosoftYaHei", fonts_dir / "msyh.ttf", 0
+    )
+    hangul = _register_ttf("MalgunGothic", fonts_dir / "malgun.ttf")
+    primary = "MicrosoftYaHei" if yahei else "STSong-Light"
+    hangul_family = "MalgunGothic" if hangul else "HYGothic-Medium"
+    return primary, hangul_family
+
+
+# Picks YaHei for Han/Kana/Latin, and a Hangul face when Korean syllables are present.
+def _body_font(text: str) -> str:
+    if any("\u1100" <= ch <= "\u11ff" or "\u3130" <= ch <= "\u318f" or "\uac00" <= ch <= "\ud7a3" for ch in text):
+        return _HANGUL
+    return _CJK
+
+
+# Uses the CJK stack for body fonts so Hangul is not measured with YaHei.
+def _layout_font(text: str, font: str) -> str:
+    if font in {_CJK, _HANGUL}:
+        return _body_font(text)
+    return font
+
+
+_CJK, _HANGUL = _register_cjk_stack()
 _BOLD = "Helvetica-Bold"
 _REGULAR = "Helvetica"
 
@@ -217,8 +262,9 @@ class ReporterService:
             c.rect(margin, y - header_h, content_w, header_h, fill=1, stroke=1)
             c.setFillColor(colors.black)
             label_y = y - 12
+            label_font = _layout_font(str(detail["label"]), _CJK)
             for line in label_lines:
-                c.setFont(_CJK, 9)
+                c.setFont(label_font, 9)
                 c.drawString(margin + 6, label_y, line)
                 label_y -= 11
             if metrics:
@@ -228,8 +274,9 @@ class ReporterService:
             if reason:
                 y = self._draw_wrapped(c, margin + 6, y, reason, _CJK, 8, content_w - 12, 11)
                 y -= 6
-            for lines in wrapped_gaps:
-                c.setFont(_CJK, 8)
+            for gap, lines in zip(detail.get("gaps") or [], wrapped_gaps):
+                gap_font = _layout_font(f"- {gap}", _CJK)
+                c.setFont(gap_font, 8)
                 for line in lines:
                     c.drawString(margin + 14, y, line)
                     y -= 11
@@ -388,6 +435,7 @@ class ReporterService:
     @staticmethod
     def _wrap_to_width(text: str, font: str, size: float, max_width: float) -> list[str]:
         raw = str(text or "").strip()
+        font = _layout_font(raw, font)
         if not raw:
             return [""]
         if max_width <= 0:
@@ -477,6 +525,7 @@ class ReporterService:
         max_width: float,
         line_height: float,
     ) -> float:
+        font = _layout_font(str(text or ""), font)
         c.setFont(font, size)
         for line in ReporterService._wrap_to_width(text, font, size, max_width):
             c.drawString(x, y, line)
@@ -568,7 +617,7 @@ class ReporterService:
                 short = _RADAR_SHORT.get(label, label)
                 label_lines = ReporterService._wrap_to_width(short, _CJK, 6.5, 70)
             lx, ly = polar((radius + 16) / radius, i)
-            c.setFont(_CJK, 6.5)
+            c.setFont(_layout_font(short, _CJK), 6.5)
             line_h = 8
             start_y = ly + (len(label_lines) - 1) * line_h / 2
             for offset, line in enumerate(label_lines):
