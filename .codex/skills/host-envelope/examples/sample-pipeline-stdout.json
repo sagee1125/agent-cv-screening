@@ -1,0 +1,27 @@
+{
+  "status": "success",
+  "engine": "matching",
+  "refno": "260818001",
+  "candidates": [
+    {
+      "rank": 1,
+      "refno": "260818001",
+      "appno": "123456",
+      "display_label": "260818001/123456",
+      "name": "Alice Chen",
+      "source": "C:\\Users\\hr\\cvs\\123456.pdf",
+      "total_score": 78.5,
+      "tier": "strong_fit",
+      "extracted_json": "data/pipeline_out/extracted-123456.json",
+      "score_json": null,
+      "detail_json": "data/pipeline_out/detail-123456.json",
+      "report_pdf": "data/pipeline_out/report-1-260818001_123456.pdf"
+    }
+  ],
+  "failures": [],
+  "ask": null,
+    "reports": {
+        "comparison_xlsx": "data/pipeline_out/comparison.xlsx",
+        "ranking_overview_html": "data/pipeline_out/ranking-overview.html"
+    }
+}

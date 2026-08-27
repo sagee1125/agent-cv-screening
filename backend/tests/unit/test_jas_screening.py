@@ -64,6 +64,7 @@ def _args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
         "engine": "legacy",
         "max_retries": 2,
         "skip_reports": False,
+        "no_open": True,
         "resume": False,
         "fail_fast": False,
     }
@@ -172,13 +173,85 @@ def test_run_jas_screening_runs_pipeline(tmp_path, monkeypatch, capsys) -> None:
     cmd = captured_cmd[0]
     assert "--jd-file" in cmd
     assert "--position" in cmd and "Project Associate" in cmd
-    assert "--cv" in cmd and str(cv_path) in cmd
+    assert "--refno" in cmd and "190001010" in cmd
+    assert "--report-dir" in cmd
+    assert "--cv" in cmd
+    assert any(Path(token).name == "123456.pdf" for token in cmd)
 
-    out_dir = tmp_path / "out"
-    jd_text = (out_dir / "jd.txt").read_text(encoding="utf-8")
+    job_dir = tmp_path / "out" / "190001010"
+    work_dir = job_dir / "_pipeline"
+    jd_text = (work_dir / "jd.txt").read_text(encoding="utf-8")
     assert "Post title: Project Associate" in jd_text
 
-    manifest = json.loads((out_dir / "jas-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((work_dir / "jas-manifest.json").read_text(encoding="utf-8"))
     assert manifest["refno"] == "190001010"
-    assert manifest["candidates"] == [{"appno": "123456", "status": "TBC", "cv_path": str(cv_path)}]
+    assert manifest["candidates"][0]["appno"] == "123456"
+    assert Path(manifest["candidates"][0]["cv_path"]).name == "123456.pdf"
     assert manifest["candidates_without_cv"] == []
+
+
+# WorkBuddy --output-dir data/jas_out --skip-reports still writes the Desktop HR pack.
+def test_internal_output_dir_and_skip_reports_redirect_to_desktop(tmp_path, monkeypatch, capsys) -> None:
+    jas_dir = tmp_path / "job"
+    cvs = jas_dir / "cvs"
+    cvs.mkdir(parents=True)
+    (jas_dir / "records.html").write_text(JOB_HTML, encoding="utf-8")
+    (cvs / "123456.pdf").write_bytes(b"%PDF")
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    captured_cmd: list[list[str]] = []
+
+    def fake_run_pipeline(cmd):
+        captured_cmd.append(cmd)
+        return 0, {"status": "success", "candidates": []}
+
+    monkeypatch.setattr(module, "_run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr("screening_core.hr_output.user_desktop", lambda: desktop)
+
+    args = _args(tmp_path, output_dir="data/jas_out", skip_reports=True, no_open=True)
+    exit_code = module.run_jas_screening(jas_dir, args)
+    capsys.readouterr()
+
+    assert exit_code == module.EXIT_OK
+    assert captured_cmd and "--skip-reports" not in captured_cmd[0]
+    job_dir = desktop / "workbuddy-cv-screen" / "190001010"
+    assert (job_dir / "_pipeline" / "jas-manifest.json").is_file()
+    assert "--report-dir" in captured_cmd[0]
+    assert str(job_dir) in captured_cmd[0]
+
+
+# Folder vs URL: www. and records.php look like URLs; Windows paths do not.
+def test_looks_like_records_url() -> None:
+    assert module._looks_like_records_url("https://jobs.polyu.edu.hk/internal/records.php?refno=1")
+    assert module._looks_like_records_url("www.jobs.polyu.edu.hk/internal/records.php?refno=1")
+    assert not module._looks_like_records_url(r"C:\Users\User\Desktop\jasweb\mock")
+    assert module._normalize_records_url("www.jobs.polyu.edu.hk/x").startswith("https://")
+
+
+# Successful runs open ranking-overview.html unless --no-open.
+def test_opens_ranking_overview_after_success(tmp_path, monkeypatch) -> None:
+    jas_dir = tmp_path / "jas"
+    (jas_dir / "cvs").mkdir(parents=True)
+    (jas_dir / "records.html").write_text(JOB_HTML, encoding="utf-8")
+    (jas_dir / "cvs" / "123456.pdf").write_bytes(b"%PDF-1.4")
+    opened: list[Path] = []
+    monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
+    monkeypatch.setattr(module, "open_hr_file", lambda path: opened.append(Path(path)))
+    args = _args(tmp_path, no_open=False)
+    assert module.run_jas_screening(jas_dir, args) == module.EXIT_OK
+    assert opened and opened[0].name == "ranking-overview.html"
+
+
+# uploads/ plus CV_Name.pdf still maps to application no. from records.html.
+def test_discover_uploads_maps_cv_url_to_appno(tmp_path) -> None:
+    jas_dir = tmp_path / "job"
+    uploads = jas_dir / "uploads"
+    uploads.mkdir(parents=True)
+    (uploads / "CV_Daniel_Nguyen.pdf").write_bytes(b"%PDF")
+    job = {
+        "candidates": [
+            {"appno": "2600827001", "cv_url": "./uploads/CV_Daniel_Nguyen.pdf"},
+        ]
+    }
+    found = module._discover_cvs(jas_dir, None, [], "2600827001", job)
+    assert found == [("2600827001", uploads / "CV_Daniel_Nguyen.pdf")]

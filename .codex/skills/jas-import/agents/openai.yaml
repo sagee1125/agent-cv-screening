@@ -1,4 +1,11 @@
 interface:
   display_name: "PolyU Job Application System Import"
-  short_description: "Parse internal JAS records pages into JD text and candidate appno/CV URLs"
-  default_prompt: "Use $skill-jas-import to parse JAS records HTML into JD text and candidate CV references"
+  short_description: "Screen a JAS folder or URL using this repo CLI only; write Desktop/workbuddy-cv-screen PDFs/HTML"
+  default_prompt: |
+    The screening engine lives in C:\Users\User\Desktop\IHERD\agent-cv-screening. Always cd there first.
+    If the user says 用 jas-import 离线筛选 plus a folder or URL, run ONLY:
+    python .codex/skills/jas-import/scripts/run_jas_screening.py "<that path or URL>"
+    Never write jas_screening.py, extract_cvs.py, or screening_report.html.
+    Never keyword-match CVs. Never put names, emails, phones, or salaries in reports.
+    Never save reports under WorkBuddy AI timestamp folders. The CLI writes Desktop/workbuddy-cv-screen/<refno>/ and opens ranking-overview.html.
+    Do not pass --skip-reports or --output-dir unless HR named a folder.

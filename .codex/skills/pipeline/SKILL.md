@@ -40,6 +40,7 @@ python .codex/skills/pipeline/scripts/run_pipeline.py \
 | `--extracted <json>` (repeatable) | Already-extracted candidate JSON; skips cv-parser                                                                                       |
 | **Reports**                       |                                                                                                                                         |
 | `--position <title>`              | Job title shown on reports (required unless `--skip-reports`)                                                                           |
+| `--refno <id>`                    | Job reference number. Together with each CV's application no. (from the filename) this is the only candidate label; names are never shown |
 | `--engine <legacy\|matching>`     | Scoring engine: `legacy` (default, ScorerService) or `matching` (six-dimension engine that renders the modal-style radar/interview PDF) |
 | `--reference-date <YYYY-MM-DD>`   | Reference date for the matching engine (default: today)                                                                                 |
 | `--skip-reports`                  | Score + rank only; skip PDF/Excel generation                                                                                            |
@@ -71,14 +72,17 @@ stdout prints a JSON manifest:
 {
   "status": "success",
   "engine": "legacy",
+  "refno": "260818001",
   "output_dir": ".../data/pipeline_out",
   "jd_source": ".../data/pipeline_out/jd-parse.json",
   "config_json": ".../data/pipeline_out/config.json",
   "candidates": [
     {
       "rank": 1,
-      "name": "Alice",
-      "source": "cv1.pdf",
+      "refno": "260818001",
+      "appno": "123456",
+      "display_label": "260818001/123456",
+      "source": ".../123456.pdf",
       "total_score": 85.2,
       "tier": "Tier 1",
       "extracted_json": "...",
@@ -88,11 +92,12 @@ stdout prints a JSON manifest:
   ],
   "failures": [],
   "ask": null,
-  "reports": { "comparison_xlsx": "..." }
+  "reports": { "screening_board_html": "..." }
 }
 ```
 
 - `status` is `success` (everyone succeeded), `partial_success` (at least one candidate succeeded and at least one failed), `error` (JD/config hard-fail or zero candidates succeeded), or `need_input` (missing JD, CVs, or `--position`).
+- Candidates in the manifest are labeled by `refno` + `appno` (`display_label`). Personal names are never included.
 - Intermediate files (`jd-parse.json`, `config.json`, `extracted-<slug>.json`, `score-<slug>.json`, `manifest.json`, `rows.json`) are kept in `--output-dir` for inspection and `--resume`.
 - Exit codes: `0` for `success` / `partial_success`; `2` for `need_input` (stdout JSON with `missing` + `questions`); `1` for `error` (stderr JSON).
 

@@ -63,6 +63,7 @@ def _url_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
         "engine": "legacy",
         "max_retries": 2,
         "skip_reports": True,
+        "no_open": True,
         "resume": False,
         "fail_fast": False,
     }
@@ -98,12 +99,13 @@ def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, caps
     assert not (tmp_path / "scratch" / "260818001").exists(), "scratch should be cleaned by default"
 
     out_dir = tmp_path / "out"
-    manifest = json.loads((out_dir / "jas-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((out_dir / "260818001" / "_pipeline" / "jas-manifest.json").read_text(encoding="utf-8"))
     assert [candidate["appno"] for candidate in manifest["candidates"]] == ["123456", "654321"]
 
     assert captured_cmd
     cmd = captured_cmd[0]
     assert "--position" in cmd and "Project Associate" in cmd
+    assert "--refno" in cmd and "260818001" in cmd
     assert any("260818001" in token and "123456.pdf" in token for token in cmd)
     assert any("260818001" in token and "654321.pdf" in token for token in cmd)
 
@@ -240,7 +242,7 @@ def test_run_url_screening_reports_partial_download_failures(tmp_path, monkeypat
     assert len(payload["download_failures"]) == 1
     assert payload["download_failures"][0]["appno"] == "654321"
 
-    manifest = json.loads((tmp_path / "out" / "jas-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((tmp_path / "out" / "260818001" / "_pipeline" / "jas-manifest.json").read_text(encoding="utf-8"))
     assert manifest["candidates_without_cv"] == ["654321"]
     assert manifest["download_failures"][0]["error_message"] == "network down"
 

@@ -39,6 +39,17 @@ _DIMENSION_LABELS = {
     "job_specific_match": "Job-Specific Match",
 }
 
+# Shorter radar-axis labels so they stay inside the chart box.
+_RADAR_SHORT = {
+    "Education and Certification": "Education",
+    "Role and Seniority Fit": "Seniority",
+    "Evidence and Impact": "Evidence",
+    "Relevant Experience": "Experience",
+    "Core Skill Match": "Core skills",
+    "Job-Specific Match": "Job-specific",
+    "Work Authorization": "Work auth",
+}
+
 
 class ReporterService:
     """Builds candidate PDF one-pagers and Excel comparison reports."""
@@ -48,7 +59,8 @@ class ReporterService:
         self,
         output_path: str,
         *,
-        candidate_name: str,
+        display_label: str | None = None,
+        candidate_name: str | None = None,
         position_name: str,
         report_date: datetime,
         total_score: float,
@@ -76,11 +88,12 @@ class ReporterService:
         c = canvas.Canvas(str(file_path), pagesize=A4)
         width, height = A4
         margin = 40
+        content_w = width - 2 * margin
         y = height - margin
 
         def new_page_if_needed(needed: float) -> None:
             nonlocal y
-            if y - needed < margin:
+            if y - needed < margin + 18:
                 self._footer(c, width, margin, version)
                 c.showPage()
                 y = height - margin
@@ -88,14 +101,16 @@ class ReporterService:
         # Header
         c.setFont(_BOLD, 15)
         c.drawString(margin, y, "Candidate Match")
-        y -= 20
-        c.setFont(_CJK, 11)
-        c.drawString(margin, y, str(candidate_name))
+        y -= 18
+        c.setFont(_CJK, 10)
+        _ = candidate_name
+        y = self._draw_wrapped(c, margin, y, str(display_label or "Application"), _CJK, 10, content_w, 13)
+        y = self._draw_wrapped(
+            c, margin, y, f"Applied Position: {position_name}", _CJK, 9, content_w, 12
+        )
         c.setFont(_CJK, 9)
-        c.drawString(margin + 180, y, f"Applied Position: {position_name}")
-        y -= 13
         c.drawString(margin, y, f"Report Date: {report_date.strftime('%Y-%m-%d')}")
-        y -= 24
+        y -= 22
 
         # Summary stat cards
         cards = [
@@ -108,7 +123,7 @@ class ReporterService:
             ),
         ]
         gap = 10
-        card_w = (width - 2 * margin - 3 * gap) / 4
+        card_w = (content_w - 3 * gap) / 4
         card_h = 42
         for i, (label, value) in enumerate(cards):
             x = margin + i * (card_w + gap)
@@ -116,9 +131,16 @@ class ReporterService:
             c.setStrokeColor(colors.Color(0.886, 0.91, 0.941))
             c.rect(x, y - card_h, card_w, card_h, fill=1, stroke=1)
             c.setFillColor(colors.black)
-            c.setFont(_CJK, 8)
+            inner_w = card_w - 16
+            label_size = 8
+            while label_size > 6 and pdfmetrics.stringWidth(label, _CJK, label_size) > inner_w:
+                label_size -= 0.5
+            c.setFont(_CJK, label_size)
             c.drawString(x + 8, y - 13, label)
-            c.setFont(_REGULAR, 15)
+            value_size = 15
+            while value_size > 8 and pdfmetrics.stringWidth(value, _REGULAR, value_size) > inner_w:
+                value_size -= 1
+            c.setFont(_REGULAR, value_size)
             c.drawString(x + 8, y - 34, value)
         y -= card_h + 14
 
@@ -129,42 +151,39 @@ class ReporterService:
 
         radar_items = self._radar_items(radar_dimensions, dimension_scores)
         radar_size = 220
-        c.setStrokeColor(colors.black)
-        c.rect(margin, y - radar_size, radar_size, radar_size, fill=0, stroke=1)
-        self._draw_radar(c, margin + 12, y - radar_size + 12, radar_size - 24, radar_items)
         side_x = margin + radar_size + 16
         side_w = width - margin - side_x
+        c.setStrokeColor(colors.black)
+        c.rect(margin, y - radar_size, radar_size, radar_size, fill=0, stroke=1)
+        self._draw_radar(c, margin + 8, y - radar_size + 8, radar_size - 16, radar_items)
         side_y = y
         if top_strengths:
             c.setFont(_BOLD, 10)
             c.drawString(side_x, side_y, "Top Strengths")
-            side_y -= 12
-            c.setFont(_CJK, 8)
+            side_y -= 13
             for strength in top_strengths[:4]:
-                side_y = self._draw_wrapped(c, side_x + 4, side_y, f"- {strength}", _CJK, 8, 62, 10)
-                side_y -= 2
+                side_y = self._draw_wrapped(c, side_x, side_y, f"- {strength}", _CJK, 8, side_w, 11)
+                side_y -= 3
             side_y -= 6
         if key_gaps:
             c.setFont(_BOLD, 10)
             c.drawString(side_x, side_y, "Key Gaps")
-            side_y -= 12
-            c.setFont(_CJK, 8)
+            side_y -= 13
             for gap in key_gaps[:4]:
-                side_y = self._draw_wrapped(c, side_x + 4, side_y, f"- {gap}", _CJK, 8, 62, 10)
-                side_y -= 2
+                side_y = self._draw_wrapped(c, side_x, side_y, f"- {gap}", _CJK, 8, side_w, 11)
+                side_y -= 3
             side_y -= 6
         if eligibility:
             status = eligibility.get("status", "")
             c.setFont(_BOLD, 10)
-            c.drawString(side_x, side_y, f"Eligibility: {status}")
-            side_y -= 12
-            c.setFont(_CJK, 8)
+            side_y = self._draw_wrapped(c, side_x, side_y, f"Eligibility: {status}", _BOLD, 10, side_w, 12)
+            side_y -= 4
             for result in (eligibility.get("results") or [])[:5]:
                 line = f"- {result.get('rule_id', '')}: {result.get('status', '')}"
                 if result.get("reason_code"):
                     line += f" ({result.get('reason_code')})"
-                side_y = self._draw_wrapped(c, side_x + 4, side_y, line, _CJK, 8, 62, 10)
-                side_y -= 2
+                side_y = self._draw_wrapped(c, side_x, side_y, line, _CJK, 8, side_w, 11)
+                side_y -= 3
         y -= radar_size + 16
 
         # Dimension Details
@@ -174,32 +193,48 @@ class ReporterService:
         y -= 16
         details = self._dimension_details(radar_dimensions, dimension_scores)
         for detail in details:
-            needed = 34 + len(detail.get("gaps", [])) * 10
+            value_text = f"{detail['score']:.1f}" if detail["score"] is not None else "N/A"
+            status_text = str(detail.get("status") or "")
+            weight_text = f"weight {detail['weight']:.2f}" if detail.get("weight") is not None else ""
+            metrics = "   ".join(part for part in (value_text, status_text, weight_text) if part)
+            c.setFont(_REGULAR, 8)
+            metrics_w = pdfmetrics.stringWidth(metrics, _REGULAR, 8) if metrics else 0
+            label_w = max(90.0, content_w - 18 - metrics_w)
+            label_lines = self._wrap_to_width(str(detail["label"]), _CJK, 9, label_w)
+            header_h = max(26.0, 10 + len(label_lines) * 11)
+            reason = str(detail.get("reasoning") or "").strip()
+            reason_h = self._text_height(reason, _CJK, 8, content_w - 12, 11) if reason else 0
+            gaps_h = 0.0
+            wrapped_gaps: list[list[str]] = []
+            for gap in detail.get("gaps") or []:
+                lines = self._wrap_to_width(f"- {gap}", _CJK, 8, content_w - 22)
+                wrapped_gaps.append(lines)
+                gaps_h += len(lines) * 11 + 3
+            needed = header_h + 8 + reason_h + (6 if reason else 0) + gaps_h + 10
             new_page_if_needed(needed)
             c.setStrokeColor(colors.Color(0.886, 0.91, 0.941))
             c.setFillColor(colors.white)
-            c.rect(margin, y - 30, width - 2 * margin, 30, fill=1, stroke=1)
+            c.rect(margin, y - header_h, content_w, header_h, fill=1, stroke=1)
             c.setFillColor(colors.black)
-            c.setFont(_CJK, 9)
-            c.drawString(margin + 6, y - 12, detail["label"])
-            value_text = f"{detail['score']:.1f}" if detail["score"] is not None else "N/A"
-            status_text = detail.get("status", "")
-            weight_text = f"weight {detail['weight']:.2f}" if detail.get("weight") is not None else ""
-            c.setFont(_REGULAR, 9)
-            c.drawRightString(margin + 200, y - 12, value_text)
-            c.setFont(_CJK, 8)
-            c.drawRightString(margin + 270, y - 12, status_text)
-            c.drawRightString(margin + width - 2 * margin - 6, y - 12, weight_text)
-            y -= 34
-            if detail.get("reasoning"):
+            label_y = y - 12
+            for line in label_lines:
+                c.setFont(_CJK, 9)
+                c.drawString(margin + 6, label_y, line)
+                label_y -= 11
+            if metrics:
+                c.setFont(_REGULAR, 8)
+                c.drawRightString(margin + content_w - 6, y - 12, metrics)
+            y -= header_h + 8
+            if reason:
+                y = self._draw_wrapped(c, margin + 6, y, reason, _CJK, 8, content_w - 12, 11)
+                y -= 6
+            for lines in wrapped_gaps:
                 c.setFont(_CJK, 8)
-                y = self._draw_wrapped(c, margin + 6, y, detail["reasoning"], _CJK, 8, 96, 10)
-                y -= 2
-            for gap in detail.get("gaps", []):
-                c.setFont(_CJK, 8)
-                y = self._draw_wrapped(c, margin + 16, y, f"- {gap}", _CJK, 8, 90, 10)
-                y -= 2
-            y -= 6
+                for line in lines:
+                    c.drawString(margin + 14, y, line)
+                    y -= 11
+                y -= 3
+            y -= 8
 
         # Suggested Interview Questions
         new_page_if_needed(40)
@@ -215,18 +250,14 @@ class ReporterService:
             for s in interview_suggestions
         ]
         for index, question in enumerate(questions, start=1):
-            text = str(question.get("question", ""))
-            wrapped = self._wrap_text(text, 100)
-            needed = len(wrapped) * 11 + 16
-            new_page_if_needed(needed)
-            c.setFont(_CJK, 9)
-            y = self._draw_wrapped(c, margin + 6, y, f"{index}. {text}", _CJK, 9, 100, 11)
+            text = f"{index}. {question.get('question', '')}"
             meta = f"Priority: {question.get('priority', '')}"
             if question.get("template_id"):
                 meta += f"  Template: {question.get('template_id')}"
-            c.setFont(_CJK, 8)
-            c.drawString(margin + 20, y, meta)
-            y -= 4
+            needed = self._text_height(text, _CJK, 9, content_w - 12, 12) + 16
+            new_page_if_needed(needed)
+            y = self._draw_wrapped(c, margin + 6, y, text, _CJK, 9, content_w - 12, 12)
+            y = self._draw_wrapped(c, margin + 16, y, meta, _CJK, 8, content_w - 22, 11)
             y -= 8
 
         # Education
@@ -234,13 +265,13 @@ class ReporterService:
         c.setFont(_BOLD, 12)
         c.drawString(margin, y, "Education")
         y -= 16
-        c.setFont(_CJK, 9)
         if education:
             for item in education[:4]:
                 line = f"- {item.get('school', '')} | {item.get('degree', '')} | {item.get('major', '')} | {item.get('period', item.get('year', ''))}"
-                y = self._draw_wrapped(c, margin + 6, y, line, _CJK, 9, 100, 12)
-                y -= 2
+                y = self._draw_wrapped(c, margin + 6, y, line, _CJK, 9, content_w - 12, 12)
+                y -= 3
         else:
+            c.setFont(_CJK, 9)
             c.drawString(margin + 6, y, "- None")
             y -= 14
         y -= 6
@@ -250,16 +281,16 @@ class ReporterService:
         c.setFont(_BOLD, 12)
         c.drawString(margin, y, "Experience")
         y -= 16
-        c.setFont(_CJK, 9)
         if experience:
             for item in experience[:5]:
                 period = item.get("period", "")
                 if not period:
                     period = f"{item.get('start_date', '')} ~ {item.get('end_date', 'Present')}"
                 line = f"- {item.get('company', '')} | {item.get('job_title', item.get('title', ''))} | {period}"
-                y = self._draw_wrapped(c, margin + 6, y, line, _CJK, 9, 100, 12)
-                y -= 2
+                y = self._draw_wrapped(c, margin + 6, y, line, _CJK, 9, content_w - 12, 12)
+                y -= 3
         else:
+            c.setFont(_CJK, 9)
             c.drawString(margin + 6, y, "- None")
             y -= 14
 
@@ -287,7 +318,8 @@ class ReporterService:
         sheet.append(
             [
                 "Rank",
-                "Name",
+                "Ref no",
+                "Application no",
                 "Total Score",
                 "Skill Match",
                 "Experience Match",
@@ -301,7 +333,8 @@ class ReporterService:
             sheet.append(
                 [
                     item.get("rank"),
-                    item.get("name"),
+                    item.get("refno") or "",
+                    item.get("appno") or item.get("display_label") or "",
                     item.get("total_score"),
                     item.get("skill_match"),
                     item.get("experience_match"),
@@ -313,26 +346,124 @@ class ReporterService:
             )
         workbook.save(str(file_path))
 
-    # Wraps text into lines of at most max_chars columns (CJK characters count double).
+    # Writes a browser HTML board with ranking and SVG radar charts (no personal names).
+    def generate_screening_board_html(
+        self,
+        output_path: str,
+        *,
+        position_name: str,
+        rows: list[dict[str, Any]],
+        report_date: datetime,
+        refno: str | None = None,
+    ) -> None:
+        from report_gen.html_board import write_screening_board
+
+        write_screening_board(
+            output_path,
+            position_name=position_name,
+            rows=rows,
+            report_date=report_date,
+            refno=refno,
+        )
+
+    # Writes one candidate HTML match page (application-no. filename).
+    def generate_candidate_match_html(
+        self,
+        output_path: str,
+        *,
+        row: dict[str, Any],
+        position_name: str,
+        report_date: datetime,
+    ) -> None:
+        from report_gen.html_board import write_candidate_match_html
+
+        write_candidate_match_html(
+            output_path,
+            row=row,
+            position_name=position_name,
+            report_date=report_date,
+        )
+
+    # Wraps text to a pixel width; keeps Latin words intact and splits CJK by character.
     @staticmethod
-    def _wrap_text(text: str, max_chars: int) -> list[str]:
+    def _wrap_to_width(text: str, font: str, size: float, max_width: float) -> list[str]:
+        raw = str(text or "").strip()
+        if not raw:
+            return [""]
+        if max_width <= 0:
+            return [raw]
+
+        def width_of(value: str) -> float:
+            return pdfmetrics.stringWidth(value, font, size)
+
+        def split_long_token(token: str) -> list[str]:
+            parts: list[str] = []
+            current = ""
+            for char in token:
+                trial = current + char
+                if current and width_of(trial) > max_width:
+                    parts.append(current)
+                    current = char
+                else:
+                    current = trial
+            if current:
+                parts.append(current)
+            return parts or [""]
+
+        tokens: list[str] = []
+        buf = ""
+        for char in raw:
+            if char == "\n":
+                if buf:
+                    tokens.append(buf)
+                    buf = ""
+                tokens.append("\n")
+            elif ord(char) > 0x2E80:
+                if buf:
+                    tokens.append(buf)
+                    buf = ""
+                tokens.append(char)
+            elif char == " ":
+                if buf:
+                    tokens.append(buf)
+                    buf = ""
+                tokens.append(" ")
+            else:
+                buf += char
+        if buf:
+            tokens.append(buf)
+
         lines: list[str] = []
         current = ""
-        for char in str(text):
-            if char == "\n":
-                if current:
-                    lines.append(current)
-                    current = ""
+        for token in tokens:
+            if token == "\n":
+                lines.append(current.rstrip())
+                current = ""
                 continue
-            width = 2 if ord(char) > 0x2E80 else 1
-            if len(current) + width > max_chars and current:
-                lines.append(current)
-                current = char
-            else:
-                current += char
+            pieces = split_long_token(token) if width_of(token) > max_width else [token]
+            for piece in pieces:
+                trial = current + piece
+                if current and width_of(trial) > max_width:
+                    lines.append(current.rstrip())
+                    current = piece.lstrip()
+                else:
+                    current = trial
         if current:
-            lines.append(current)
-        return lines or [""]
+            lines.append(current.rstrip())
+        return [line for line in lines if line != ""] or [""]
+
+    # Character-count wrap kept for older callers; prefers word-safe width wrap.
+    @staticmethod
+    def _wrap_text(text: str, max_chars: int) -> list[str]:
+        approx_width = max(40.0, float(max_chars) * 4.2)
+        return ReporterService._wrap_to_width(text, _CJK, 8, approx_width)
+
+    # Height needed to draw wrapped text.
+    @staticmethod
+    def _text_height(text: str, font: str, size: float, max_width: float, line_height: float) -> float:
+        if not str(text or "").strip():
+            return 0.0
+        return len(ReporterService._wrap_to_width(text, font, size, max_width)) * line_height
 
     # Draws wrapped text lines starting at (x, y) and returns the next y position.
     @staticmethod
@@ -343,11 +474,11 @@ class ReporterService:
         text: str,
         font: str,
         size: float,
-        max_chars: int,
+        max_width: float,
         line_height: float,
     ) -> float:
         c.setFont(font, size)
-        for line in ReporterService._wrap_text(text, max_chars):
+        for line in ReporterService._wrap_to_width(text, font, size, max_width):
             c.drawString(x, y, line)
             y -= line_height
         return y
@@ -368,7 +499,7 @@ class ReporterService:
             return
         center_x = x + size / 2
         center_y = y + size / 2
-        radius = size / 2 - 30
+        radius = size / 2 - 42
         rings = (0.2, 0.4, 0.6, 0.8, 1.0)
         max_value = 100.0
 
@@ -425,23 +556,29 @@ class ReporterService:
                 c.setDash(2, 2)
                 c.circle(axis_x, axis_y, 2.5, stroke=1, fill=0)
                 c.setDash()
-                label_text = f"{label} (N/A)"
+                short = _RADAR_SHORT.get(label, label)
+                label_lines = ReporterService._wrap_to_width(short, _CJK, 6.5, 70)
+                label_lines.append("(N/A)")
             else:
                 c.setFillColor(colors.Color(0.01, 0.518, 0.78))
                 c.circle(pt[0], pt[1], 2.8, stroke=0, fill=1)
                 c.setFillColor(colors.black)
-                c.setFont(_REGULAR, 7)
-                c.drawCentredString(pt[0], pt[1] + 4, f"{value:.0f}")
-                label_text = label
-            lx, ly = polar((radius + 12) / radius, i)
-            c.setFont(_CJK, 7)
-            anchor = "middle" if abs(lx - center_x) < 1 else ("start" if lx < center_x else "end")
-            if anchor == "middle":
-                c.drawCentredString(lx, ly, label_text)
-            elif anchor == "start":
-                c.drawString(lx, ly, label_text)
-            else:
-                c.drawRightString(lx, ly, label_text)
+                c.setFont(_REGULAR, 6.5)
+                c.drawCentredString(pt[0], pt[1] + 5, f"{value:.0f}")
+                short = _RADAR_SHORT.get(label, label)
+                label_lines = ReporterService._wrap_to_width(short, _CJK, 6.5, 70)
+            lx, ly = polar((radius + 16) / radius, i)
+            c.setFont(_CJK, 6.5)
+            line_h = 8
+            start_y = ly + (len(label_lines) - 1) * line_h / 2
+            for offset, line in enumerate(label_lines):
+                ty = start_y - offset * line_h
+                if abs(lx - center_x) < 8:
+                    c.drawCentredString(lx, ty, line)
+                elif lx < center_x:
+                    c.drawRightString(lx, ty, line)
+                else:
+                    c.drawString(lx, ty, line)
 
     # Builds radar items (label, score) from matching-detail or legacy dimension scores.
     @staticmethod
@@ -494,8 +631,14 @@ class ReporterService:
                     "status": str(dim.get("status", "")),
                     "weight": None if dim.get("normalized_weight") is None else float(dim["normalized_weight"]),
                     "reasoning": str(reasoning.get("summary", "")) if reasoning.get("summary") else "",
-                    "gaps": [str(g.get("text", "")) for g in (dim.get("gaps") or []) if g.get("text")],
+                    "gaps": [],
                 }
+                gaps: list[str] = []
+                for item in dim.get("gaps") or []:
+                    text = item.get("text", "") if isinstance(item, dict) else str(item)
+                    if text:
+                        gaps.append(str(text))
+                detail["gaps"] = gaps
                 details.append(detail)
             return details
         return [
@@ -513,5 +656,5 @@ class ReporterService:
     # Draws the footer disclaimer and version on the current page.
     @staticmethod
     def _footer(c: canvas.Canvas, width: float, margin: float, version: str) -> None:
-        c.setFont(_CJK, 8)
-        c.drawString(margin, 25, f"Disclaimer: This report supports screening only and does not constitute a hiring decision. Version: {version}")
+        text = f"Disclaimer: This report supports screening only and does not constitute a hiring decision. Version: {version}"
+        ReporterService._draw_wrapped(c, margin, 28, text, _CJK, 7, width - 2 * margin, 9)

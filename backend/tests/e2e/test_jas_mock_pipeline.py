@@ -40,6 +40,7 @@ def _screening_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
         "engine": "legacy",
         "max_retries": 2,
         "skip_reports": False,
+        "no_open": True,
         "resume": False,
         "fail_fast": False,
     }
@@ -91,8 +92,8 @@ def test_screening_orchestration_ranks_mock(tmp_path, monkeypatch, capsys) -> No
         return 0, {
             "status": "success",
             "candidates": [
-                {"rank": 1, "name": "CHAN Tai Man", "total_score": 45.31},
-                {"rank": 2, "name": "LEE Wai Yan", "total_score": 0.0},
+                {"rank": 1, "appno": "123456", "refno": "260818001", "total_score": 45.31},
+                {"rank": 2, "appno": "654321", "refno": "260818001", "total_score": 0.0},
             ],
         }
 
@@ -108,7 +109,7 @@ def test_screening_orchestration_ranks_mock(tmp_path, monkeypatch, capsys) -> No
     assert any("654321.pdf" in token for token in cmd)
 
     out_dir = tmp_path / "out"
-    manifest = json.loads((out_dir / "jas-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((out_dir / "260818001" / "_pipeline" / "jas-manifest.json").read_text(encoding="utf-8"))
     assert manifest["refno"] == "260818001"
     assert [candidate["appno"] for candidate in manifest["candidates"]] == ["123456", "654321"]
     assert manifest["candidates_without_cv"] == []
@@ -143,7 +144,11 @@ def test_real_e2e_ranking(tmp_path) -> None:
     assert payload["status"] == "success"
     ranks = payload["candidates"]
     assert len(ranks) == 2
-    assert ranks[0]["name"] == "CHAN Tai Man"
-    assert ranks[1]["name"] == "LEE Wai Yan"
+    assert ranks[0]["appno"] == "123456"
+    assert ranks[1]["appno"] == "654321"
+    assert "name" not in ranks[0]
     assert ranks[0]["total_score"] > ranks[1]["total_score"]
-    assert (out_dir / "jas-manifest.json").is_file()
+    job_dir = out_dir / "260818001"
+    assert (job_dir / "ranking-overview.html").is_file()
+    assert (job_dir / "123456.html").is_file()
+    assert (job_dir / "_pipeline" / "jas-manifest.json").is_file()

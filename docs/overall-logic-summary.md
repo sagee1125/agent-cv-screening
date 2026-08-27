@@ -2,14 +2,14 @@
 
 ## 0. Product vision
 
-**Primary goal:** an **embeddable CV screening execution layer** for agent hosts (Codex, Cursor, and similar). The **host** runs the conversation; **this repo** runs deterministic screening.
+**Primary goal:** an **embeddable CV screening execution layer** for agent hosts (Codex, Cursor, WorkBuddy, and similar). The **host** runs the conversation; **this repo** runs deterministic screening. WorkBuddy must only attach `host-envelope` JSON (`docs/workbuddy/PRD-Host_Tool_Return_Whitelist_v1.0.md`) to the conversation model — never raw pipeline or screening-agent stdout.
 
 | Layer                                            | Owner           | Responsibility                                                                                                             |
 | ------------------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | **Host** (Codex / Cursor / future HR chat shell) | Platform        | Natural-language dialogue, file pickers, clarifying questions, explaining results to the user                              |
 | **This repo**                                    | Screening agent | Parse JD + CVs, score & rank with **reproducible logic**, generate PDF/Excel, surface `need_input` when inputs are missing |
 
-**Target user:** HR and recruiters **without a technical background**. They should not run terminals, read JSON, or configure pipelines. They talk to the host; the host invokes skills / `screening-agent` / `pipeline` on their behalf.
+**Target user:** HR and recruiters **without a technical background**. They should not run terminals, read JSON, or configure pipelines. They talk to the host; the host invokes skills / `screening-agent` / `pipeline` on their behalf. Ranked output identifies a person only by unique job **ref no.** plus unique **application no.** — never by name (including first-letter masks).
 
 **Web application (FastAPI + frontend):** **not the primary product.** It remains a **compatibility path** for stepwise UI, DB persistence, PolyU job-board sync, and demos. New product work should favor **host-embeddable skills** first; extend the web stack only when it does not block that path.
 

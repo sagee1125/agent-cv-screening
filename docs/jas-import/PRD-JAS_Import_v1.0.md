@@ -7,6 +7,7 @@ owner: HR Screening Product Owner
 api_version: v1
 related_docs:
   - docs/overall-logic-summary.md
+  - docs/workbuddy/PRD-Host_Tool_Return_Whitelist_v1.0.md
   - .codex/skills/jas-import/SKILL.md
   - .codex/skills/pipeline/SKILL.md
   - .codex/skills/screening-agent/SKILL.md
@@ -34,10 +35,10 @@ affected_modules:
 
 ## Change Log
 
-| Version | Date       | Author                  | Change Summary                                                         |
-| ------- | ---------- | ----------------------- | ---------------------------------------------------------------------- |
-| 1.0.0   | 2026-08-26 | HR Screening Product Owner | Initial draft for JAS Import (Phase 0 parser).                        |
-| 1.1.0   | 2026-08-26 | Engineering Review      | Aligned to implementation: URL mode, input policy, scratch lifecycle, schema_version. |
+| Version | Date       | Author                     | Change Summary                                                                        |
+| ------- | ---------- | -------------------------- | ------------------------------------------------------------------------------------- |
+| 1.0.0   | 2026-08-26 | HR Screening Product Owner | Initial draft for JAS Import (Phase 0 parser).                                        |
+| 1.1.0   | 2026-08-26 | Engineering Review         | Aligned to implementation: URL mode, input policy, scratch lifecycle, schema_version. |
 
 ---
 
@@ -79,7 +80,7 @@ MVP success means: given either (a) an HR-exported folder (`records.html` + `cvs
 ### 1.4 Open Questions (Resolve Before Live Validation)
 
 - What is the exact authentication/session mechanism for live `/internal/*` fetch (SSO cookie, browser session, or HR export only)?
-- Is `Application no.` globally unique or only unique within a `refno`? (Current key is the composite `(refno, appno)`.)
+- **Resolved:** each job has a unique `refno` and each application has a unique `appno`. The product locks a candidate with the composite `(refno, appno)` and **never displays a personal name** (including first-letter masks).
 - Does the real `record_detail.php` application form need to be parsed in MVP, or is the CV PDF sufficient for scoring?
 - Is `downloadexcel.php?refno=...` a required fast-scan path, and what is its exact column layout?
 - Is the current-status label reliably the plain-text token among TBC/P/S/N across real rows?
@@ -92,34 +93,34 @@ MVP success means: given either (a) an HR-exported folder (`records.html` + `cvs
 
 ### 2.1 P0 - Core Requirements (Launch Blockers)
 
-| ID   | Feature                                        | Description                                                                                         | Status |
-| ---- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------ |
-| F0.1 | Parse JAS records list HTML                     | Extract refno, job group, unit, post title, dates, list type, application count, records URL.       | Done   |
-| F0.2 | Parse JAS job-detail HTML                       | Extract job metadata + JD text from the advertisement table and candidate CV references.             | Done   |
-| F0.3 | Drop candidate identity columns                 | Return only appno/status/file URLs; never emit name/email/phone/HKID/salary/declarations.            | Done   |
-| F0.4 | CLI with JSON error envelope                    | Exit 0 on success (stdout JSON); exit 1 on error (stderr JSON with `error_message`).                 | Done   |
-| F0.5 | Register skill in shared bootstrap + tests      | Add `jas-import` to `_SKILL_SRC_DIRS`; unit tests against fixtures and real HR samples.              | Done   |
-| F0.6 | Input policy guard                             | Entry points accept only existing file paths or allowlisted http(s) URLs; reject base64/data-URI/text. | Done   |
+| ID   | Feature                                    | Description                                                                                            | Status |
+| ---- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ------ |
+| F0.1 | Parse JAS records list HTML                | Extract refno, job group, unit, post title, dates, list type, application count, records URL.          | Done   |
+| F0.2 | Parse JAS job-detail HTML                  | Extract job metadata + JD text from the advertisement table and candidate CV references.               | Done   |
+| F0.3 | Drop candidate identity columns            | Return only appno/status/file URLs; never emit name/email/phone/HKID/salary/declarations.              | Done   |
+| F0.4 | CLI with JSON error envelope               | Exit 0 on success (stdout JSON); exit 1 on error (stderr JSON with `error_message`).                   | Done   |
+| F0.5 | Register skill in shared bootstrap + tests | Add `jas-import` to `_SKILL_SRC_DIRS`; unit tests against fixtures and real HR samples.                | Done   |
+| F0.6 | Input policy guard                         | Entry points accept only existing file paths or allowlisted http(s) URLs; reject base64/data-URI/text. | Done   |
 
 ### 2.2 P1 - Important Enhancements
 
-| ID   | Feature                                    | Description                                                                                    | Status      |
-| ---- | ------------------------------------------ | ---------------------------------------------------------------------------------------------- | ----------- |
-| F1.1 | Live fetch job                             | `--records-url` / `--jd-url` fetch + parse the records page into JD text (skeleton, mock-tested). | In Progress |
-| F1.2 | Download CVs keyed by appno                | `--cv-url` / URL mode downloads CVs to `data/jas_scratch/{refno}/{appno}.pdf`; cleanup after run. | Done        |
-| F1.3 | Parse Excel export                         | `parse-excel --refno` from `downloadexcel.php` for fast candidate metadata without attachments.  | Not Started |
-| F1.4 | Pipeline/agent wiring                      | `pipeline` gains `--jd-url/--cv-url/--cookie-file/--scratch-dir`; `screening-agent` forwards them. | Done        |
-| F1.5 | Parse `record_detail.php` application form | Pre-fill structured candidate fields (education/experience) from the printable form.            | Not Started |
-| F1.6 | Pseudonymous reports                       | Reports/manifests label candidates by `appno`; `--include-pii` off by default.                  | Not Started |
-| F1.7 | `--trust-extracted` policy                 | `--extracted` profiles outside `--output-dir` require `--trust-extracted`.                      | Done        |
+| ID   | Feature                                    | Description                                                                                                        | Status      |
+| ---- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ----------- |
+| F1.1 | Live fetch job                             | `--records-url` / `--jd-url` fetch + parse the records page into JD text (skeleton, mock-tested).                  | In Progress |
+| F1.2 | Download CVs keyed by appno                | `--cv-url` / URL mode downloads CVs to `data/jas_scratch/{refno}/{appno}.pdf`; cleanup after run.                  | Done        |
+| F1.3 | Parse Excel export                         | `parse-excel --refno` from `downloadexcel.php` for fast candidate metadata without attachments.                    | Not Started |
+| F1.4 | Pipeline/agent wiring                      | `pipeline` gains `--jd-url/--cv-url/--cookie-file/--scratch-dir`; `screening-agent` forwards them.                 | Done        |
+| F1.5 | Parse `record_detail.php` application form | Pre-fill structured candidate fields (education/experience) from the printable form.                               | Not Started |
+| F1.6 | Pseudonymous reports                       | Reports/manifests label candidates by `(refno, appno)` only; names (including first-letter masks) are never shown. | Done        |
+| F1.7 | `--trust-extracted` policy                 | `--extracted` profiles outside `--output-dir` require `--trust-extracted`.                                         | Done        |
 
 ### 2.3 Module Priority Summary
 
-| Module   | Name                              | Priority | Rationale                                                     |
-| -------- | --------------------------------- | -------- | ------------------------------------------------------------- |
-| Module 0 | JAS parser (`jas-import`)         | P0       | Unblocks the whole internal flow; testable without access     |
-| Module 1 | Live fetch + downloads            | P1       | Requires internal access/session; skeleton shipped and mocked |
-| Module 2 | Pipeline/agent wiring             | P1       | Reuses existing pipeline; adds source flags only              |
+| Module   | Name                      | Priority | Rationale                                                     |
+| -------- | ------------------------- | -------- | ------------------------------------------------------------- |
+| Module 0 | JAS parser (`jas-import`) | P0       | Unblocks the whole internal flow; testable without access     |
+| Module 1 | Live fetch + downloads    | P1       | Requires internal access/session; skeleton shipped and mocked |
+| Module 2 | Pipeline/agent wiring     | P1       | Reuses existing pipeline; adds source flags only              |
 
 ### 2.4 Acceptance Criteria by Module
 
@@ -140,34 +141,34 @@ MVP success means: given either (a) an HR-exported folder (`records.html` + `cvs
 
 ### 2.5 Related Code / Entry Points
 
-| Req ID | Area           | Existing File(s) / Entry Point                                                                                          | Notes                        |
-| ------ | -------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| F0.1   | Parser         | `.codex/skills/jas-import/src/jas_import/records.py` -> `parse_list_html`                                               | Implemented                  |
-| F0.2   | Parser         | `.codex/skills/jas-import/src/jas_import/records.py` -> `parse_job_html` / `build_jd_text`                               | Implemented                  |
-| F0.3   | Serialization  | `.codex/skills/jas-import/src/jas_import/skill.py` -> `parse_job_skill` / `job_payload_from_html`                        | Implemented                  |
-| F0.4   | CLI            | `.codex/skills/jas-import/scripts/run_jas_import.py` -> `parse-list` / `parse-job` / `mock`                              | Implemented                  |
-| F0.5   | Bootstrap      | `.codex/skills/_shared/src/screening_core/bootstrap.py` -> `_SKILL_SRC_DIRS`                                             | Implemented                  |
-| F0.6   | Input policy   | `.codex/skills/_shared/src/screening_core/input_policy.py` -> `validate_reference` / `validate_extracted_reference`     | Implemented                  |
-| F1.1   | Live fetch     | `.codex/skills/jas-import/src/jas_import/fetch.py` -> `fetch_job_payload` / `fetch_jd_text`; `run_jas_screening.py --records-url` | Implemented (mock-tested)   |
-| F1.2   | Downloads      | `.codex/skills/jas-import/src/jas_import/fetch.py` -> `download_to` / `cv_filename_for_url`; `run_jas_screening.py`       | Implemented                  |
-| F1.4   | Orchestration  | `.codex/skills/pipeline/scripts/run_pipeline.py` (`--jd-url`/`--cv-url`/`--cookie-file`/`--scratch-dir`); `.codex/skills/screening-agent/scripts/run_agent.py` (forwards flags) | Implemented                  |
-| F1.7   | Extracted policy | `.codex/skills/pipeline/scripts/run_pipeline.py` -> `--trust-extracted`; `input_policy.validate_extracted_reference`   | Implemented                  |
-| Mock   | Test data      | `.codex/skills/jas-import/src/jas_import/mock.py` -> `generate_mock_jas_dir`; `run_jas_import.py mock`                    | Implemented                  |
+| Req ID | Area             | Existing File(s) / Entry Point                                                                                                                                                  | Notes                     |
+| ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| F0.1   | Parser           | `.codex/skills/jas-import/src/jas_import/records.py` -> `parse_list_html`                                                                                                       | Implemented               |
+| F0.2   | Parser           | `.codex/skills/jas-import/src/jas_import/records.py` -> `parse_job_html` / `build_jd_text`                                                                                      | Implemented               |
+| F0.3   | Serialization    | `.codex/skills/jas-import/src/jas_import/skill.py` -> `parse_job_skill` / `job_payload_from_html`                                                                               | Implemented               |
+| F0.4   | CLI              | `.codex/skills/jas-import/scripts/run_jas_import.py` -> `parse-list` / `parse-job` / `mock`                                                                                     | Implemented               |
+| F0.5   | Bootstrap        | `.codex/skills/_shared/src/screening_core/bootstrap.py` -> `_SKILL_SRC_DIRS`                                                                                                    | Implemented               |
+| F0.6   | Input policy     | `.codex/skills/_shared/src/screening_core/input_policy.py` -> `validate_reference` / `validate_extracted_reference`                                                             | Implemented               |
+| F1.1   | Live fetch       | `.codex/skills/jas-import/src/jas_import/fetch.py` -> `fetch_job_payload` / `fetch_jd_text`; `run_jas_screening.py --records-url`                                               | Implemented (mock-tested) |
+| F1.2   | Downloads        | `.codex/skills/jas-import/src/jas_import/fetch.py` -> `download_to` / `cv_filename_for_url`; `run_jas_screening.py`                                                             | Implemented               |
+| F1.4   | Orchestration    | `.codex/skills/pipeline/scripts/run_pipeline.py` (`--jd-url`/`--cv-url`/`--cookie-file`/`--scratch-dir`); `.codex/skills/screening-agent/scripts/run_agent.py` (forwards flags) | Implemented               |
+| F1.7   | Extracted policy | `.codex/skills/pipeline/scripts/run_pipeline.py` -> `--trust-extracted`; `input_policy.validate_extracted_reference`                                                            | Implemented               |
+| Mock   | Test data        | `.codex/skills/jas-import/src/jas_import/mock.py` -> `generate_mock_jas_dir`; `run_jas_import.py mock`                                                                          | Implemented               |
 
 ### 2.6 Requirements Traceability Matrix (RTM)
 
-| Req ID | Acceptance Criteria | Test Case ID              | KPI / Validation                     | Module / File                                   |
-| ------ | ------------------- | ------------------------- | ------------------------------------ | ----------------------------------------------- |
-| F0.1   | AC0.1               | T-F0.1-001                | Catalog parse success = 100%         | `jas_import/records.py`, `test_jas_import.py`    |
-| F0.2   | AC0.2               | T-F0.2-001                | JD/candidate linkage present         | `jas_import/records.py`, `test_jas_import.py`    |
-| F0.3   | AC0.3               | T-F0.3-001                | PII leakage fields = 0               | `jas_import/skill.py`, `test_jas_import.py`      |
-| F0.4   | AC0.4               | T-F0.4-001                | Exit-code conformance = 100%         | `run_jas_import.py`, `test_jas_import.py`        |
-| F0.5   | AC0.1-AC0.4         | T-F0.5-001                | 100% of P0 tests green               | `bootstrap.py`, `test_jas_import.py`             |
-| F0.6   | AC0.5               | T-F0.6-001                | Inline-content rejection = 100%      | `input_policy.py`, `test_input_policy_cli.py`    |
-| F1.1   | AC1.1-AC1.3         | T-F1.1-001                | URL mode mock tests green            | `jas_import/fetch.py`, `test_jas_fetch.py`       |
-| F1.2   | AC1.1               | T-F1.2-001                | Download + cleanup green             | `run_jas_screening.py`, `test_jas_screening_url.py` |
-| F1.4   | AC1.1               | T-F1.4-001                | URL flags forwarded to pipeline      | `run_pipeline.py`, `run_agent.py`, `test_jas_fetch.py` |
-| F1.7   | AC0.6               | T-F1.7-001                | Extracted-scratch rule green         | `input_policy.py`, `test_input_policy_cli.py`    |
+| Req ID | Acceptance Criteria | Test Case ID | KPI / Validation                | Module / File                                          |
+| ------ | ------------------- | ------------ | ------------------------------- | ------------------------------------------------------ |
+| F0.1   | AC0.1               | T-F0.1-001   | Catalog parse success = 100%    | `jas_import/records.py`, `test_jas_import.py`          |
+| F0.2   | AC0.2               | T-F0.2-001   | JD/candidate linkage present    | `jas_import/records.py`, `test_jas_import.py`          |
+| F0.3   | AC0.3               | T-F0.3-001   | PII leakage fields = 0          | `jas_import/skill.py`, `test_jas_import.py`            |
+| F0.4   | AC0.4               | T-F0.4-001   | Exit-code conformance = 100%    | `run_jas_import.py`, `test_jas_import.py`              |
+| F0.5   | AC0.1-AC0.4         | T-F0.5-001   | 100% of P0 tests green          | `bootstrap.py`, `test_jas_import.py`                   |
+| F0.6   | AC0.5               | T-F0.6-001   | Inline-content rejection = 100% | `input_policy.py`, `test_input_policy_cli.py`          |
+| F1.1   | AC1.1-AC1.3         | T-F1.1-001   | URL mode mock tests green       | `jas_import/fetch.py`, `test_jas_fetch.py`             |
+| F1.2   | AC1.1               | T-F1.2-001   | Download + cleanup green        | `run_jas_screening.py`, `test_jas_screening_url.py`    |
+| F1.4   | AC1.1               | T-F1.4-001   | URL flags forwarded to pipeline | `run_pipeline.py`, `run_agent.py`, `test_jas_fetch.py` |
+| F1.7   | AC0.6               | T-F1.7-001   | Extracted-scratch rule green    | `input_policy.py`, `test_input_policy_cli.py`          |
 
 ---
 
@@ -243,16 +244,16 @@ stateDiagram-v2
 
 ### 4.4 Config / Environment / External Dependencies
 
-| Config / Flag          | Required | Default                     | Description                                                             |
-| ---------------------- | -------- | --------------------------- | ----------------------------------------------------------------------- |
-| `--base-url`           | No       | `https://jobs.polyu.edu.hk` | Base URL for resolving relative hrefs                                   |
-| `--records-url`        | Live     | -                           | JAS records page URL for live mode                                      |
-| `--cookie-file`        | No       | -                           | Local Netscape `cookies.txt` (0600); cookies are never CLI arguments    |
-| `--scratch-dir`        | No       | `data/jas_scratch`          | Root for downloaded CVs (`{refno}/{appno}.pdf`)                         |
-| `--keep-cvs`           | No       | false                       | Retain downloaded CVs after the run                                     |
-| `--trust-extracted`    | No       | false                       | Allow `--extracted` profiles from outside `--output-dir`                |
-| External dependencies  | Phase 0  | stdlib only                 | Parsing makes no network calls                                          |
-| External dependencies  | Phase 1  | `httpx` (already in `backend/requirements.txt`) | Live fetch and downloads                                |
+| Config / Flag         | Required | Default                                         | Description                                                          |
+| --------------------- | -------- | ----------------------------------------------- | -------------------------------------------------------------------- |
+| `--base-url`          | No       | `https://jobs.polyu.edu.hk`                     | Base URL for resolving relative hrefs                                |
+| `--records-url`       | Live     | -                                               | JAS records page URL for live mode                                   |
+| `--cookie-file`       | No       | -                                               | Local Netscape `cookies.txt` (0600); cookies are never CLI arguments |
+| `--scratch-dir`       | No       | `data/jas_scratch`                              | Root for downloaded CVs (`{refno}/{appno}.pdf`)                      |
+| `--keep-cvs`          | No       | false                                           | Retain downloaded CVs after the run                                  |
+| `--trust-extracted`   | No       | false                                           | Allow `--extracted` profiles from outside `--output-dir`             |
+| External dependencies | Phase 0  | stdlib only                                     | Parsing makes no network calls                                       |
+| External dependencies | Phase 1  | `httpx` (already in `backend/requirements.txt`) | Live fetch and downloads                                             |
 
 ---
 
@@ -260,14 +261,14 @@ stateDiagram-v2
 
 ### 5.1 API Contract Summary
 
-| Command                                                    | Method (CLI)   | Auth       | Success         | Error Codes                  | Idempotent | Rate Limit |
-| ---------------------------------------------------------- | -------------- | ---------- | --------------- | ---------------------------- | ---------- | ---------- |
-| `run_jas_import.py parse-list --html-file F`               | subcommand     | none       | exit 0, stdout  | exit 1, stderr JSON          | yes        | N/A        |
-| `run_jas_import.py parse-job --html-file F`                | subcommand     | none       | exit 0, stdout  | exit 1, stderr JSON          | yes        | N/A        |
-| `run_jas_import.py mock --output-dir D`                    | subcommand     | none       | exit 0, stdout  | exit 1, stderr JSON          | yes        | N/A        |
-| `run_jas_screening.py --jas-dir D`                         | CLI            | none       | exit 0, stdout  | exit 1 error / exit 2 need_input | yes (with `--resume`) | N/A |
-| `run_jas_screening.py --records-url U [--cookie-file C]`   | CLI            | cookie file | exit 0, stdout  | exit 1 error / exit 2 need_input | no (network) | be polite |
-| `run_pipeline.py --jd-url U --cv-url U ...`                | CLI            | cookie file | exit 0, stdout  | exit 1 error / exit 2 need_input | yes (with `--resume`) | N/A |
+| Command                                                  | Method (CLI) | Auth        | Success        | Error Codes                      | Idempotent            | Rate Limit |
+| -------------------------------------------------------- | ------------ | ----------- | -------------- | -------------------------------- | --------------------- | ---------- |
+| `run_jas_import.py parse-list --html-file F`             | subcommand   | none        | exit 0, stdout | exit 1, stderr JSON              | yes                   | N/A        |
+| `run_jas_import.py parse-job --html-file F`              | subcommand   | none        | exit 0, stdout | exit 1, stderr JSON              | yes                   | N/A        |
+| `run_jas_import.py mock --output-dir D`                  | subcommand   | none        | exit 0, stdout | exit 1, stderr JSON              | yes                   | N/A        |
+| `run_jas_screening.py --jas-dir D`                       | CLI          | none        | exit 0, stdout | exit 1 error / exit 2 need_input | yes (with `--resume`) | N/A        |
+| `run_jas_screening.py --records-url U [--cookie-file C]` | CLI          | cookie file | exit 0, stdout | exit 1 error / exit 2 need_input | no (network)          | be polite  |
+| `run_pipeline.py --jd-url U --cv-url U ...`              | CLI          | cookie file | exit 0, stdout | exit 1 error / exit 2 need_input | yes (with `--resume`) | N/A        |
 
 - Success JSON carries `"status": "success"`; failure JSON carries `{"status": "error", "error_message": "..."}` on stderr with exit code 1; `need_input` uses exit code 2.
 
@@ -337,7 +338,11 @@ Screening manifest (`jas-manifest.json`, PII-free):
   "refno": "260818001",
   "post_title": "Project Associate",
   "candidates": [
-    { "appno": "123456", "status": "S", "cv_path": ".../data/jas_scratch/260818001/123456.pdf" }
+    {
+      "appno": "123456",
+      "status": "S",
+      "cv_path": ".../data/jas_scratch/260818001/123456.pdf"
+    }
   ],
   "candidates_without_cv": []
 }
@@ -368,30 +373,30 @@ Data lifecycle rules:
 
 ## 6. Non-Functional Requirements
 
-| Category       | Requirement                                                                                  |
-| -------------- | --------------------------------------------------------------------------------------------- |
-| Determinism    | Same HTML input yields identical JSON (no LLM in JAS Import; no random sampling).             |
-| Resilience     | Malformed tables and missing files degrade to empty results or an error envelope, never a traceback. |
-| Traceability   | Every artifact carries `source=jas`, `refno`, and per-candidate `appno`.                      |
-| Performance    | Local parse of a normal records page completes in < 1s on a developer machine.                |
-| Compatibility  | Parsing is stdlib-only; live fetch uses `httpx` (already a project dependency). Python 3.10+. |
-| Security/PII   | Identity columns dropped at the parser boundary; inline content rejected at every CLI entry; no PII in stdout/logs. |
+| Category      | Requirement                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Determinism   | Same HTML input yields identical JSON (no LLM in JAS Import; no random sampling).                                   |
+| Resilience    | Malformed tables and missing files degrade to empty results or an error envelope, never a traceback.                |
+| Traceability  | Every artifact carries `source=jas`, `refno`, and per-candidate `appno`.                                            |
+| Performance   | Local parse of a normal records page completes in < 1s on a developer machine.                                      |
+| Compatibility | Parsing is stdlib-only; live fetch uses `httpx` (already a project dependency). Python 3.10+.                       |
+| Security/PII  | Identity columns dropped at the parser boundary; inline content rejected at every CLI entry; no PII in stdout/logs. |
 
 ---
 
 ## 7. Risks and Mitigations
 
-| Risk                                      | Impact | Mitigation                                                                                  |
-| ----------------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
-| JAS HTML structure changes                | High   | Select by `job-table`/`job-detail-table` classes + `Reference number` label; regression fixtures + mock generator. |
-| Live `/internal/*` requires auth          | High   | `--cookie-file` reads a local Netscape cookies.txt; cookies never enter CLI arguments or the host conversation. |
-| Candidate identity leakage                | High   | Parser structurally omits identity columns; unit tests assert absence of email/phone/name; input policy rejects inline content. |
-| CV-content PII masking is heuristic       | High   | cv-parser masks locally detected PII before LLM and blocks external calls when no name is detected; residual risk documented. |
-| URL mode unverifiable without access      | Medium | All live paths are mock-tested; first real-access run is a validation milestone.            |
-| Status inference (TBC/P/S/N) ambiguous    | Medium | Emit `null` when not a plain-text token; never fabricate status.                            |
-| HR sample is masked (`*`)                 | Medium | Tests target DOM structure; synthetic mock data provides realistic non-masked fixtures.      |
-| Duplicate `id="f-list"` on one page       | Medium | Select by class token for candidates and by `Reference number` label for the JD table.       |
-| Contract drift (PRD vs code)              | Low    | `schema_version` field, RTM, and this alignment pass.                                        |
+| Risk                                   | Impact | Mitigation                                                                                                                      |
+| -------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| JAS HTML structure changes             | High   | Select by `job-table`/`job-detail-table` classes + `Reference number` label; regression fixtures + mock generator.              |
+| Live `/internal/*` requires auth       | High   | `--cookie-file` reads a local Netscape cookies.txt; cookies never enter CLI arguments or the host conversation.                 |
+| Candidate identity leakage             | High   | Parser structurally omits identity columns; unit tests assert absence of email/phone/name; input policy rejects inline content. |
+| CV-content PII masking is heuristic    | High   | cv-parser masks locally detected PII before LLM and blocks external calls when no name is detected; residual risk documented.   |
+| URL mode unverifiable without access   | Medium | All live paths are mock-tested; first real-access run is a validation milestone.                                                |
+| Status inference (TBC/P/S/N) ambiguous | Medium | Emit `null` when not a plain-text token; never fabricate status.                                                                |
+| HR sample is masked (`*`)              | Medium | Tests target DOM structure; synthetic mock data provides realistic non-masked fixtures.                                         |
+| Duplicate `id="f-list"` on one page    | Medium | Select by class token for candidates and by `Reference number` label for the JD table.                                          |
+| Contract drift (PRD vs code)           | Low    | `schema_version` field, RTM, and this alignment pass.                                                                           |
 
 ### 7.1 Failure-Mode Requirements (Non-negotiable)
 
@@ -417,17 +422,17 @@ Data lifecycle rules:
 
 ## 9. Success Metrics (KPIs)
 
-| Metric                                    | Target      | Measured By                                                        |
-| ----------------------------------------- | ----------- | ------------------------------------------------------------------ |
-| Catalog parse success on HR samples       | 100%        | `backend/tests/unit/test_jas_import.py`                            |
-| JD + candidate linkage present            | 100%        | Assertions on `jd_text` and `cv_url`                               |
-| Candidate identity fields leaked           | 0 fields    | Serialized-JSON PII absence assertion                              |
-| Inline-content rejection                  | 100%        | `test_input_policy_cli.py` base64/data-URI/oversized cases         |
-| Extracted-scratch rule                    | 100%        | `test_input_policy_cli.py` `--trust-extracted` cases              |
-| URL-mode download + cleanup               | 100%        | `test_jas_screening_url.py`                                        |
-| CLI exit-code conformance                 | 100%        | CLI error-envelope and need_input tests                            |
-| End-to-end rank order on mock data        | 100%        | `backend/tests/e2e/test_jas_mock_pipeline.py` (`JAS_MOCK_E2E=1`)  |
-| P0 test pass rate                         | 100%        | `pytest backend/tests -q` (223 passed / 1 skipped at review time) |
+| Metric                              | Target   | Measured By                                                       |
+| ----------------------------------- | -------- | ----------------------------------------------------------------- |
+| Catalog parse success on HR samples | 100%     | `backend/tests/unit/test_jas_import.py`                           |
+| JD + candidate linkage present      | 100%     | Assertions on `jd_text` and `cv_url`                              |
+| Candidate identity fields leaked    | 0 fields | Serialized-JSON PII absence assertion                             |
+| Inline-content rejection            | 100%     | `test_input_policy_cli.py` base64/data-URI/oversized cases        |
+| Extracted-scratch rule              | 100%     | `test_input_policy_cli.py` `--trust-extracted` cases              |
+| URL-mode download + cleanup         | 100%     | `test_jas_screening_url.py`                                       |
+| CLI exit-code conformance           | 100%     | CLI error-envelope and need_input tests                           |
+| End-to-end rank order on mock data  | 100%     | `backend/tests/e2e/test_jas_mock_pipeline.py` (`JAS_MOCK_E2E=1`)  |
+| P0 test pass rate                   | 100%     | `pytest backend/tests -q` (223 passed / 1 skipped at review time) |
 
 ---
 
@@ -436,7 +441,7 @@ Data lifecycle rules:
 - `downloadexcel.php` Excel parsing for fast candidate metadata scanning.
 - `record_detail.php` application-form parsing to pre-fill candidate profiles.
 - Multi-refno orchestration in `screening-agent` (loop refnos, one ranked report each).
-- Pseudonymous report labels (`appno`) with an optional, default-off HR name view (`--include-pii`).
+- Ranked reports keyed by `(refno, appno)` only. Personal names are never shown (first-letter masking is rejected as insufficient de-identification).
 - Live validation against the real JAS once internal access (or an HR-run session) is available.
 - Audit logging for every download/cleanup action.
 
@@ -466,14 +471,14 @@ Data lifecycle rules:
 
 ### 12.1 Implementation Status
 
-| Area                       | Status     | Evidence                                                                 |
-| -------------------------- | ---------- | ------------------------------------------------------------------------ |
-| JAS HTML parser (P0)       | Shipped    | `test_jas_import.py` (incl. real HR samples)                             |
-| Input policy guard         | Shipped    | `test_input_policy.py` + `test_input_policy_cli.py`                      |
-| Offline screening flow     | Shipped    | `test_jas_screening.py`; e2e mock pipeline                              |
-| URL mode skeleton          | Shipped (mock-only) | `test_jas_fetch.py` + `test_jas_screening_url.py`                |
-| Pipeline/agent wiring      | Shipped    | `test_jas_fetch.py` forwarding test; compat tests                        |
-| Mock data generator        | Shipped    | `run_jas_import.py mock`; e2e generate/parse tests                       |
+| Area                   | Status              | Evidence                                            |
+| ---------------------- | ------------------- | --------------------------------------------------- |
+| JAS HTML parser (P0)   | Shipped             | `test_jas_import.py` (incl. real HR samples)        |
+| Input policy guard     | Shipped             | `test_input_policy.py` + `test_input_policy_cli.py` |
+| Offline screening flow | Shipped             | `test_jas_screening.py`; e2e mock pipeline          |
+| URL mode skeleton      | Shipped (mock-only) | `test_jas_fetch.py` + `test_jas_screening_url.py`   |
+| Pipeline/agent wiring  | Shipped             | `test_jas_fetch.py` forwarding test; compat tests   |
+| Mock data generator    | Shipped             | `run_jas_import.py mock`; e2e generate/parse tests  |
 
 ### 12.2 Test Gates
 
@@ -496,17 +501,17 @@ Data lifecycle rules:
 
 ## Glossary
 
-| Term              | Definition                                                                 |
-| ----------------- | -------------------------------------------------------------------------- |
-| JAS               | PolyU Job Application System (internal records area).                        |
-| refno             | Job reference number; the internal job identifier used in `records.php`.     |
-| appno             | Application number; the internal candidate identifier and CV linkage key.    |
-| records_url       | URL to a job-detail page (`internal/records.php?refno=...`).                 |
-| record_detail_url | URL to the printable application form (`internal/record_detail.php?id=...`). |
-| cv_url            | URL to a candidate CV download (`internal/file.php?t=cv&id=...`).            |
-| supp_url          | URL to a candidate's supplementary document, when present.                   |
-| PII               | Personally identifiable information (name, email, phone, HKID, salary, etc.).|
-| Pseudonymization  | Replacing identity data with a non-identifying key such as `appno`.          |
-| Input policy      | The path-or-allowlisted-URL contract enforced at every CLI entry point.      |
-| Scratch dir       | Private local directory (`data/jas_scratch/{refno}/`) for downloaded CVs.    |
-| P0 / P1           | MVP launch blockers / delayable enhancements.                               |
+| Term              | Definition                                                                    |
+| ----------------- | ----------------------------------------------------------------------------- |
+| JAS               | PolyU Job Application System (internal records area).                         |
+| refno             | Job reference number; the internal job identifier used in `records.php`.      |
+| appno             | Application number; the internal candidate identifier and CV linkage key.     |
+| records_url       | URL to a job-detail page (`internal/records.php?refno=...`).                  |
+| record_detail_url | URL to the printable application form (`internal/record_detail.php?id=...`).  |
+| cv_url            | URL to a candidate CV download (`internal/file.php?t=cv&id=...`).             |
+| supp_url          | URL to a candidate's supplementary document, when present.                    |
+| PII               | Personally identifiable information (name, email, phone, HKID, salary, etc.). |
+| Pseudonymization  | Replacing identity data with a non-identifying key such as `appno`.           |
+| Input policy      | The path-or-allowlisted-URL contract enforced at every CLI entry point.       |
+| Scratch dir       | Private local directory (`data/jas_scratch/{refno}/`) for downloaded CVs.     |
+| P0 / P1           | MVP launch blockers / delayable enhancements.                                 |

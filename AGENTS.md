@@ -32,3 +32,14 @@ export function JobCard({ job, ... }) {
 
 - Applies to all code files: backend modules, API routes, services, models, frontend components, hooks, utilities, and scripts.
 - Short, auto-explanatory helpers may use a single inline comment instead of a multi-line block, but must still carry a comment.
+
+## WorkBuddy / HR screening
+
+When the user says `用 jas-import 离线筛选` plus a folder or URL:
+
+1. `cd` to this repository root.
+2. Run `python .codex/skills/jas-import/scripts/run_jas_screening.py "<folder-or-url>"`.
+3. Do not invent a keyword screener. Do not write `screening_report.html`. Do not pass `--skip-reports`.
+4. Reports go to `Desktop/workbuddy-cv-screen/<refno>/` (not the WorkBuddy session folder). Files: `ranking-overview.html`, `<appno>.html`, `<appno>.pdf`.
+5. Never put candidate names, emails, phones, or salaries in HTML/PDF. Identity is `refno/appno` only.
+

@@ -50,7 +50,7 @@ async def generate_candidate_report(
     await asyncio.to_thread(
         reporter.generate_candidate_one_pager_pdf,
         str(output_path),
-        candidate_name=candidate.name,
+        display_label=str(candidate.id),
         position_name=job.position_name,
         report_date=datetime.utcnow(),
         total_score=float(scoring.total_score),
@@ -109,7 +109,8 @@ async def generate_comparison_report(
         excel_rows.append(
             {
                 "rank": scoring.rank,
-                "name": candidate.name,
+                "refno": None,
+                "appno": str(candidate.id),
                 "total_score": float(scoring.total_score),
                 "skill_match": float(dimensions.get("skill_match", 0)),
                 "experience_match": float(dimensions.get("experience_match", 0)),

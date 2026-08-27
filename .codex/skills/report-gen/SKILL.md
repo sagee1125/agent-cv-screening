@@ -44,18 +44,20 @@ python .codex/skills/report-gen/scripts/run_report.py candidate \
   --extracted <extracted.json> \
   --score <score.json> \
   --position "<job title>" \
-  [--name "Override Name"] \
+  [--refno 260818001] \
+  [--appno 123456] \
   [--rank 1] \
   --output <report.pdf>
 ```
 
 | flag | meaning |
 |---|---|
-| `--extracted` (required) | JSON file with CV Parser `structured_data` (name, education, experience) |
+| `--extracted` (required) | JSON file with CV Parser `structured_data` (education, experience; **names are not shown on the PDF**) |
 | `--score` (optional) | JSON file with Scorer output (`total_score`, `tier`, `dimension_scores`, `skill_match_details`, `full_snapshot`); a ranked `{"score": {...}, "ranking": [...]}` envelope is auto-unwrapped. Required when `--detail` is not given |
 | `--detail` (optional) | Matching-engine detail JSON (radar_dimensions, interview_questions, eligibility, evidence_confidence, fit_band, top_strengths, key_gaps) — the same payload the frontend candidate-match modal shows. When given, the PDF renders a radar chart + dimension details + suggested interview questions |
 | `--position` (required) | Job position name shown on the report |
-| `--name` (optional) | Override candidate name; defaults to `extracted_data.name` or `Unknown` |
+| `--refno` / `--appno` (optional) | Composite HR key shown on the PDF header as `{refno}/{appno}`. Personal names and first-letter masks are never used |
+| `--name` (optional) | Ignored. Kept for old CLIs; reports never display a candidate name |
 | `--rank` (optional) | Candidate rank shown on the report (default `0`) |
 | `--output` (required) | Path to write the PDF report file |
 
@@ -73,6 +75,18 @@ python .codex/skills/report-gen/scripts/run_report.py comparison \
 | `--position` (required) | Job position name shown on the report |
 | `--rows` (required) | JSON file with a list of ranked candidate rows |
 | `--output` (required) | Path to write the XLSX report file |
+
+### `board` — HTML ranking + radar board (HR browser)
+
+```bash
+python .codex/skills/report-gen/scripts/run_report.py board \
+  --position "<job title>" \
+  --rows <rows.json> \
+  [--refno 260818001] \
+  --output screening-board.html
+```
+
+Standalone HTML (no CDN). Labels are `refno/appno` only. Pipeline writes this next to `comparison.xlsx` as `screening-board.html`. Open the file in a browser; do not paste the HTML into the host LLM.
 
 ## Input JSON fields
 
@@ -102,7 +116,7 @@ Each row uses the same fields as the REST `/reports/comparison` endpoint:
 
 ## Output
 
-- stdout prints a JSON result: `{"status": "success", "format": "pdf" | "excel", "output_path": "..."}`
+- stdout prints a JSON result: `{"status": "success", "format": "pdf" | "excel" | "html", "output_path": "..."}`
 - `--output` is the report file path (`.pdf` / `.xlsx`), not a JSON path
 - On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "WorkBuddy Host Envelope"
+  short_description: "Project screening JSON onto the host-LLM whitelist"
+  default_prompt: "Use $skill-host-envelope to convert pipeline stdout into HostToolReturn JSON before showing results to the host model"

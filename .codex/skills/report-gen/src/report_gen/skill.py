@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from report_gen.reporter import ReporterService
+from screening_core.candidate_id import format_candidate_label
 
 
 # Unwrap a ranked score envelope ({score: {...}, ranking: [...]}) or pass through a plain score result.
@@ -36,6 +37,8 @@ def generate_candidate_report_skill(
     score_result: dict[str, Any] | None = None,
     position_name: str,
     candidate_name: str | None = None,
+    refno: str | None = None,
+    appno: str | None = None,
     rank: int = 0,
     output_path: str,
     version: str = "skill",
@@ -66,11 +69,12 @@ def generate_candidate_report_skill(
     suggestions = score_result.get("interview_suggestions") or snapshot.get("interview_suggestions") or []
     total_score = detail.get("match_score") if "match_score" in detail else score_result.get("total_score", 0)
     tier = detail.get("fit_band") if "fit_band" in detail else score_result.get("tier", "")
-    name = candidate_name or extracted_data.get("name") or "Unknown"
+    _ = candidate_name  # names are never shown on reports
+    label = format_candidate_label(refno, appno)
     service = ReporterService()
     service.generate_candidate_one_pager_pdf(
         output_path,
-        candidate_name=name,
+        display_label=label,
         position_name=position_name,
         report_date=datetime.utcnow(),
         total_score=float(total_score),
@@ -110,3 +114,39 @@ def generate_comparison_report_skill(
         rows=rows,
     )
     return {"status": "success", "format": "excel", "output_path": output_path}
+
+
+# Generate a local HTML board (ranking + radar) for HR to open in a browser.
+def generate_screening_board_skill(
+    *,
+    position_name: str,
+    rows: list[dict[str, Any]],
+    output_path: str,
+    refno: str | None = None,
+) -> dict[str, Any]:
+    service = ReporterService()
+    service.generate_screening_board_html(
+        output_path,
+        position_name=position_name,
+        rows=rows,
+        report_date=datetime.utcnow(),
+        refno=refno,
+    )
+    return {"status": "success", "format": "html", "output_path": output_path}
+
+
+# Generate one candidate HTML match page (typically named <appno>.html).
+def generate_candidate_match_html_skill(
+    *,
+    position_name: str,
+    row: dict[str, Any],
+    output_path: str,
+) -> dict[str, Any]:
+    service = ReporterService()
+    service.generate_candidate_match_html(
+        output_path,
+        row=row,
+        position_name=position_name,
+        report_date=datetime.utcnow(),
+    )
+    return {"status": "success", "format": "html", "output_path": output_path}

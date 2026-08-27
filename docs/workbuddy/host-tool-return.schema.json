@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iherd.local/schemas/workbuddy/host-tool-return.schema.json",
+  "$comment": "WorkBuddy host-LLM tool return whitelist; additionalProperties false; CV/JD bodies and identity never appear here.",
+  "title": "WorkBuddy HostToolReturn",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tool", "status"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "tool": {
+      "type": "string",
+      "enum": ["request_jas_access", "screen_refno", "get_run_status"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "partial_success", "need_input", "error"]
+    },
+    "error_code": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "envelope_rejected",
+        "unauthorized",
+        "session_expired",
+        "host_not_allowlisted",
+        "refno_invalid",
+        "fetch_failed",
+        "need_input",
+        "pipeline_error",
+        "partial_failures",
+        "internal"
+      ]
+    },
+    "error_message": {
+      "type": ["string", "null"],
+      "maxLength": 160,
+      "pattern": "^[^\\r\\n]*$"
+    },
+    "run_id": {
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "refno": {
+      "type": ["string", "null"],
+      "maxLength": 16,
+      "pattern": "^[0-9]+$"
+    },
+    "post_title": {
+      "type": ["string", "null"],
+      "maxLength": 120,
+      "pattern": "^[^\\r\\n]*$"
+    },
+    "engine": {
+      "type": ["string", "null"],
+      "enum": [null, "legacy", "matching"]
+    },
+    "candidate_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 200 },
+    "failed_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 200 },
+    "auth": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["jas_session"],
+      "properties": {
+        "jas_session": {
+          "type": "string",
+          "enum": ["missing", "granted", "denied", "expired"]
+        },
+        "cookie_file_present": { "type": "boolean" }
+      }
+    },
+    "ask": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["missing", "questions"],
+      "properties": {
+        "missing": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "enum": ["jas_session", "refno", "candidates", "jd", "position", "scope", "input"]
+          }
+        },
+        "questions": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "maxLength": 120,
+            "pattern": "^[^\\r\\n]*$"
+          }
+        }
+      }
+    },
+    "ranking": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rank", "appno", "parse_failed"],
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1 },
+          "appno": { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$" },
+          "hr_status": {
+            "type": ["string", "null"],
+            "enum": [null, "TBC", "P", "S", "N"]
+          },
+          "total_score": { "type": ["number", "null"] },
+          "tier": { "type": ["string", "null"], "maxLength": 64, "pattern": "^[^\\r\\n]*$" },
+          "match_score": { "type": ["number", "null"] },
+          "fit_band": { "type": ["string", "null"], "maxLength": 64, "pattern": "^[^\\r\\n]*$" },
+          "eligible": { "type": ["boolean", "null"] },
+          "parse_failed": { "type": "boolean" },
+          "failure_stage": {
+            "type": ["string", "null"],
+            "enum": [null, "cv-parse", "score", "match", "report-gen", "download"]
+          }
+        }
+      }
+    },
+    "reports": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "type": ["string", "null"],
+          "maxLength": 512,
+          "pattern": "^[^\\r\\n]*$"
+        },
+        "comparison_xlsx": { "type": "boolean" },
+        "pdf_count": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "html_ready": { "type": "boolean" },
+        "open_hint": {
+          "type": ["string", "null"],
+          "enum": [null, "open_in_panel", "open_in_folder"]
+        }
+      }
+    },
+    "scratch_retained": { "type": ["boolean", "null"] }
+  }
+}
