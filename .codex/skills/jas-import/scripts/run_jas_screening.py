@@ -22,11 +22,21 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
 from jas_import.fetch import download_to, fetch_job_payload
 from jas_import.skill import parse_job_skill
+from screening_core.candidate_id import appno_from_filename
+from screening_core.hr_output import (
+    RANKING_OVERVIEW_HTML,
+    is_internal_output_dir,
+    open_hr_file,
+    pipeline_work_dir,
+    resolve_hr_job_dir,
+    safe_pack_id,
+)
 from screening_core.input_policy import validate_path, validate_reference
 
 REPO_ROOT = _bootstrap.REPO_ROOT
@@ -39,6 +49,7 @@ EXIT_NEED_INPUT = 2
 
 RECORDS_HTML_NAMES = ("records.html", "Job Application Recordsrecords.html", "records.php.html")
 DEFAULT_CVS_DIR = "cvs"
+CV_DIR_CANDIDATES = ("cvs", "uploads")
 CV_SUFFIXES = (".pdf", ".doc", ".docx")
 SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -69,28 +80,72 @@ def _resolve_records_html(jas_dir: Path, records_html: str | None) -> Path:
 
 # Maps one CV filename stem to an application no. (accepts <appno> or <refno>_<appno>).
 def _appno_from_filename(stem: str, refno: str) -> str:
-    name = stem
-    prefix = f"{refno}_"
-    if name.startswith(prefix):
-        name = name[len(prefix):]
-    match = re.fullmatch(r"(\d+)", name)
-    return match.group(1) if match else name
+    return appno_from_filename(stem, refno)
 
 
-# Discovers CV files in the cvs dir plus any extra --cv paths.
-def _discover_cvs(jas_dir: Path, cvs_dir: str | None, extra_cvs: list[str], refno: str) -> list[tuple[str, Path]]:
-    base = jas_dir / (cvs_dir or DEFAULT_CVS_DIR)
+# Map local CV filenames in records.html (e.g. CV_Name.pdf) back to application no.
+def _appno_by_cv_filename(job: dict) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for candidate in job.get("candidates") or []:
+        appno = str(candidate.get("appno") or "").strip()
+        url = str(candidate.get("cv_url") or "").strip()
+        if not appno or not url:
+            continue
+        name = Path(unquote(urlparse(url).path)).name.lower()
+        if name:
+            mapping[name] = appno
+    return mapping
+
+
+# Prefer cvs/, then uploads/, when HR did not pass --cvs-dir.
+def _resolve_cvs_dir(jas_dir: Path, cvs_dir: str | None) -> Path:
+    if cvs_dir:
+        return jas_dir / cvs_dir
+    for name in CV_DIR_CANDIDATES:
+        candidate = jas_dir / name
+        if not candidate.is_dir():
+            continue
+        if any(path.is_file() and path.suffix.lower() in CV_SUFFIXES for path in candidate.iterdir()):
+            return candidate
+    return jas_dir / DEFAULT_CVS_DIR
+
+
+# Discovers CV files in the cvs/uploads dir plus any extra --cv paths.
+def _discover_cvs(
+    jas_dir: Path,
+    cvs_dir: str | None,
+    extra_cvs: list[str],
+    refno: str,
+    job: dict | None = None,
+) -> list[tuple[str, Path]]:
+    url_map = _appno_by_cv_filename(job or {})
+    base = _resolve_cvs_dir(jas_dir, cvs_dir)
     found: list[tuple[str, Path]] = []
     if base.is_dir():
         for path in sorted(base.iterdir()):
             if path.is_file() and path.suffix.lower() in CV_SUFFIXES:
-                found.append((_appno_from_filename(path.stem, refno), path))
+                appno = url_map.get(path.name.lower()) or _appno_from_filename(path.stem, refno)
+                found.append((appno, path))
     for item in extra_cvs:
         path = Path(item)
         if not path.is_absolute():
             path = jas_dir / path
-        found.append((_appno_from_filename(path.stem, refno), path))
+        appno = url_map.get(path.name.lower()) or _appno_from_filename(path.stem, refno)
+        found.append((appno, path))
     return found
+
+
+# Copy CVs to <appno>.pdf so reports never inherit personal-name filenames.
+def _stage_cvs_by_appno(work_dir: Path, cvs: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
+    staged_dir = work_dir / "staged_cvs"
+    staged_dir.mkdir(parents=True, exist_ok=True)
+    staged: list[tuple[str, Path]] = []
+    for appno, src in cvs:
+        stem = safe_pack_id(appno, fallback="unknown")
+        dest = staged_dir / f"{stem}{src.suffix.lower() or '.pdf'}"
+        shutil.copy2(src, dest)
+        staged.append((stem, dest))
+    return staged
 
 
 # Builds the pipeline command for one JAS job folder.
@@ -104,6 +159,8 @@ def _pipeline_cmd(
     skip_reports: bool,
     resume: bool,
     fail_fast: bool,
+    refno: str | None = None,
+    report_dir: Path | None = None,
 ) -> list[str]:
     cmd = [
         PYTHON,
@@ -119,6 +176,10 @@ def _pipeline_cmd(
         "--max-retries",
         str(max_retries),
     ]
+    if report_dir is not None:
+        cmd += ["--report-dir", str(report_dir)]
+    if refno:
+        cmd += ["--refno", str(refno)]
     if skip_reports:
         cmd.append("--skip-reports")
     if resume:
@@ -196,23 +257,31 @@ def _run_screening(
     download_failures: list[dict] | None = None,
 ) -> int:
     position = (job.get("job") or {}).get("post_title") or ""
-    out_dir = _resolve_output_dir(args.output_dir)
-    jd_text_path = out_dir / "jd.txt"
+    refno = str(job.get("refno") or "") or None
+    skip_reports = bool(args.skip_reports)
+    if not args.output_dir or is_internal_output_dir(args.output_dir, repo_root=REPO_ROOT):
+        skip_reports = False
+    job_dir = resolve_hr_job_dir(args.output_dir, refno, repo_root=REPO_ROOT)
+    work_dir = pipeline_work_dir(job_dir)
+    jd_text_path = work_dir / "jd.txt"
     jd_text_path.write_text(job.get("jd_text", ""), encoding="utf-8")
 
-    manifest = _build_manifest(job, cvs, download_failures=download_failures)
-    (out_dir / "jas-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    staged = _stage_cvs_by_appno(work_dir, cvs)
+    manifest = _build_manifest(job, staged, download_failures=download_failures)
+    (work_dir / "jas-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     cmd = _pipeline_cmd(
         jd_text_path,
-        [path for _, path in cvs],
+        [path for _, path in staged],
         position,
-        out_dir,
+        work_dir,
         args.engine,
         args.max_retries,
-        args.skip_reports,
+        skip_reports,
         args.resume,
         args.fail_fast,
+        refno=refno,
+        report_dir=job_dir,
     )
     exit_code, payload = _run_pipeline(cmd)
     if download_failures:
@@ -222,6 +291,9 @@ def _run_screening(
         print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
     else:
         print(json.dumps(payload, ensure_ascii=False))
+    if exit_code == 0 and not skip_reports and not getattr(args, "no_open", False):
+        overview = job_dir / RANKING_OVERVIEW_HTML
+        open_hr_file(overview)
     return exit_code
 
 
@@ -248,7 +320,7 @@ def run_jas_screening(jas_dir: Path, args: argparse.Namespace) -> int:
         return EXIT_NEED_INPUT
 
     refno = job.get("refno") or "job"
-    cvs = _discover_cvs(jas_dir, args.cvs_dir, args.cv, refno)
+    cvs = _discover_cvs(jas_dir, args.cvs_dir, args.cv, refno, job)
     if not cvs:
         print(
             json.dumps(
@@ -361,28 +433,77 @@ def run_url_screening(args: argparse.Namespace) -> int:
             _remove_scratch_dir(scratch_job, scratch_root)
 
 
+# Returns True when the value is a records URL rather than a local folder.
+def _looks_like_records_url(value: str) -> bool:
+    text = value.strip().lower()
+    return text.startswith(("http://", "https://", "www.")) or "jobs.polyu.edu.hk" in text or "records.php" in text
+
+
+# Add https:// when the HR pasted www... without a scheme.
+def _normalize_records_url(value: str) -> str:
+    text = value.strip()
+    if text.lower().startswith(("http://", "https://")):
+        return text
+    return "https://" + text.lstrip("/")
+
+
 # Builds the argparse CLI for the offline JAS screening flow.
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run JAS screening from an HR-exported folder or a records URL.")
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--jas-dir", default=None, help="HR-exported JAS folder (records.html + cvs/).")
-    source.add_argument("--records-url", default=None, help="JAS records page URL; CVs are downloaded automatically.")
+    parser = argparse.ArgumentParser(
+        description="Screen a JAS folder or records URL. Writes HTML/PDF and opens ranking-overview.html."
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Exported JAS folder or records URL. Same as --jas-dir / --records-url.",
+    )
+    parser.add_argument("--jas-dir", default=None, help="HR-exported JAS folder (records.html + cvs/).")
+    parser.add_argument("--records-url", default=None, help="JAS records page URL; CVs are downloaded automatically.")
     parser.add_argument("--records-html", default=None, help="Optional explicit path to records.html.")
     parser.add_argument("--cvs-dir", default=None, help="CV folder name inside jas-dir (default cvs).")
     parser.add_argument("--cv", action="append", default=[], metavar="FILE", help="Extra CV files outside the folder.")
     parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt for authenticated fetches.")
     parser.add_argument("--keep-cvs", action="store_true", help="Keep downloaded CVs in --scratch-dir after the run.")
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Root directory for downloaded CVs.")
-    parser.add_argument("--output-dir", default="data/jas_out", help="Output directory shared with pipeline.")
-    parser.add_argument("--engine", choices=("legacy", "matching"), default="legacy", help="Scoring engine.")
-    parser.add_argument("--skip-reports", action="store_true", help="Score/rank only; skip PDF/Excel.")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Parent folder for the HR pack. Default: Desktop/workbuddy-cv-screen/<refno>/",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=("legacy", "matching"),
+        default="matching",
+        help="Scoring engine (default matching: Candidate Match PDF with radar).",
+    )
+    parser.add_argument(
+        "--skip-reports",
+        action="store_true",
+        help="Score/rank only; skip HTML/PDF/Excel. Do not use for HR.",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not open ranking-overview.html after a successful run.",
+    )
     parser.add_argument("--resume", action="store_true", help="Reuse usable artifacts already in --output-dir.")
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure.")
     parser.add_argument("--max-retries", type=int, default=2, help="Extra attempts per candidate step.")
     args = parser.parse_args()
+    if args.target:
+        if args.jas_dir or args.records_url:
+            parser.error("use either a positional folder/URL or --jas-dir/--records-url, not both")
+        if _looks_like_records_url(args.target):
+            args.records_url = _normalize_records_url(args.target)
+        else:
+            args.jas_dir = args.target
     if args.records_url:
         return run_url_screening(args)
-    return run_jas_screening(Path(args.jas_dir), args)
+    if args.jas_dir:
+        return run_jas_screening(Path(args.jas_dir), args)
+    parser.error("provide a JAS folder or a records URL")
+    return EXIT_ERROR
 
 
 if __name__ == "__main__":

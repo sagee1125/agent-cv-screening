@@ -175,7 +175,8 @@ def test_pipeline_partial_success_isolates_cv_failure(tmp_path, monkeypatch, cap
     assert exit_code == 0
     assert manifest["status"] == "partial_success"
     assert len(manifest["candidates"]) == 1
-    assert manifest["candidates"][0]["name"] == "Good Person"
+    assert manifest["candidates"][0]["appno"] == "good"
+    assert "name" not in manifest["candidates"][0]
     assert Path(manifest["candidates"][0]["extracted_json"]).name == "extracted-good.json"
     assert len(manifest["failures"]) == 1
     assert manifest["failures"][0]["source"] == str(bad_cv)
@@ -252,7 +253,8 @@ def test_pipeline_resume_skips_existing_extracted(tmp_path, monkeypatch, capsys)
     assert exit_code == 0
     assert manifest["status"] == "success"
     assert parse_calls == []
-    assert manifest["candidates"][0]["name"] == "Resumed"
+    assert manifest["candidates"][0]["appno"] == "good"
+    assert "name" not in manifest["candidates"][0]
 
 
 def test_pipeline_all_candidates_failed_is_error(tmp_path, monkeypatch, capsys) -> None:

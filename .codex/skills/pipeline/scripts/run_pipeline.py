@@ -33,6 +33,8 @@ from datetime import date
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
+from screening_core.hr_output import RANKING_OVERVIEW_HTML, candidate_match_stem
 from screening_core.input_policy import validate_extracted_reference, validate_path, validate_reference
 from jas_import.fetch import cv_filename_for_url, download_to, fetch_jd_text
 
@@ -250,7 +252,7 @@ def _parse_candidates(
         slug = _unique_slug(source, used_slugs)
         extracted_out = out_dir / f"extracted-{slug}.json"
         if args.resume and _is_usable_json(extracted_out):
-            candidates.append({"extracted": extracted_out, "source": source, "slug": slug})
+            candidates.append(_with_identity(args, extracted_out, source, slug))
             continue
         cmd = [
             PYTHON,
@@ -270,19 +272,26 @@ def _parse_candidates(
                 Failure(source=source, stage="cv-parse", attempts=attempts, error_message=error),
             )
             continue
-        candidates.append({"extracted": extracted_out, "source": source, "slug": slug})
+        candidates.append(_with_identity(args, extracted_out, source, slug))
     for ext in args.extracted:
         source = str(ext)
         slug = _unique_slug(source, used_slugs)
-        candidates.append({"extracted": Path(ext), "source": source, "slug": slug})
+        candidates.append(_with_identity(args, Path(ext), source, slug))
     return candidates
 
 
-def _candidate_name(extracted_path: Path) -> str:
-    """Read the candidate name from an extracted profile (envelope or flat dict)."""
-    extracted = _load_json(extracted_path)
-    structured = extracted.get("structured_data") or extracted
-    return structured.get("name") or "Unknown"
+# Attach the composite JAS key (refno, appno) used for ranking and reports.
+def _with_identity(args: argparse.Namespace, extracted: Path, source: str, slug: str) -> dict:
+    refno = getattr(args, "refno", None) or None
+    appno = appno_from_filename(Path(source).stem, refno)
+    return {
+        "extracted": extracted,
+        "source": source,
+        "slug": slug,
+        "refno": refno,
+        "appno": appno,
+        "display_label": format_candidate_label(refno, appno),
+    }
 
 
 def _score_legacy_candidate(
@@ -319,14 +328,13 @@ def _score_legacy_candidate(
 def _legacy_row(cand: dict) -> dict:
     """Build a comparison/ranking row from a successfully scored legacy candidate."""
     score = _load_json(cand["score"])
-    extracted = _load_json(cand["extracted"])
-    structured = extracted.get("structured_data") or extracted
-    name = structured.get("name") or "Unknown"
     dims = score.get("dimension_scores") or {}
     snapshot = score.get("full_snapshot") or {}
     suggestions = snapshot.get("interview_suggestions") or score.get("interview_suggestions") or []
     return {
-        "name": name,
+        "refno": cand.get("refno"),
+        "appno": cand.get("appno"),
+        "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
         "total_score": score.get("total_score", 0),
         "tier": score.get("tier", ""),
         "skill_match": dims.get("skill_match", 0),
@@ -370,7 +378,7 @@ def _run_legacy_engine(
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
     reports = _generate_reports(args, out_dir, rows, failures)
-    return _build_manifest(out_dir, jd_source, config_out, rows, reports, failures, engine="legacy")
+    return _build_manifest(args, out_dir, jd_source, config_out, rows, reports, failures, engine="legacy")
 
 
 def _match_candidate(
@@ -406,7 +414,6 @@ def _match_candidate(
             )
             return None
     detail = _load_json(detail_out)
-    name = _candidate_name(cand["extracted"])
     dims = {
         (d.get("dimension_id") or ""): d.get("score")
         for d in (detail.get("radar_dimensions") or [])
@@ -417,7 +424,9 @@ def _match_candidate(
         f"{q.get('priority', '')}:{q.get('template_id', '')}" for q in questions[:3]
     )
     return {
-        "name": name,
+        "refno": cand.get("refno"),
+        "appno": cand.get("appno"),
+        "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
         "total_score": float(detail.get("match_score", 0)),
         "tier": detail.get("fit_band") or "",
         "skill_match": _radar_dim_score(dims, "core_skill_match"),
@@ -450,18 +459,73 @@ def _run_matching_engine(
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
     reports = _generate_reports(args, out_dir, rows, failures)
-    return _build_manifest(out_dir, jd_source, None, rows, reports, failures, engine="matching")
+    return _build_manifest(args, out_dir, jd_source, None, rows, reports, failures, engine="matching")
+
+
+# Public ranking fields plus radar/interview numbers from matching detail (no identity, no reasoning).
+def _board_row(row: dict) -> dict:
+    public = {key: value for key, value in row.items() if not str(key).startswith("_")}
+    detail_path = row.get("_detail")
+    if not detail_path:
+        return public
+    path = Path(detail_path)
+    if not path.is_file():
+        return public
+    try:
+        detail = _load_json(path)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return public
+    axes = []
+    for item in detail.get("radar_dimensions") or []:
+        if not isinstance(item, dict):
+            continue
+        axes.append(
+            {
+                "id": item.get("dimension_id") or item.get("id"),
+                "label": item.get("label"),
+                "score": item.get("score"),
+            }
+        )
+    if axes:
+        public["radar_dimensions"] = axes
+    questions = []
+    for item in detail.get("interview_questions") or []:
+        if not isinstance(item, dict) or not item.get("question"):
+            continue
+        questions.append(
+            {
+                "priority": item.get("priority"),
+                "question": str(item.get("question"))[:240],
+            }
+        )
+    if questions:
+        public["interview_questions"] = questions[:8]
+    return public
+
+
+# HR-facing report folder (ranking HTML/XLSX and <appno>.html/.pdf).
+def _report_dir(args: argparse.Namespace, out_dir: Path) -> Path:
+    raw = getattr(args, "report_dir", None)
+    if not raw:
+        return out_dir
+    path = Path(raw)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _generate_reports(
     args: argparse.Namespace, out_dir: Path, rows: list[dict], failures: list[Failure]
 ) -> dict:
-    """Generate per-candidate PDFs and one Excel comparison (unless skipped)."""
+    """Generate per-candidate HTML/PDF and ranking overview (unless skipped)."""
     reports: dict = {}
     if args.skip_reports:
         return reports
+    report_dir = _report_dir(args, out_dir)
     for row in rows:
-        pdf_out = out_dir / f"report-{row['rank']}-{_safe_name(row['name'])}.pdf"
+        stem = candidate_match_stem(row.get("appno") or row.get("display_label") or row["rank"])
+        pdf_out = report_dir / f"{stem}.pdf"
         cmd = [
             PYTHON,
             str(_skill_script("report-gen", "run_report.py")),
@@ -470,13 +534,15 @@ def _generate_reports(
             str(row["_extracted"]),
             "--position",
             args.position,
-            "--name",
-            row["name"],
             "--rank",
             str(row["rank"]),
             "--output",
             str(pdf_out),
         ]
+        if row.get("refno"):
+            cmd += ["--refno", str(row["refno"])]
+        if row.get("appno"):
+            cmd += ["--appno", str(row["appno"])]
         if row.get("_detail"):
             cmd += ["--detail", str(row["_detail"])]
         else:
@@ -492,34 +558,61 @@ def _generate_reports(
         row["_pdf"] = pdf_out
     if not rows:
         return reports
-    comparison_rows = [{k: v for k, v in row.items() if not k.startswith("_")} for row in rows]
+    comparison_rows = [_board_row(row) for row in rows]
     rows_out = out_dir / "rows.json"
     rows_out.write_text(json.dumps(comparison_rows, ensure_ascii=False, indent=2), encoding="utf-8")
-    xlsx_out = out_dir / "comparison.xlsx"
-    cmd = [
+    html_out = report_dir / RANKING_OVERVIEW_HTML
+    html_cmd = [
         PYTHON,
         str(_skill_script("report-gen", "run_report.py")),
-        "comparison",
+        "board",
         "--position",
         args.position,
         "--rows",
         str(rows_out),
         "--output",
-        str(xlsx_out),
+        str(html_out),
     ]
-    attempts, error = _run_with_retries(cmd, args.max_retries)
+    if getattr(args, "refno", None):
+        html_cmd += ["--refno", str(args.refno)]
+    attempts, error = _run_with_retries(html_cmd, args.max_retries)
     if error:
         _record_failure(
             args,
             failures,
-            Failure(source=str(xlsx_out), stage="comparison", attempts=attempts, error_message=error),
+            Failure(source=str(html_out), stage="report-gen", attempts=attempts, error_message=error),
         )
-        return reports
-    reports["comparison_xlsx"] = str(xlsx_out)
+    else:
+        reports["ranking_overview_html"] = str(html_out)
+        reports["screening_board_html"] = str(html_out)
+    for row, public in zip(rows, comparison_rows):
+        stem = candidate_match_stem(row.get("appno") or public.get("appno") or row.get("rank"))
+        match_html = report_dir / f"{stem}.html"
+        row_path = out_dir / f"board-row-{stem}.json"
+        row_path.write_text(json.dumps(public, ensure_ascii=False, indent=2), encoding="utf-8")
+        match_cmd = [
+            PYTHON,
+            str(_skill_script("report-gen", "run_report.py")),
+            "match-html",
+            "--position",
+            args.position,
+            "--row",
+            str(row_path),
+            "--output",
+            str(match_html),
+        ]
+        attempts, error = _run_with_retries(match_cmd, args.max_retries)
+        if error:
+            _record_failure(
+                args,
+                failures,
+                Failure(source=str(match_html), stage="report-gen", attempts=attempts, error_message=error),
+            )
     return reports
 
 
 def _build_manifest(
+    args: argparse.Namespace,
     out_dir: Path,
     jd_source: Path,
     config_out: Path | None,
@@ -543,7 +636,9 @@ def _build_manifest(
         manifest_rows.append(
             {
                 "rank": row["rank"],
-                "name": row["name"],
+                "refno": row.get("refno"),
+                "appno": row.get("appno"),
+                "display_label": row.get("display_label"),
                 "source": row["_source"],
                 "total_score": row["total_score"],
                 "tier": row["tier"],
@@ -556,6 +651,7 @@ def _build_manifest(
     manifest = {
         "status": status,
         "engine": engine,
+        "refno": args.refno,
         "output_dir": str(out_dir),
         "jd_source": str(jd_source),
         "config_json": str(config_out) if config_out else None,
@@ -609,6 +705,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     _enforce_input_policy(args, out_dir)
+    if not args.refno:
+        args.refno = refno_from_url(getattr(args, "jd_url", None)) or getattr(args, "polyu_ref", None)
     _collect_need_input(args)
     downloaded_cvs = _resolve_url_inputs(args, out_dir)
     try:
@@ -654,8 +752,10 @@ def main() -> int:
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
     parser.add_argument("--keep-cvs", action="store_true", help="Keep CVs downloaded from --cv-url after the run.")
     parser.add_argument("--position", default=None, help="Job title shown on reports (required unless --skip-reports).")
-    parser.add_argument("--output-dir", default="data/pipeline_out", help="Directory for intermediate JSONs and reports (default data/pipeline_out).")
-    parser.add_argument("--skip-reports", action="store_true", help="Score/rank only; skip PDF and Excel generation.")
+    parser.add_argument("--refno", default=None, help="Job reference number; together with application no. identifies a candidate (names are never shown).")
+    parser.add_argument("--output-dir", default="data/pipeline_out", help="Directory for intermediate JSONs (default data/pipeline_out).")
+    parser.add_argument("--report-dir", default=None, help="HR-facing report folder for ranking-overview.html and <appno>.html/.pdf (default: same as --output-dir).")
+    parser.add_argument("--skip-reports", action="store_true", help="Score/rank only; skip HTML/PDF/Excel (do not use for HR runs).")
     parser.add_argument("--max-retries", type=int, default=2, metavar="N", help="Retries per candidate step after the first attempt (default 2).")
     parser.add_argument("--resume", action="store_true", help="Skip JD/CV/score steps when usable artifacts already exist in --output-dir.")
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure (legacy behavior).")

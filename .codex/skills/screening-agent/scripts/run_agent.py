@@ -119,6 +119,8 @@ def _pipeline_cmd(args: argparse.Namespace, out_dir: Path, resume: bool) -> list
         cmd += ["--reference-date", args.reference_date]
     if args.position:
         cmd += ["--position", args.position]
+    if getattr(args, "refno", None):
+        cmd += ["--refno", args.refno]
     if args.jd_file:
         cmd += ["--jd-file", args.jd_file]
     elif args.jd_json:
@@ -352,6 +354,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
     parser.add_argument("--keep-cvs", action="store_true", help="Keep CVs downloaded from --cv-url after the run.")
     parser.add_argument("--position", default=None, help="Job title shown on reports.")
+    parser.add_argument("--refno", default=None, help="Job reference number; candidates are labeled by refno/appno, never by name.")
     parser.add_argument("--engine", choices=("legacy", "matching"), default="legacy", help="Scoring engine for pipeline.")
     parser.add_argument("--reference-date", default=None, help="Reference date used by matching engine.")
     parser.add_argument("--output-dir", default="data/pipeline_out", help="Output directory shared with pipeline.")

@@ -14,6 +14,7 @@ _SKILL_SRC_DIRS = (
     ("report-gen", "src"),
     ("polyu-import", "src"),
     ("jas-import", "src"),
+    ("host-envelope", "src"),
 )
 
 

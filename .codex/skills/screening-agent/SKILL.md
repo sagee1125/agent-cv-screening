@@ -51,6 +51,7 @@ python .codex/skills/screening-agent/scripts/run_agent.py \
 | `--extracted <json>` (repeatable) | Pre-parsed candidate profiles |
 | **Execution** | |
 | `--position <title>` | Job title used for reports |
+| `--refno <id>` | Job reference number; ranking and reports use `{refno}/{appno}` and never show names |
 | `--engine <legacy\|matching>` | Pipeline scoring engine |
 | `--skip-reports` | Skip PDF/Excel generation |
 | `--output-dir <dir>` | Shared output directory |
