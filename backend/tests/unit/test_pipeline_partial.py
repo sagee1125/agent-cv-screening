@@ -1,6 +1,7 @@
 """Tests for L1 pipeline partial success, need_input, retries, and resume."""
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import subprocess
@@ -288,3 +289,133 @@ def test_pipeline_all_candidates_failed_is_error(tmp_path, monkeypatch, capsys) 
     assert manifest["status"] == "error"
     assert manifest["candidates"] == []
     assert manifest["failures"][0]["stage"] == "cv-parse"
+
+
+# Unchanged score artifacts reuse existing PDFs instead of calling report-gen again.
+def test_pipeline_skips_unchanged_candidate_reports(tmp_path, monkeypatch) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    report_dir = tmp_path / "hr"
+    out_dir.mkdir()
+    report_dir.mkdir()
+    extracted = out_dir / "extracted-123456.json"
+    score = out_dir / "score-123456.json"
+    extracted.write_text("{}", encoding="utf-8")
+    score.write_text('{"total_score": 80, "tier": "Tier 2"}', encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_retries(cmd, max_retries):
+        calls.append(cmd[2])
+        output = Path(cmd[cmd.index("--output") + 1])
+        output.write_bytes(b"%PDF-fake" if output.suffix == ".pdf" else b"<html></html>")
+        return 1, None
+
+    monkeypatch.setattr(module, "_run_with_retries", fake_retries)
+    args = argparse.Namespace(
+        skip_reports=False,
+        position="Project Associate",
+        engine="legacy",
+        refno="260818001",
+        max_retries=0,
+        fail_fast=False,
+        report_dir=str(report_dir),
+    )
+    row = {
+        "rank": 1,
+        "refno": "260818001",
+        "appno": "123456",
+        "display_label": "260818001/123456",
+        "total_score": 80,
+        "tier": "Tier 2",
+        "_extracted": extracted,
+        "_score": score,
+        "_source": "123456.pdf",
+    }
+    failures: list = []
+    first = module._generate_reports(args, out_dir, [dict(row)], failures)
+    assert calls == ["candidate", "board", "match-html"]
+    assert first["ranking_overview_html"]
+    reused = dict(row)
+    second = module._generate_reports(args, out_dir, [reused], failures)
+    assert calls == ["candidate", "board", "match-html"]
+    assert reused.get("_report_reused") is True
+    assert second["ranking_overview_html"]
+
+
+# Same JD/CV bytes plus --resume skip cv-parser on the second run.
+def test_pipeline_resume_skips_when_input_fingerprint_matches(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text("{}", encoding="utf-8")
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+    argv = [
+        "--jd-json",
+        str(jd),
+        "--cv",
+        str(cv),
+        "--skip-reports",
+        "--resume",
+        "--output-dir",
+        str(out_dir),
+    ]
+    _run_cli(module, argv, monkeypatch, capsys)
+    first_count = len(parse_calls)
+    assert first_count == 1
+    _run_cli(module, argv, monkeypatch, capsys)
+    assert len(parse_calls) == first_count
+
+
+# A changed JD file disables --resume so candidates are parsed again.
+def test_pipeline_resume_rebuilds_when_jd_changes(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text('{"must_skills":[]}', encoding="utf-8")
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+    argv = [
+        "--jd-json",
+        str(jd),
+        "--cv",
+        str(cv),
+        "--skip-reports",
+        "--resume",
+        "--output-dir",
+        str(out_dir),
+    ]
+    _run_cli(module, argv, monkeypatch, capsys)
+    jd.write_text('{"must_skills":["Python"]}', encoding="utf-8")
+    _run_cli(module, argv, monkeypatch, capsys)
+    assert len(parse_calls) == 2
+
+
+# Replacing a CV file rebuilds that candidate even when --resume is set.
+def test_pipeline_resume_rebuilds_replaced_cv(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF-one")
+    jd = tmp_path / "jd.json"
+    jd.write_text("{}", encoding="utf-8")
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+    argv = [
+        "--jd-json",
+        str(jd),
+        "--cv",
+        str(cv),
+        "--skip-reports",
+        "--resume",
+        "--output-dir",
+        str(out_dir),
+    ]
+    _run_cli(module, argv, monkeypatch, capsys)
+    cv.write_bytes(b"%PDF-two")
+    _run_cli(module, argv, monkeypatch, capsys)
+    assert len(parse_calls) == 2

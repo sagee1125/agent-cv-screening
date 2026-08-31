@@ -30,6 +30,7 @@ openpyxl==3.1.5
 # Utils
 python-dotenv==1.0.1
 pyyaml==6.0.2
+truststore==0.10.4
 
 # Testing
 pytest==8.3.4

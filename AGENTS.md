@@ -35,11 +35,17 @@ export function JobCard({ job, ... }) {
 
 ## WorkBuddy / HR screening
 
-When the user says `用 jas-import 离线筛选` plus a folder or URL:
+When HR asks to screen a job in Chinese or English (a JAS records URL, a numeric
+refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a path:
 
 1. `cd` to this repository root.
-2. Run `python .codex/skills/jas-import/scripts/run_jas_screening.py "<folder-or-url>"`.
-3. Do not invent a keyword screener. Do not write `screening_report.html`. Do not pass `--skip-reports`.
-4. Reports go to `Desktop/workbuddy-cv-screen/<refno>/` (not the WorkBuddy session folder). Files: `ranking-overview.html`, `<appno>.html`, `<appno>.pdf`.
-5. Never put candidate names, emails, phones, or salaries in HTML/PDF. Identity is `refno/appno` only.
+2. Run `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder-or-url-or-refno>"`.
+   For a live URL or refno, add `--cookie-file` after JAS access is granted.
+   Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
+3. If there is no refno, link, or folder, do not invent a screener. The CLI returns `need_input` (`refno`). Ask HR in the language they used (or both) for the job reference number or the records page link.
+4. Do not write or edit `screening.html` / `screening_report.html`. Do not add JS parsers or localhost demos. Do not pass `--skip-reports`.
+5. Reports go to `Desktop/workbuddy-cv-screen/<refno>/` (not the WorkBuddy session folder). Files: `ranking-overview.html`, `<appno>.html`, `<appno>.pdf`.
+6. Never put candidate names, emails, phones, or salaries in HTML/PDF. Identity is `refno/appno` only.
+7. Tell HR where the Desktop folder is, in the same language they used. Do not load those files into the chat model.
+   Do not ask HR to name Python scripts.
 

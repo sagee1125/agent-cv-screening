@@ -31,6 +31,12 @@ def format_candidate_label(refno: str | None, appno: str | None) -> str:
     return f"{job}/{application}"
 
 
+# True when the value is a bare JAS job reference number (digits only).
+def is_jas_refno(value: str | None) -> bool:
+    text = (value or "").strip()
+    return bool(text.isdigit() and 6 <= len(text) <= 12)
+
+
 # Read refno from a JAS records URL query string when present.
 def refno_from_url(url: str | None) -> str | None:
     if not url:
@@ -40,8 +46,15 @@ def refno_from_url(url: str | None) -> str | None:
     return text or None
 
 
+# Builds the allowlisted JAS records URL for a job reference number.
+def records_url_for_refno(refno: str) -> str:
+    return f"https://jobs.polyu.edu.hk/internal/records.php?refno={refno.strip()}"
+
+
 __all__ = [
     "appno_from_filename",
     "format_candidate_label",
+    "is_jas_refno",
+    "records_url_for_refno",
     "refno_from_url",
 ]

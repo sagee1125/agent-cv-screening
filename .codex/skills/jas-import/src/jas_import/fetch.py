@@ -12,6 +12,7 @@ import httpx
 from jas_import.records import build_jd_text, parse_job_html
 from jas_import.skill import job_payload_from_html
 from screening_core.input_policy import validate_url
+from screening_core.ssl_verify import resolve_ssl_verify
 
 DEFAULT_TIMEOUT = 30.0
 DOWNLOAD_TIMEOUT = 60.0
@@ -37,27 +38,40 @@ def load_cookie_file(path: str | Path) -> httpx.Cookies:
 
 
 # Performs one authenticated GET while validating every redirect target.
-async def _request(url: str, cookie_file: str | Path | None, timeout: float) -> httpx.Response:
+async def _request(
+    url: str,
+    cookie_file: str | Path | None,
+    timeout: float,
+    allowed_hosts: tuple[str, ...] | None = None,
+) -> httpx.Response:
     cookies = load_cookie_file(cookie_file) if cookie_file else None
-    current_url = validate_url(url, flag="request URL")
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, cookies=cookies) as client:
+    current_url = validate_url(url, flag="request URL", allowed_hosts=allowed_hosts)
+    async with httpx.AsyncClient(
+        timeout=timeout, follow_redirects=False, cookies=cookies, verify=resolve_ssl_verify()
+    ) as client:
         for _redirect in range(MAX_REDIRECTS + 1):
             response = await client.get(current_url)
             if response.is_redirect:
                 location = response.headers.get("location")
                 if not location:
                     raise ValueError(f"redirect response from {current_url} had no location")
-                current_url = validate_url(urljoin(str(response.url), location), flag="redirect URL")
+                current_url = validate_url(urljoin(str(response.url), location), flag="redirect URL", allowed_hosts=allowed_hosts)
                 continue
             response.raise_for_status()
-            validate_url(str(response.url), flag="final response URL")
+            validate_url(str(response.url), flag="final response URL", allowed_hosts=allowed_hosts)
             return response
     raise ValueError(f"too many redirects while fetching {url}")
 
 
 # Fetches an HTML page, optionally authenticated with a local cookie jar.
-async def fetch_html(url: str, *, cookie_file: str | Path | None = None, timeout: float = DEFAULT_TIMEOUT) -> str:
-    response = await _request(url, cookie_file, timeout)
+async def fetch_html(
+    url: str,
+    *,
+    cookie_file: str | Path | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    allowed_hosts: tuple[str, ...] | None = None,
+) -> str:
+    response = await _request(url, cookie_file, timeout, allowed_hosts=allowed_hosts)
     return response.text
 
 
@@ -68,8 +82,9 @@ async def download_to(
     *,
     cookie_file: str | Path | None = None,
     timeout: float = DOWNLOAD_TIMEOUT,
+    allowed_hosts: tuple[str, ...] | None = None,
 ) -> Path:
-    response = await _request(url, cookie_file, timeout)
+    response = await _request(url, cookie_file, timeout, allowed_hosts=allowed_hosts)
     if not response.content:
         raise ValueError(f"empty download from {url}")
     path = Path(dest)
@@ -90,18 +105,30 @@ def html_to_text(raw_html: str) -> str:
 
 
 # Fetches a JAS records page and returns only its structured JD text.
-async def fetch_jd_text(url: str, *, cookie_file: str | Path | None = None) -> str:
-    html = await fetch_html(url, cookie_file=cookie_file)
-    detail = parse_job_html(html)
+async def fetch_jd_text(
+    url: str,
+    *,
+    cookie_file: str | Path | None = None,
+    base_url: str | None = None,
+    allowed_hosts: tuple[str, ...] | None = None,
+) -> str:
+    html = await fetch_html(url, cookie_file=cookie_file, allowed_hosts=allowed_hosts)
+    detail = parse_job_html(html, base_url=base_url)
     if detail.fields:
         return build_jd_text(detail)
     raise ValueError("JAS page did not contain a recognizable job advertisement table")
 
 
 # Fetches a JAS records page and returns the full job payload (JD + candidates).
-async def fetch_job_payload(url: str, *, cookie_file: str | Path | None = None) -> dict[str, Any]:
-    html = await fetch_html(url, cookie_file=cookie_file)
-    payload = job_payload_from_html(html)
+async def fetch_job_payload(
+    url: str,
+    *,
+    cookie_file: str | Path | None = None,
+    base_url: str | None = None,
+    allowed_hosts: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    html = await fetch_html(url, cookie_file=cookie_file, allowed_hosts=allowed_hosts)
+    payload = job_payload_from_html(html, base_url=base_url)
     if not payload.get("refno"):
         raise ValueError(f"URL did not look like a JAS records page: {url}")
     if not (payload.get("jd_text") or "").strip():

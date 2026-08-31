@@ -23,3 +23,12 @@ def test_refno_from_url() -> None:
         == "260818001"
     )
     assert refno_from_url(None) is None
+
+
+# Bare numeric job ids are treated as JAS refnos; records URLs are built from them.
+def test_is_jas_refno_and_records_url() -> None:
+    from screening_core.candidate_id import is_jas_refno, records_url_for_refno
+
+    assert is_jas_refno("260818001")
+    assert not is_jas_refno("abc")
+    assert records_url_for_refno("260818001").endswith("refno=260818001")

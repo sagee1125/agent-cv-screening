@@ -13,9 +13,11 @@ sys.path.insert(0, str(SHARED_SRC))
 
 from screening_core.input_policy import (  # noqa: E402
     InputPolicyError,
+    extra_allowed_hosts_from_env,
     is_data_uri,
     is_http_url,
     looks_like_base64,
+    merge_allowed_hosts,
     validate_path,
     validate_extracted_reference,
     validate_reference,
@@ -148,3 +150,22 @@ def test_detector_helpers() -> None:
     assert is_data_uri("data:text/plain;base64,SGVsbG8=")
     assert looks_like_base64(BASE64_BLOB)
     assert not looks_like_base64(str(Path("data/cv.pdf")))
+
+# JAS_ALLOWED_HOSTS env var adds extra allowlisted hosts.
+def test_extra_allowed_hosts_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("JAS_ALLOWED_HOSTS", "jes-web-demo.vercel.app, example.com")
+    assert extra_allowed_hosts_from_env() == ("jes-web-demo.vercel.app", "example.com")
+    monkeypatch.delenv("JAS_ALLOWED_HOSTS")
+    assert extra_allowed_hosts_from_env() == ()
+
+
+# merge_allowed_hosts de-duplicates and lower-cases host groups.
+def test_merge_allowed_hosts() -> None:
+    merged = merge_allowed_hosts(("Jobs.Polyu.Edu.Hk",), None, ["jes-web-demo.vercel.app", "JOBS.POLYU.EDU.HK"])
+    assert merged == ("jobs.polyu.edu.hk", "jes-web-demo.vercel.app")
+
+
+# Custom allowed_hosts lets a public demo host pass URL validation.
+def test_validate_url_custom_allowed_hosts() -> None:
+    url = "https://jes-web-demo.vercel.app/records.html?refno=2600827001"
+    assert validate_url(url, flag="--records-url", allowed_hosts=("jes-web-demo.vercel.app",)) == url

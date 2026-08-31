@@ -36,6 +36,16 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
 from screening_core.hr_output import RANKING_OVERVIEW_HTML, candidate_match_stem
 from screening_core.input_policy import validate_extracted_reference, validate_path, validate_reference
+from screening_core.report_fingerprint import (
+    board_report_fingerprint,
+    candidate_report_fingerprint,
+    input_run_payload,
+    jd_inputs_changed,
+    load_fingerprints,
+    save_fingerprints,
+    sha256_file,
+    stale_cv_slugs,
+)
 from jas_import.fetch import cv_filename_for_url, download_to, fetch_jd_text
 
 REPO_ROOT = _bootstrap.REPO_ROOT
@@ -131,6 +141,64 @@ def _safe_name(name: str) -> str:
     """Return a filesystem-safe token derived from a candidate name."""
     cleaned = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name).strip("_")
     return cleaned or "candidate"
+
+
+# Deletes cached parse/score JSON for one candidate slug so it is rebuilt.
+def _clear_candidate_artifacts(out_dir: Path, slug: str) -> None:
+    """Remove extracted/score/detail JSON for a slug that must be parsed again."""
+    for prefix in ("extracted-", "score-", "detail-"):
+        (out_dir / f"{prefix}{slug}.json").unlink(missing_ok=True)
+
+
+# Snapshot JD + CV bytes so --resume does not reuse stale parse/score JSON.
+def _input_payload(args: argparse.Namespace) -> dict:
+    """Hash the current JD files and CV/extracted files for resume invalidation."""
+    jd_paths: list[Path | str | None] = [getattr(args, "jd_file", None), getattr(args, "jd_json", None)]
+    used: set[str] = set()
+    cv_hashes: dict[str, str] = {}
+    for source in list(args.cv or []) + list(args.extracted or []):
+        slug = _unique_slug(str(source), used)
+        cv_hashes[slug] = sha256_file(source)
+    return input_run_payload(
+        engine=getattr(args, "engine", None),
+        position=getattr(args, "position", None),
+        refno=getattr(args, "refno", None),
+        jd_paths=jd_paths,
+        cv_hashes=cv_hashes,
+    )
+
+
+# Turn off --resume or drop per-CV cache when JD text or a CV file changed.
+def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
+    """Keep --resume only when JD/engine match; rebuild CVs whose bytes changed."""
+    payload = _input_payload(args)
+    args._input_payload = payload
+    previous = load_fingerprints(out_dir).get("input")
+    prior = previous if isinstance(previous, dict) else {}
+    args._inputs_unchanged = bool(prior) and prior == payload
+    if not args.resume:
+        return
+    if jd_inputs_changed(prior, payload):
+        args.resume = False
+        args._inputs_unchanged = False
+        (out_dir / "jd-parse.json").unlink(missing_ok=True)
+        (out_dir / "config.json").unlink(missing_ok=True)
+        return
+    for slug in stale_cv_slugs(prior, payload):
+        _clear_candidate_artifacts(out_dir, slug)
+        args._inputs_unchanged = False
+
+
+# Merge report + input fingerprints and write report-fingerprints.json.
+def _persist_fingerprints(out_dir: Path, args: argparse.Namespace, extra: dict | None = None) -> None:
+    """Write input and optional report fingerprints next to pipeline JSON."""
+    data = load_fingerprints(out_dir)
+    if extra:
+        data.update(extra)
+    payload = getattr(args, "_input_payload", None)
+    if isinstance(payload, dict):
+        data["input"] = payload
+    save_fingerprints(out_dir, data)
 
 
 def _unique_slug(source: str, used: set[str]) -> str:
@@ -515,6 +583,20 @@ def _report_dir(args: argparse.Namespace, out_dir: Path) -> Path:
     return path
 
 
+# Stable fingerprint for one candidate's PDF/HTML inputs (score JSON + rank).
+def _row_report_fingerprint(args: argparse.Namespace, row: dict) -> str:
+    return candidate_report_fingerprint(
+        engine=getattr(args, "engine", None),
+        position=args.position,
+        refno=row.get("refno") or getattr(args, "refno", None),
+        appno=row.get("appno"),
+        rank=row.get("rank"),
+        total_score=row.get("total_score"),
+        tier=row.get("tier"),
+        artifact_paths=[row.get("_detail"), row.get("_score"), row.get("_extracted")],
+    )
+
+
 def _generate_reports(
     args: argparse.Namespace, out_dir: Path, rows: list[dict], failures: list[Failure]
 ) -> dict:
@@ -523,9 +605,24 @@ def _generate_reports(
     if args.skip_reports:
         return reports
     report_dir = _report_dir(args, out_dir)
+    previous = load_fingerprints(out_dir)
+    previous_candidates = previous.get("candidates") if isinstance(previous.get("candidates"), dict) else {}
+    candidate_fps: dict[str, str] = {}
     for row in rows:
         stem = candidate_match_stem(row.get("appno") or row.get("display_label") or row["rank"])
         pdf_out = report_dir / f"{stem}.pdf"
+        match_html = report_dir / f"{stem}.html"
+        fingerprint = _row_report_fingerprint(args, row)
+        candidate_fps[stem] = fingerprint
+        reusable = (
+            previous_candidates.get(stem) == fingerprint
+            and pdf_out.is_file()
+            and match_html.is_file()
+        )
+        if reusable:
+            row["_pdf"] = pdf_out
+            row["_report_reused"] = True
+            continue
         cmd = [
             PYTHON,
             str(_skill_script("report-gen", "run_report.py")),
@@ -559,33 +656,45 @@ def _generate_reports(
     if not rows:
         return reports
     comparison_rows = [_board_row(row) for row in rows]
-    rows_out = out_dir / "rows.json"
-    rows_out.write_text(json.dumps(comparison_rows, ensure_ascii=False, indent=2), encoding="utf-8")
     html_out = report_dir / RANKING_OVERVIEW_HTML
-    html_cmd = [
-        PYTHON,
-        str(_skill_script("report-gen", "run_report.py")),
-        "board",
-        "--position",
-        args.position,
-        "--rows",
-        str(rows_out),
-        "--output",
-        str(html_out),
-    ]
-    if getattr(args, "refno", None):
-        html_cmd += ["--refno", str(args.refno)]
-    attempts, error = _run_with_retries(html_cmd, args.max_retries)
-    if error:
-        _record_failure(
-            args,
-            failures,
-            Failure(source=str(html_out), stage="report-gen", attempts=attempts, error_message=error),
-        )
-    else:
+    board_fp = board_report_fingerprint(
+        position=args.position,
+        refno=getattr(args, "refno", None),
+        candidate_fingerprints=candidate_fps,
+    )
+    reuse_board = previous.get("board") == board_fp and html_out.is_file()
+    if reuse_board:
         reports["ranking_overview_html"] = str(html_out)
         reports["screening_board_html"] = str(html_out)
+    else:
+        rows_out = out_dir / "rows.json"
+        rows_out.write_text(json.dumps(comparison_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        html_cmd = [
+            PYTHON,
+            str(_skill_script("report-gen", "run_report.py")),
+            "board",
+            "--position",
+            args.position,
+            "--rows",
+            str(rows_out),
+            "--output",
+            str(html_out),
+        ]
+        if getattr(args, "refno", None):
+            html_cmd += ["--refno", str(args.refno)]
+        attempts, error = _run_with_retries(html_cmd, args.max_retries)
+        if error:
+            _record_failure(
+                args,
+                failures,
+                Failure(source=str(html_out), stage="report-gen", attempts=attempts, error_message=error),
+            )
+        else:
+            reports["ranking_overview_html"] = str(html_out)
+            reports["screening_board_html"] = str(html_out)
     for row, public in zip(rows, comparison_rows):
+        if row.get("_report_reused"):
+            continue
         stem = candidate_match_stem(row.get("appno") or public.get("appno") or row.get("rank"))
         match_html = report_dir / f"{stem}.html"
         row_path = out_dir / f"board-row-{stem}.json"
@@ -608,6 +717,15 @@ def _generate_reports(
                 failures,
                 Failure(source=str(match_html), stage="report-gen", attempts=attempts, error_message=error),
             )
+    reused = sum(1 for row in rows if row.get("_report_reused"))
+    reports["reused_pdf_count"] = reused
+    reports["generated_pdf_count"] = max(0, len(rows) - reused)
+    reports["inputs_unchanged"] = bool(getattr(args, "_inputs_unchanged", False) and reuse_board and reused == len(rows))
+    _persist_fingerprints(
+        out_dir,
+        args,
+        {"candidates": candidate_fps, "board": board_fp},
+    )
     return reports
 
 
@@ -659,7 +777,9 @@ def _build_manifest(
         "failures": [item.to_dict() for item in failures],
         "ask": None,
         "reports": reports,
+        "inputs_unchanged": bool((reports or {}).get("inputs_unchanged")),
     }
+    _persist_fingerprints(out_dir, args)
     text = json.dumps(manifest, ensure_ascii=False, indent=2)
     (out_dir / "manifest.json").write_text(text + "\n", encoding="utf-8")
     stream = sys.stdout if exit_code == EXIT_OK else sys.stderr
@@ -709,6 +829,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         args.refno = refno_from_url(getattr(args, "jd_url", None)) or getattr(args, "polyu_ref", None)
     _collect_need_input(args)
     downloaded_cvs = _resolve_url_inputs(args, out_dir)
+    _sync_resume_with_inputs(args, out_dir)
     try:
         failures: list[Failure] = []
         jd_source, jd_text = _resolve_jd_source(args, out_dir)

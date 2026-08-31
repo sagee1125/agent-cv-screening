@@ -111,7 +111,7 @@ def test_html_to_text_fallback() -> None:
 
 # A JAS records page fetched from a URL parses into structured JD text.
 def test_fetch_jd_text_parses_jas_page(monkeypatch) -> None:
-    async def fake_request(url, cookie_file, timeout):
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
         class Response:
             text = mock_records_html()
             content = b""
@@ -125,7 +125,7 @@ def test_fetch_jd_text_parses_jas_page(monkeypatch) -> None:
 
 # A fetched records page returns the full job payload (JD + candidates).
 def test_fetch_job_payload_parses_records_page(monkeypatch) -> None:
-    async def fake_request(url, cookie_file, timeout):
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
         class Response:
             text = mock_records_html()
             content = b""
@@ -141,7 +141,7 @@ def test_fetch_job_payload_parses_records_page(monkeypatch) -> None:
 
 # Non-JAS pages are rejected so candidate-table PII cannot become JD text.
 def test_fetch_jd_text_rejects_page_without_jd_table(monkeypatch) -> None:
-    async def fake_request(url, cookie_file, timeout):
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
         class Response:
             text = "<html><body><p>Requirements: Python and SQL.</p></body></html>"
             content = b""
@@ -170,7 +170,7 @@ def test_fetch_job_payload_rejects_page_without_jd_table(monkeypatch) -> None:
     </body></html>
     """
 
-    async def fake_request(url, cookie_file, timeout):
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
         class Response:
             text = candidate_only_html
             content = b""
@@ -183,7 +183,7 @@ def test_fetch_job_payload_rejects_page_without_jd_table(monkeypatch) -> None:
 
 # download_to writes the fetched bytes to the destination.
 def test_download_to_writes_bytes(tmp_path, monkeypatch) -> None:
-    async def fake_request(url, cookie_file, timeout):
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
         class Response:
             content = b"%PDF-fake"
             text = ""
@@ -197,7 +197,7 @@ def test_download_to_writes_bytes(tmp_path, monkeypatch) -> None:
 
 # Empty downloads are rejected instead of writing empty files.
 def test_download_to_rejects_empty(tmp_path, monkeypatch) -> None:
-    async def fake_request(url, cookie_file, timeout):
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
         class Response:
             content = b""
             text = ""
@@ -345,3 +345,71 @@ def test_run_agent_forwards_url_flags(tmp_path) -> None:
     assert "--cv-url" in cmd and ALLOWED_CV_URL in cmd
     assert "--cookie-file" in cmd
     assert "--scratch-dir" in cmd
+
+# fetch_job_payload threads base_url through so relative CV links resolve to the demo host.
+def test_fetch_job_payload_base_url_resolves_cv_links(monkeypatch) -> None:
+    html = """
+    <html><body>
+    <table class="listTable job-detail-table"><tbody><tr>
+      <td class="f-data-1">1</td>
+      <td class="f-data-1">123456</td>
+      <td class="f-data-1"><a href="/record_detail.php?id=123456&amp;refno=260818001">form</a></td>
+      <td class="f-data-1">TBC</td>
+      <td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td>
+      <td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td>
+      <td class="f-data-1"></td><td class="f-data-1"><a href="/uploads/CV.pdf">cv</a></td><td class="f-data-1"></td>
+    </tr></tbody></table>
+    <p>Job advertisement information</p>
+    <table><tbody>
+      <tr><td class="f-header">Reference number</td><td class="f-data-1">260818001</td></tr>
+      <tr><td class="f-header">Post title</td><td class="f-data-1">Project Associate</td></tr>
+      <tr><td class="f-header">Description</td><td class="f-data-1"><p>Python SQL</p></td></tr>
+    </tbody></table>
+    </body></html>
+    """
+
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None):
+        class Response:
+            text = html
+            content = b""
+        return Response()
+
+    monkeypatch.setattr(fetch, "_request", fake_request)
+    payload = asyncio.run(
+        fetch.fetch_job_payload(
+            "https://jes-web-demo.vercel.app/records.html?refno=260818001",
+            base_url="https://jes-web-demo.vercel.app",
+            allowed_hosts=("jes-web-demo.vercel.app",),
+        )
+    )
+    assert payload["refno"] == "260818001"
+    assert payload["candidates"][0]["cv_url"] == "https://jes-web-demo.vercel.app/uploads/CV.pdf"
+
+
+# _request passes the resolved TLS verify setting to the httpx client.
+def test_request_passes_resolved_ssl_verify(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeClient:
+        # Captures the client construction kwargs for assertions.
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        # Enters the fake async client context.
+        async def __aenter__(self):
+            return self
+
+        # Leaves the fake async client context.
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        # Returns a plain 200 response for the allowlisted URL.
+        async def get(self, url):
+            request = fetch.httpx.Request("GET", url)
+            return fetch.httpx.Response(200, content=b"ok", request=request)
+
+    monkeypatch.setattr(fetch, "resolve_ssl_verify", lambda: False)
+    monkeypatch.setattr(fetch.httpx, "AsyncClient", FakeClient)
+    html = asyncio.run(fetch.fetch_html(ALLOWED_JD_URL))
+    assert html == "ok"
+    assert captured["verify"] is False

@@ -1,12 +1,8 @@
-"""CLI entry point for the jas-import skill (agent-facing).
+"""CLI for jas-import: HR screening by default; parse-list/parse-job/mock for developers.
 
-Subcommands:
-    parse-list   Parse a JAS records list HTML file into a job catalog.
-    parse-job    Parse a JAS records job-detail HTML file into JD text and candidate refs.
-
-Example (from repository root):
-    python .codex/skills/jas-import/scripts/run_jas_import.py parse-list --html-file list.html
-    python .codex/skills/jas-import/scripts/run_jas_import.py parse-job --html-file records.html --output job.json
+Passing a folder, records URL, or refno screens the job and writes Desktop reports.
+parse-job on an exported folder that already has CVs is also treated as screening,
+so WorkBuddy does not stop at JSON.
 """
 from __future__ import annotations
 
@@ -17,8 +13,12 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
-from jas_import.skill import parse_job_skill, parse_list_skill
 from jas_import.mock import generate_mock_jas_dir
+from jas_import.skill import parse_job_skill, parse_list_skill
+from screening_core.hr_output import looks_like_jas_export_dir
+
+DEVELOPER_COMMANDS = {"parse-list", "parse-job", "mock"}
+CV_SUFFIXES = {".pdf", ".doc", ".docx"}
 
 
 # Write the JSON payload to --output or print it to stdout.
@@ -63,9 +63,56 @@ def _run_mock(args: argparse.Namespace) -> int:
     return 0
 
 
-# Build the argparse CLI and dispatch subcommands.
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Parse PolyU JAS records HTML files.")
+# True when a folder already has applicant CV files (offline screening is possible).
+def _folder_has_cvs(folder: Path) -> bool:
+    for name in ("cvs", "uploads"):
+        child = folder / name
+        if not child.is_dir():
+            continue
+        if any(path.is_file() and path.suffix.lower() in CV_SUFFIXES for path in child.iterdir()):
+            return True
+    return False
+
+
+# Read --html-file from parse-job argv without building a full parser.
+def _html_file_arg(argv: list[str]) -> str | None:
+    for index, token in enumerate(argv):
+        if token == "--html-file" and index + 1 < len(argv):
+            return argv[index + 1]
+        if token.startswith("--html-file="):
+            return token.split("=", 1)[1]
+    return None
+
+
+# Screen the export folder instead of JSON-only parse-job when CVs are already there.
+def _screening_target_from_parse_job(argv: list[str]) -> str | None:
+    html = _html_file_arg(argv)
+    if not html:
+        return None
+    folder = Path(html).expanduser().resolve().parent
+    if looks_like_jas_export_dir(folder) and _folder_has_cvs(folder):
+        return str(folder)
+    return None
+
+
+# Hand remaining argv to run_jas_screening.py (Desktop HTML/PDF).
+def _forward_to_screening(argv: list[str]) -> int:
+    script_dir = Path(__file__).resolve().parent
+    if str(script_dir) not in sys.path:
+        sys.path.insert(0, str(script_dir))
+    import run_jas_screening
+
+    saved = sys.argv
+    try:
+        sys.argv = [str(script_dir / "run_jas_screening.py"), *argv]
+        return run_jas_screening.main()
+    finally:
+        sys.argv = saved
+
+
+# Developer-only subcommands: parse-list, parse-job (JSON), mock.
+def _developer_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Parse PolyU JAS records HTML files (developer).")
     sub = parser.add_subparsers(dest="command", required=True)
 
     list_parser = sub.add_parser("parse-list", help="Parse the JAS records list page.")
@@ -85,8 +132,20 @@ def main() -> int:
     mock_parser.add_argument("--output", default=None, help="Optional output JSON file.")
     mock_parser.set_defaults(func=_run_mock)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return args.func(args)
+
+
+# HR default: a folder/URL/refno screens; developer subcommands stay available.
+def main() -> int:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "parse-job":
+        folder = _screening_target_from_parse_job(argv)
+        if folder:
+            return _forward_to_screening([folder])
+    if argv and argv[0] in DEVELOPER_COMMANDS:
+        return _developer_main(argv)
+    return _forward_to_screening(argv)
 
 
 if __name__ == "__main__":

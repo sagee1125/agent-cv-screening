@@ -28,16 +28,23 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
 from jas_import.fetch import download_to, fetch_job_payload
 from jas_import.skill import parse_job_skill
-from screening_core.candidate_id import appno_from_filename
+from screening_core.candidate_id import appno_from_filename, is_jas_refno, records_url_for_refno, refno_from_url
 from screening_core.hr_output import (
+    HR_PACK_FOLDER,
     RANKING_OVERVIEW_HTML,
-    is_internal_output_dir,
     open_hr_file,
     pipeline_work_dir,
     resolve_hr_job_dir,
     safe_pack_id,
 )
-from screening_core.input_policy import validate_path, validate_reference
+from screening_core.report_fingerprint import FINGERPRINTS_NAME
+from screening_core.input_policy import (
+    ALLOWED_URL_HOSTS,
+    extra_allowed_hosts_from_env,
+    merge_allowed_hosts,
+    validate_path,
+    validate_reference,
+)
 
 REPO_ROOT = _bootstrap.REPO_ROOT
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -52,6 +59,58 @@ DEFAULT_CVS_DIR = "cvs"
 CV_DIR_CANDIDATES = ("cvs", "uploads")
 CV_SUFFIXES = (".pdf", ".doc", ".docx")
 SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+ASK_REFNO = (
+    "Please send the job reference number, or paste the internal job records page link.",
+    "請發送崗位參考編號，或貼上內部招聘記錄頁的連結。",
+)
+ASK_JAS_SESSION = (
+    "Please allow access to the internal job records page so this screening can continue.",
+    "請允許存取內部招聘記錄頁，以便繼續篩選。",
+)
+ASK_JD = (
+    "Save the job records page as HTML in the folder, then try again.",
+    "請將崗位記錄頁存成 HTML 放到該資料夾後再試。",
+)
+ASK_CANDIDATES = (
+    "Add each applicant CV as a PDF named with the application number.",
+    "請將每位申請人的 CV 存成以申請編號命名的 PDF。",
+)
+
+
+# Build the effective URL host allowlist: defaults + env + --allow-host flags.
+def _effective_allowed_hosts(args: argparse.Namespace) -> tuple[str, ...]:
+    extra = tuple(getattr(args, "allow_host", []) or [])
+    return merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), extra)
+
+
+# Build the records URL for a refno, honoring a demo --base-url.
+def build_records_url_for_refno(refno: str, base_url: str | None) -> str:
+    if base_url:
+        return f"{base_url.rstrip('/')}/records.html?refno={refno.strip()}"
+    return records_url_for_refno(refno)
+
+
+# Prints a host-projectable need_input envelope and returns exit code 2.
+def _print_need_input(missing: list[str], questions: list[str], **extra: object) -> int:
+    payload = {
+        "status": "need_input",
+        "missing": missing,
+        "questions": questions,
+        "ask": {"missing": missing, "questions": questions},
+        **extra,
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+    return EXIT_NEED_INPUT
+
+
+# True when a live fetch failed because the JAS session is missing or expired.
+def _is_auth_failure(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if "401" in text or "403" in text or "unauthorized" in text or "forbidden" in text:
+        return True
+    status = getattr(exc, "response", None)
+    code = getattr(status, "status_code", None)
+    return code in {401, 403}
 
 
 # Returns a path to a skill CLI script.
@@ -258,11 +317,12 @@ def _run_screening(
 ) -> int:
     position = (job.get("job") or {}).get("post_title") or ""
     refno = str(job.get("refno") or "") or None
-    skip_reports = bool(args.skip_reports)
-    if not args.output_dir or is_internal_output_dir(args.output_dir, repo_root=REPO_ROOT):
-        skip_reports = False
+    skip_reports = False
     job_dir = resolve_hr_job_dir(args.output_dir, refno, repo_root=REPO_ROOT)
     work_dir = pipeline_work_dir(job_dir)
+    # Reuse parse/score JSON on a later run of the same job folder.
+    if (work_dir / FINGERPRINTS_NAME).is_file() or (work_dir / "manifest.json").is_file() or (work_dir / "jas-manifest.json").is_file():
+        args.resume = True
     jd_text_path = work_dir / "jd.txt"
     jd_text_path.write_text(job.get("jd_text", ""), encoding="utf-8")
 
@@ -284,8 +344,14 @@ def _run_screening(
         report_dir=job_dir,
     )
     exit_code, payload = _run_pipeline(cmd)
+    hr_files = (
+        f"Desktop/{HR_PACK_FOLDER}/{job_dir.name}"
+        if job_dir.parent.name == HR_PACK_FOLDER
+        else str(job_dir)
+    )
+    payload = dict(payload)
+    payload["hr_files"] = hr_files
     if download_failures:
-        payload = dict(payload)
         payload["download_failures"] = download_failures
     if exit_code != 0:
         print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
@@ -306,33 +372,12 @@ def run_jas_screening(jas_dir: Path, args: argparse.Namespace) -> int:
         records = _resolve_records_html(jas_dir, args.records_html)
         job = parse_job_skill(records)
     except FileNotFoundError as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "need_input",
-                    "missing": ["records_html"],
-                    "questions": ["Place the HR-exported records.html inside the JAS folder."],
-                    "detail": str(exc),
-                },
-                ensure_ascii=False,
-            )
-        )
-        return EXIT_NEED_INPUT
+        return _print_need_input(["jd"], list(ASK_JD), detail=str(exc))
 
     refno = job.get("refno") or "job"
     cvs = _discover_cvs(jas_dir, args.cvs_dir, args.cv, refno, job)
     if not cvs:
-        print(
-            json.dumps(
-                {
-                    "status": "need_input",
-                    "missing": ["cvs"],
-                    "questions": ["Place candidate CV PDFs (named <appno>.pdf) in the cvs/ folder."],
-                },
-                ensure_ascii=False,
-            )
-        )
-        return EXIT_NEED_INPUT
+        return _print_need_input(["candidates"], list(ASK_CANDIDATES))
     return _run_screening(job, cvs, args)
 
 
@@ -368,16 +413,22 @@ def _remove_scratch_dir(scratch_job: Path, scratch_root: Path) -> None:
 
 # Orchestrates live JAS screening from a records URL (downloads CVs to scratch).
 def run_url_screening(args: argparse.Namespace) -> int:
+    allowed_hosts = _effective_allowed_hosts(args)
+    base_url = getattr(args, "base_url", None)
     try:
-        validate_reference(args.records_url, flag="--records-url")
+        validate_reference(args.records_url, flag="--records-url", allowed_hosts=allowed_hosts)
         if args.cookie_file:
             validate_path(args.cookie_file, flag="--cookie-file")
     except Exception as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return EXIT_ERROR
     try:
-        job = asyncio.run(fetch_job_payload(args.records_url, cookie_file=args.cookie_file))
+        job = asyncio.run(
+            fetch_job_payload(args.records_url, cookie_file=args.cookie_file, base_url=base_url, allowed_hosts=allowed_hosts)
+        )
     except Exception as exc:
+        if _is_auth_failure(exc):
+            return _print_need_input(["jas_session"], list(ASK_JAS_SESSION))
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return EXIT_ERROR
 
@@ -400,7 +451,7 @@ def run_url_screening(args: argparse.Namespace) -> int:
                 continue
             try:
                 appno = _safe_identifier(raw_appno, label="application number")
-                validate_reference(cv_url, flag="candidate cv_url")
+                validate_reference(cv_url, flag="candidate cv_url", allowed_hosts=allowed_hosts)
             except Exception as exc:
                 download_failures.append({"appno": str(raw_appno), "error_message": str(exc)})
                 continue
@@ -409,7 +460,7 @@ def run_url_screening(args: argparse.Namespace) -> int:
                 cvs.append((appno, dest))
                 continue
             try:
-                asyncio.run(download_to(cv_url, dest, cookie_file=args.cookie_file))
+                asyncio.run(download_to(cv_url, dest, cookie_file=args.cookie_file, allowed_hosts=allowed_hosts))
                 cvs.append((appno, dest))
             except Exception as exc:
                 download_failures.append({"appno": appno, "error_message": str(exc)})
@@ -460,10 +511,28 @@ def main() -> int:
     )
     parser.add_argument("--jas-dir", default=None, help="HR-exported JAS folder (records.html + cvs/).")
     parser.add_argument("--records-url", default=None, help="JAS records page URL; CVs are downloaded automatically.")
+    parser.add_argument(
+        "--refno",
+        default=None,
+        help="Job reference number. Builds the internal records URL when no folder or URL is given.",
+    )
     parser.add_argument("--records-html", default=None, help="Optional explicit path to records.html.")
     parser.add_argument("--cvs-dir", default=None, help="CV folder name inside jas-dir (default cvs).")
     parser.add_argument("--cv", action="append", default=[], metavar="FILE", help="Extra CV files outside the folder.")
     parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt for authenticated fetches.")
+    parser.add_argument("--no-cookie", action="store_true", help="Allow unauthenticated --records-url fetches for public demo hosts.")
+    parser.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        metavar="HOST",
+        help="Extra allowlisted URL host (repeatable; public demo hosts).",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Base URL for CV link resolution and refno URL building (public demo).",
+    )
     parser.add_argument("--keep-cvs", action="store_true", help="Keep downloaded CVs in --scratch-dir after the run.")
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Root directory for downloaded CVs.")
     parser.add_argument(
@@ -496,14 +565,24 @@ def main() -> int:
             parser.error("use either a positional folder/URL or --jas-dir/--records-url, not both")
         if _looks_like_records_url(args.target):
             args.records_url = _normalize_records_url(args.target)
+        elif is_jas_refno(args.target):
+            args.refno = args.target.strip()
         else:
             args.jas_dir = args.target
+    if args.refno and not is_jas_refno(str(args.refno)):
+        print(json.dumps({"status": "error", "error_message": "invalid job reference number"}, ensure_ascii=False), file=sys.stderr)
+        return EXIT_ERROR
+    if args.records_url and not args.refno:
+        args.refno = refno_from_url(args.records_url)
+    if args.refno and not args.records_url and not args.jas_dir:
+        args.records_url = build_records_url_for_refno(str(args.refno), args.base_url)
     if args.records_url:
+        if not args.cookie_file and not args.no_cookie:
+            return _print_need_input(["jas_session"], list(ASK_JAS_SESSION))
         return run_url_screening(args)
     if args.jas_dir:
         return run_jas_screening(Path(args.jas_dir), args)
-    parser.error("provide a JAS folder or a records URL")
-    return EXIT_ERROR
+    return _print_need_input(["refno"], list(ASK_REFNO))
 
 
 if __name__ == "__main__":

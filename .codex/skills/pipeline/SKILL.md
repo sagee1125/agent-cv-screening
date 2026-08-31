@@ -47,7 +47,7 @@ python .codex/skills/pipeline/scripts/run_pipeline.py \
 | `--output-dir <dir>`              | Output directory for intermediate JSONs and reports (default `data/pipeline_out`)                                                       |
 | **L1 reliability**                |                                                                                                                                         |
 | `--max-retries <N>`               | Extra attempts per candidate step after the first (default `2`)                                                                         |
-| `--resume`                        | Skip JD parse / CV parse / score when usable artifacts already exist in `--output-dir`                                                  |
+| `--resume`                        | Skip JD parse / CV parse / score when usable JSON exists **and** JD/CV bytes match the last run. If the JD or a CV file changed, cache is rebuilt. Unchanged PDFs/HTML are skipped by fingerprint even without this flag |
 | `--fail-fast`                     | Abort the batch on the first per-candidate failure (legacy all-or-nothing behavior)                                                     |
 
 ## What it runs
@@ -108,7 +108,7 @@ stdout prints a JSON manifest:
 - `--jd-json` from `polyu fetch-and-parse` supplies its `jd_text` as CV context; from `jd-parser` there is no original text, so no JD context is passed to cv-parser.
 - `--polyu-detail-url` is only accepted together with `--polyu-ref` (catalog fallback); it cannot be combined with `--jd-file` or `--jd-json`.
 - Per-candidate steps (CV parse, score/match, PDF) retry `--max-retries` extra times; JD fetch/parse and `build-config` remain batch-hard failures.
-- `--resume` skips a step when the target JSON in `--output-dir` already loads as an object.
+- `--resume` skips a step when the target JSON in `--output-dir` already loads as an object **and** the JD/CV input fingerprint matches the last run. A changed JD disables resume; a replaced CV file rebuilds only that candidate.
 - No DB writes, no REST API calls — this is the offline equivalent of the web demo flow.
 
 ## Offline example (no LLM, no network)
