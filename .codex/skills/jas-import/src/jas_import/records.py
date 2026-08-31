@@ -249,12 +249,16 @@ def _key_value_rows(table: dict[str, Any]) -> list[tuple[str, str]]:
     return fields
 
 
+# Plain-text status label to canonical HR status (clickable labels are links).
+_STATUS_LABELS = (("TBC", "TBC"), ("P", "P"), ("S", "S"), ("N", "N"), ("T", "TBC"))
+
+
 # Derive the current HR status as the plain-text label (clickable labels are links).
 def _current_status(cell: dict[str, Any]) -> str | None:
     plain = _text(cell)
-    for token in ("TBC", "P", "S", "N"):
+    for token, value in _STATUS_LABELS:
         if re.search(rf"\b{re.escape(token)}\b", plain):
-            return token
+            return value
     return None
 
 

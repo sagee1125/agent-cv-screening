@@ -145,10 +145,13 @@ def build_job_description(listing: PolyUListing, detail_text: str) -> str:
 async def fetch_polyu_html(url: str) -> str:
     import httpx
 
+    from screening_core.ssl_verify import resolve_ssl_verify
+
     async with httpx.AsyncClient(
         timeout=30.0,
         follow_redirects=True,
         headers={"User-Agent": _USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+        verify=resolve_ssl_verify(),
     ) as client:
         response = await client.get(url)
         response.raise_for_status()

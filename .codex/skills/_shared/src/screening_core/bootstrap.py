@@ -15,6 +15,7 @@ _SKILL_SRC_DIRS = (
     ("polyu-import", "src"),
     ("jas-import", "src"),
     ("host-envelope", "src"),
+    ("webridge-collect", "src"),
 )
 
 

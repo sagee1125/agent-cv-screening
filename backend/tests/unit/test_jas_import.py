@@ -200,3 +200,13 @@ def test_parse_real_hr_sample_files() -> None:
     assert job_payload["refno"] == "190001010"
     assert job_payload["candidates"][0]["appno"] == "123456"
     assert job_payload["candidates"][0]["status"] == "TBC"
+
+
+# A status cell showing only "T" (other labels are links) maps to TBC.
+def test_parse_job_status_single_t_maps_to_tbc() -> None:
+    html = JOB_HTML.replace(
+        'TBC <a href="https://jobs.polyu.edu.hk/internal/records.php?appno=123456&amp;refno=190001010&amp;appstatus=P">P</a>',
+        'T <a href="https://jobs.polyu.edu.hk/internal/records.php?appno=123456&amp;refno=190001010&amp;appstatus=P">P</a>',
+    )
+    detail = parse_job_html(html)
+    assert detail.candidates[0].status == "TBC"

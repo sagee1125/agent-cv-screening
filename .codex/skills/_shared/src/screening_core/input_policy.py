@@ -1,12 +1,39 @@
 # Enforces the PII-safe input contract: accept only file paths or allowlisted URLs.
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-ALLOWED_URL_HOSTS = ("jobs.polyu.edu.hk",)
+_DEFAULT_ALLOWED_HOSTS = ("jobs.polyu.edu.hk",)
+
+
+# Returns extra allowlisted URL hosts from the JAS_ALLOWED_HOSTS env var.
+def extra_allowed_hosts_from_env(env_name: str = "JAS_ALLOWED_HOSTS") -> tuple[str, ...]:
+    raw = os.environ.get(env_name, "")
+    return tuple(host.strip().lower() for host in raw.split(",") if host.strip())
+
+
+# Merges host groups, de-duplicated and lower-cased, preserving order.
+def merge_allowed_hosts(*groups: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    seen: list[str] = []
+    for group in groups:
+        for host in group or ():
+            text = str(host).strip().lower()
+            if text and text not in seen:
+                seen.append(text)
+    return tuple(seen)
+
+
+# Effective default allowlist: built-in host plus any env-configured hosts.
+ALLOWED_URL_HOSTS = merge_allowed_hosts(_DEFAULT_ALLOWED_HOSTS, extra_allowed_hosts_from_env())
 MAX_REFERENCE_LENGTH = 8192
+
+
+# Returns the effective host allowlist (None means the default allowlist).
+def _resolve_allowed_hosts(allowed_hosts: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    return ALLOWED_URL_HOSTS if allowed_hosts is None else tuple(allowed_hosts)
 CONTRACT_MESSAGE = (
     "This skill only accepts file paths or http(s) URLs. "
     "Do not parse file content and pass it in; inline content (base64/text) is refused."
@@ -54,14 +81,20 @@ def validate_path(value: str, *, flag: str = "input") -> str:
 
 
 # Validates and normalizes an http(s) URL reference against the host allowlist.
-def validate_url(value: str, *, flag: str = "input", allowed_hosts: tuple[str, ...] = ALLOWED_URL_HOSTS) -> str:
+def validate_url(
+    value: str,
+    *,
+    flag: str = "input",
+    allowed_hosts: tuple[str, ...] | list[str] | None = ALLOWED_URL_HOSTS,
+) -> str:
+    hosts = _resolve_allowed_hosts(allowed_hosts)
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower()
     if parsed.scheme not in ("http", "https") or not host:
         raise InputPolicyError(f"{flag} is not an http(s) URL. {CONTRACT_MESSAGE}", reason="bad-url")
-    if allowed_hosts and host not in allowed_hosts:
+    if hosts and host not in hosts:
         raise InputPolicyError(
-            f"{flag} host '{host}' is not allowlisted (allowed: {', '.join(allowed_hosts)}). {CONTRACT_MESSAGE}",
+            f"{flag} host '{host}' is not allowlisted (allowed: {', '.join(hosts)}). {CONTRACT_MESSAGE}",
             reason="host-not-allowlisted",
         )
     return value
@@ -133,9 +166,11 @@ __all__ = [
     "ALLOWED_URL_HOSTS",
     "CONTRACT_MESSAGE",
     "InputPolicyError",
+    "extra_allowed_hosts_from_env",
     "is_data_uri",
     "is_http_url",
     "looks_like_base64",
+    "merge_allowed_hosts",
     "validate_extracted_reference",
     "validate_path",
     "validate_reference",

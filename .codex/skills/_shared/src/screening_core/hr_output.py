@@ -61,11 +61,26 @@ def is_host_session_dir(path: Path | str | None) -> bool:
     return bool(_HOST_SESSION_NAME.match(target.name))
 
 
-# True when --output-dir is a repo/session path WorkBuddy should not use for HR files.
+# True when the path is an HR-exported JAS folder (reports must not be written here).
+def looks_like_jas_export_dir(path: Path | str | None) -> bool:
+    if not path:
+        return False
+    target = Path(path)
+    if not target.is_dir():
+        return False
+    records_names = ("records.html", "Job Application Recordsrecords.html", "records.php.html")
+    if any((target / name).is_file() for name in records_names):
+        return True
+    return (target / "cvs").is_dir() or (target / "uploads").is_dir()
+
+
+# True when --output-dir is a repo/session/export path WorkBuddy should not use for HR files.
 def is_internal_output_dir(path: Path | str | None, *, repo_root: Path | None = None) -> bool:
     if not path:
         return False
     if is_host_session_dir(path):
+        return True
+    if looks_like_jas_export_dir(path):
         return True
     target = Path(path)
     if repo_root is not None:
@@ -129,6 +144,7 @@ __all__ = [
     "default_hr_pack_root",
     "is_host_session_dir",
     "is_internal_output_dir",
+    "looks_like_jas_export_dir",
     "open_hr_file",
     "pipeline_work_dir",
     "resolve_hr_job_dir",

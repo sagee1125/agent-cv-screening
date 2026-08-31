@@ -57,6 +57,9 @@ def _url_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
     values = {
         "records_url": ALLOWED_URL,
         "cookie_file": None,
+        "no_cookie": False,
+        "allow_host": [],
+        "base_url": None,
         "keep_cvs": False,
         "scratch_dir": str(tmp_path / "scratch"),
         "output_dir": str(tmp_path / "out"),
@@ -75,10 +78,10 @@ def _url_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
 def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return _job_payload()
 
-    async def fake_download(url, dest, cookie_file=None):
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
         return Path(dest)
 
@@ -114,10 +117,10 @@ def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, caps
 def test_run_url_screening_keep_cvs_retains(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return _job_payload()
 
-    async def fake_download(url, dest, cookie_file=None):
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
         return Path(dest)
 
@@ -138,10 +141,10 @@ def test_run_url_screening_keep_cvs_retains(tmp_path, monkeypatch, capsys) -> No
 def test_run_url_screening_no_cv_error_cleans(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return _job_payload()
 
-    async def fake_download(url, dest, cookie_file=None):
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
         raise RuntimeError("network down")
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
@@ -162,7 +165,7 @@ def test_run_url_screening_rejects_disallowed_host(tmp_path, monkeypatch, capsys
     module = _import_screening_module()
     called: list[str] = []
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         called.append(url)
         return _job_payload()
 
@@ -183,10 +186,10 @@ def test_run_url_screening_rejects_disallowed_candidate_url(tmp_path, monkeypatc
     job["candidates"] = [{**job["candidates"][0], "cv_url": "https://evil.example.com/cv.pdf"}]
     downloaded: list[str] = []
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return job
 
-    async def fake_download(url, dest, cookie_file=None):
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
         downloaded.append(url)
         return Path(dest)
 
@@ -204,7 +207,7 @@ def test_run_url_screening_rejects_disallowed_candidate_url(tmp_path, monkeypatc
 def test_run_url_screening_rejects_unsafe_refno(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return _job_payload("../escaped")
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
@@ -220,10 +223,10 @@ def test_run_url_screening_rejects_unsafe_refno(tmp_path, monkeypatch, capsys) -
 def test_run_url_screening_reports_partial_download_failures(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return _job_payload()
 
-    async def fake_download(url, dest, cookie_file=None):
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
         if "654321" in url:
             raise RuntimeError("network down")
         Path(dest).write_bytes(b"%PDF")
@@ -250,11 +253,13 @@ def test_run_url_screening_reports_partial_download_failures(tmp_path, monkeypat
 # The CLI dispatches --records-url to the live URL mode end-to-end.
 def test_main_url_mode_dispatches(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
 
-    async def fake_fetch(url, cookie_file=None):
+    async def fake_fetch(url, cookie_file=None, **kwargs):
         return _job_payload()
 
-    async def fake_download(url, dest, cookie_file=None):
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
         return Path(dest)
 
@@ -268,6 +273,8 @@ def test_main_url_mode_dispatches(tmp_path, monkeypatch, capsys) -> None:
             module.__file__,
             "--records-url",
             ALLOWED_URL,
+            "--cookie-file",
+            str(jar),
             "--output-dir",
             str(tmp_path / "out"),
             "--scratch-dir",
@@ -283,3 +290,99 @@ def test_main_url_mode_dispatches(tmp_path, monkeypatch, capsys) -> None:
     payload = json.loads(captured.out)
     assert payload["status"] == "success"
     assert not (tmp_path / "scratch" / "260818001").exists()
+
+
+# A 401/403 from JAS asks HR to grant session access again.
+def test_run_url_screening_auth_failure_is_need_input(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+
+    async def fake_fetch(url, cookie_file=None, **kwargs):
+        raise RuntimeError("401 Unauthorized")
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    exit_code = module.run_url_screening(_url_args(tmp_path))
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == module.EXIT_NEED_INPUT
+    assert payload["missing"] == ["jas_session"]
+
+# Build a demo-style records URL for the public jes-web-demo.vercel.app host.
+DEMO_BASE_URL = "https://jes-web-demo.vercel.app"
+
+
+# --base-url builds a demo records URL from a bare refno.
+def test_build_records_url_for_refno_base_url() -> None:
+    module = _import_screening_module()
+    assert (
+        module.build_records_url_for_refno("2600827001", DEMO_BASE_URL)
+        == "https://jes-web-demo.vercel.app/records.html?refno=2600827001"
+    )
+    assert (
+        module.build_records_url_for_refno("2600827001", None)
+        == "https://jobs.polyu.edu.hk/internal/records.php?refno=2600827001"
+    )
+
+
+# A public demo host works when allowlisted via --allow-host with --no-cookie.
+def test_run_url_screening_demo_host_allowed(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+    captured: dict = {}
+
+    async def fake_fetch(url, cookie_file=None, **kwargs):
+        captured["kwargs"] = kwargs
+        return _job_payload()
+
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
+        Path(dest).write_bytes(b"%PDF")
+        return Path(dest)
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
+
+    args = _url_args(
+        tmp_path,
+        records_url=f"{DEMO_BASE_URL}/records.html?refno=2600827001",
+        no_cookie=True,
+        allow_host=["jes-web-demo.vercel.app"],
+        base_url=DEMO_BASE_URL,
+    )
+    exit_code = module.run_url_screening(args)
+    capsys.readouterr()
+
+    assert exit_code == module.EXIT_OK
+    assert captured["kwargs"]["base_url"] == DEMO_BASE_URL
+    assert "jes-web-demo.vercel.app" in captured["kwargs"]["allowed_hosts"]
+    assert not (tmp_path / "scratch" / "2600827001").exists()
+
+
+# main() accepts a bare refno for the public demo without a cookie jar.
+def test_main_refno_with_base_url_no_cookie(monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+    captured: dict = {}
+
+    def fake_run_url_screening(args):
+        captured["records_url"] = args.records_url
+        captured["base_url"] = args.base_url
+        captured["allow_host"] = args.allow_host
+        return module.EXIT_OK
+
+    monkeypatch.setattr(module, "run_url_screening", fake_run_url_screening)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            module.__file__,
+            "2600827001",
+            "--base-url",
+            DEMO_BASE_URL,
+            "--allow-host",
+            "jes-web-demo.vercel.app",
+            "--no-cookie",
+        ],
+    )
+    exit_code = module.main()
+    capsys.readouterr()
+
+    assert exit_code == module.EXIT_OK
+    assert captured["records_url"] == f"{DEMO_BASE_URL}/records.html?refno=2600827001"
+    assert captured["allow_host"] == ["jes-web-demo.vercel.app"]

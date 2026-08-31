@@ -145,7 +145,8 @@ def test_run_jas_screening_need_input_when_no_cvs(tmp_path, capsys) -> None:
     assert exit_code == module.EXIT_NEED_INPUT
     payload = json.loads(captured.out)
     assert payload["status"] == "need_input"
-    assert payload["missing"] == ["cvs"]
+    assert payload["missing"] == ["candidates"]
+    assert payload["ask"]["missing"] == ["candidates"]
 
 
 # Run the full offline flow and delegate to the pipeline with the right args.
@@ -208,7 +209,7 @@ def test_internal_output_dir_and_skip_reports_redirect_to_desktop(tmp_path, monk
     monkeypatch.setattr(module, "_run_pipeline", fake_run_pipeline)
     monkeypatch.setattr("screening_core.hr_output.user_desktop", lambda: desktop)
 
-    args = _args(tmp_path, output_dir="data/jas_out", skip_reports=True, no_open=True)
+    args = _args(tmp_path, output_dir=str(jas_dir), skip_reports=True, no_open=True)
     exit_code = module.run_jas_screening(jas_dir, args)
     capsys.readouterr()
 
@@ -226,6 +227,54 @@ def test_looks_like_records_url() -> None:
     assert module._looks_like_records_url("www.jobs.polyu.edu.hk/internal/records.php?refno=1")
     assert not module._looks_like_records_url(r"C:\Users\User\Desktop\jasweb\mock")
     assert module._normalize_records_url("www.jobs.polyu.edu.hk/x").startswith("https://")
+
+
+# No folder/URL/refno returns a host-projectable need_input envelope.
+def test_main_need_input_when_refno_missing(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
+    assert module.main() == module.EXIT_NEED_INPUT
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "need_input"
+    assert payload["missing"] == ["refno"]
+    questions = payload["ask"]["questions"]
+    assert any("reference number" in q.lower() for q in questions)
+    assert any("參考編號" in q or "崗位" in q for q in questions)
+
+
+# Live URL/refno without a cookie jar asks for JAS session access.
+def test_main_need_input_when_jas_session_missing(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "260818001"])
+    assert module.main() == module.EXIT_NEED_INPUT
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["missing"] == ["jas_session"]
+
+
+# A bare refno is turned into the allowlisted records URL before live fetch.
+def test_main_refno_builds_records_url(tmp_path, monkeypatch, capsys) -> None:
+    captured: list[argparse.Namespace] = []
+
+    def fake_url(args: argparse.Namespace) -> int:
+        captured.append(args)
+        return 0
+
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setattr(module, "run_url_screening", fake_url)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--refno", "260818001", "--cookie-file", str(jar)])
+    assert module.main() == 0
+    capsys.readouterr()
+    assert captured
+    assert "refno=260818001" in captured[0].records_url
+
+
+# Missing records.html asks for the JD source, not an internal filename code.
+def test_run_jas_screening_need_input_when_no_records(tmp_path, capsys) -> None:
+    jas_dir = tmp_path / "empty"
+    jas_dir.mkdir()
+    exit_code = module.run_jas_screening(jas_dir, _args(tmp_path))
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == module.EXIT_NEED_INPUT
+    assert payload["missing"] == ["jd"]
 
 
 # Successful runs open ranking-overview.html unless --no-open.
@@ -255,3 +304,24 @@ def test_discover_uploads_maps_cv_url_to_appno(tmp_path) -> None:
     }
     found = module._discover_cvs(jas_dir, None, [], "2600827001", job)
     assert found == [("2600827001", uploads / "CV_Daniel_Nguyen.pdf")]
+
+# A second screening of the same job folder enables --resume without HR flags.
+def test_second_run_auto_enables_resume(tmp_path, monkeypatch, capsys) -> None:
+    jas_dir = tmp_path / "job"
+    cvs = jas_dir / "cvs"
+    cvs.mkdir(parents=True)
+    (jas_dir / "records.html").write_text(JOB_HTML, encoding="utf-8")
+    (cvs / "123456.pdf").write_bytes(b"%PDF")
+    captured_cmd: list[list[str]] = []
+
+    def fake_run_pipeline(cmd):
+        captured_cmd.append(cmd)
+        return 0, {"status": "success", "candidates": []}
+
+    monkeypatch.setattr(module, "_run_pipeline", fake_run_pipeline)
+    module.run_jas_screening(jas_dir, _args(tmp_path, resume=False, no_open=True))
+    module.run_jas_screening(jas_dir, _args(tmp_path, resume=False, no_open=True))
+    capsys.readouterr()
+    assert "--resume" not in captured_cmd[0]
+    assert "--resume" in captured_cmd[1]
+

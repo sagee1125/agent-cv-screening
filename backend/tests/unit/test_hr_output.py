@@ -44,6 +44,24 @@ def test_repo_data_dir_uses_desktop(monkeypatch, tmp_path) -> None:
     assert is_internal_output_dir("data/jas_out", repo_root=repo)
     job = resolve_hr_job_dir("data/jas_out", "2600827001", repo_root=repo)
     assert job == desktop / HR_PACK_FOLDER / "2600827001"
+
+
+# An exported JAS folder must not be used as the report output directory.
+def test_jas_export_folder_as_output_dir_uses_desktop(monkeypatch, tmp_path) -> None:
+    from screening_core.hr_output import looks_like_jas_export_dir
+
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    export = tmp_path / "jasweb-mock"
+    export.mkdir()
+    (export / "records.html").write_text("<html></html>", encoding="utf-8")
+    monkeypatch.setattr("screening_core.hr_output.user_desktop", lambda: desktop)
+    assert looks_like_jas_export_dir(export)
+    job = resolve_hr_job_dir(str(export), "2600827001")
+    assert job == desktop / HR_PACK_FOLDER / "2600827001"
+
+
+# An explicit non-internal folder still nests the job refno.
 def test_explicit_output_dir_nests_refno(tmp_path) -> None:
     parent = tmp_path / "hr-out"
     job = resolve_hr_job_dir(str(parent), "260818001")

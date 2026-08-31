@@ -1,0 +1,114 @@
+# Thin HTTP client for the Kimi WebBridge local daemon (http://127.0.0.1:10086).
+from __future__ import annotations
+
+import base64
+import json
+from typing import Any
+
+import httpx
+
+DEFAULT_DAEMON_URL = "http://127.0.0.1:10086"
+DEFAULT_SESSION = "jes-demo-screen"
+CV_CHUNK_BYTES = 512 * 1024
+
+
+# Raised when the WebBridge daemon rejects a command or is unreachable.
+class WebBridgeError(RuntimeError):
+    def __init__(self, message: str, *, reason: str = "webbridge") -> None:
+        """Record a machine-readable reason alongside the human message."""
+        self.reason = reason
+        super().__init__(message)
+
+
+# Client for the WebBridge daemon: one POST /command per browser action.
+class WebBridgeClient:
+    # Bind one client to a daemon URL and a session (tab group) name.
+    def __init__(self, *, daemon_url: str = DEFAULT_DAEMON_URL, session: str = DEFAULT_SESSION, timeout: float = 120.0) -> None:
+        self.daemon_url = daemon_url.rstrip("/")
+        self.session = session
+        self.timeout = timeout
+
+    # POST one command and return the parsed JSON body.
+    def command(self, action: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"action": action, "session": self.session}
+        if args:
+            payload["args"] = args
+        try:
+            response = httpx.post(f"{self.daemon_url}/command", json=payload, timeout=self.timeout)
+        except httpx.HTTPError as exc:
+            raise WebBridgeError(
+                f"Kimi WebBridge daemon unreachable at {self.daemon_url} ({exc.__class__.__name__}). "
+                'Start it with: & "$env:USERPROFILE\\.kimi-webbridge\\bin\\kimi-webbridge.exe" start',
+                reason="daemon-unreachable",
+            ) from exc
+        if response.status_code >= 400:
+            raise WebBridgeError(
+                f"WebBridge daemon returned HTTP {response.status_code}: {response.text[:200]}",
+                reason="daemon-error",
+            )
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            raise WebBridgeError(
+                f"WebBridge daemon returned non-JSON: {response.text[:200]}",
+                reason="daemon-error",
+            ) from exc
+        if isinstance(data, dict) and data.get("success") is False:
+            raise WebBridgeError(str(data.get("error") or data.get("message") or data), reason="command-failed")
+        return data
+
+    # Open a URL in a tab and label the tab group for this task.
+    def navigate(self, url: str, *, new_tab: bool = True, group_title: str | None = None) -> dict[str, Any]:
+        args: dict[str, Any] = {"url": url, "newTab": new_tab}
+        if group_title:
+            args["group_title"] = group_title
+        return self.command("navigate", args)
+
+    # Run JS in the current tab and return its JSON-encodable value.
+    def evaluate(self, code: str) -> Any:
+        data = self.command("evaluate", {"code": code})
+        if not isinstance(data, dict) or "value" not in data:
+            raise WebBridgeError(f"evaluate returned no value: {data}", reason="evaluate-no-value")
+        return data["value"]
+
+    # Return the full rendered outerHTML of the current tab.
+    def page_html(self) -> str:
+        return str(self.evaluate("document.documentElement.outerHTML"))
+
+    # Fetch a URL inside the browser (carries its login session) and return bytes.
+    def fetch_bytes(self, url: str) -> bytes:
+        meta = self.evaluate(
+            "(async () => { const r = await fetch(%r); const b = await r.arrayBuffer(); "
+            "window.__wbcv = { u: new Uint8Array(b), pos: 0, total: b.byteLength, status: r.status, ok: r.ok }; "
+            "return { ok: r.ok, status: r.status, total: b.byteLength }; })()" % url
+        )
+        if not isinstance(meta, dict) or not meta.get("ok"):
+            raise WebBridgeError(f"browser fetch failed for {url}: {meta}", reason="download-failed")
+        chunks: list[str] = []
+        for _ in range(int(meta.get("total", 0)) // CV_CHUNK_BYTES + 1):
+            part = self.evaluate(
+                "(function(){ const s = window.__wbcv; if (!s) return { error: 'no buffer' }; "
+                "const CH = %d; const end = Math.min(s.pos + CH, s.total); let bin = ''; "
+                "for (let i = s.pos; i < end; i++) bin += String.fromCharCode(s.u[i]); "
+                "s.pos = end; return { done: s.pos >= s.total, pos: s.pos, total: s.total, chunk: btoa(bin) }; })()"
+                % CV_CHUNK_BYTES
+            )
+            if not isinstance(part, dict) or "chunk" not in part:
+                raise WebBridgeError(f"browser CV chunk failed: {part}", reason="download-failed")
+            chunks.append(part["chunk"])
+            if part.get("done"):
+                break
+        return base64.b64decode("".join(chunks))
+
+    # Close every tab this session opened.
+    def close_session(self) -> None:
+        self.command("close_session")
+
+
+__all__ = [
+    "CV_CHUNK_BYTES",
+    "DEFAULT_DAEMON_URL",
+    "DEFAULT_SESSION",
+    "WebBridgeClient",
+    "WebBridgeError",
+]
