@@ -12,6 +12,7 @@ import run_jas_screening as screening  # same-dir URL helpers
 
 from jas_import.fetch import fetch_job_payload
 from screening_core.candidate_id import is_jas_refno, refno_from_url
+from screening_core.demo_mode import apply_demo_defaults
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
 from screening_core.job_state import (
     current_snapshot,
@@ -73,6 +74,7 @@ def main() -> int:
     parser.add_argument("--state-dir", default=None, help="Job-state directory (default repo data/jas_state).")
     parser.add_argument("--no-store", action="store_true", help="Report changes without updating stored state.")
     args = parser.parse_args()
+    apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
 
     refno = args.refno
     records_url = args.records_url

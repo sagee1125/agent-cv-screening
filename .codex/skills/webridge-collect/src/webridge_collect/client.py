@@ -53,8 +53,19 @@ class WebBridgeClient:
                 f"WebBridge daemon returned non-JSON: {response.text[:200]}",
                 reason="daemon-error",
             ) from exc
-        if isinstance(data, dict) and data.get("success") is False:
-            raise WebBridgeError(str(data.get("error") or data.get("message") or data), reason="command-failed")
+        # The daemon wraps responses as {"ok": true, "data": {...}} and errors as
+        # {"ok": false, "error": {code, message}}; unwrap them for the callers.
+        if isinstance(data, dict):
+            if data.get("ok") is False:
+                error = data.get("error") or {}
+                raise WebBridgeError(
+                    str(error.get("message") or data),
+                    reason=str(error.get("code") or "command-failed"),
+                )
+            if data.get("success") is False:
+                raise WebBridgeError(str(data.get("error") or data.get("message") or data), reason="command-failed")
+            if isinstance(data.get("data"), dict):
+                return data["data"]
         return data
 
     # Open a URL in a tab and label the tab group for this task.

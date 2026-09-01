@@ -38,6 +38,7 @@ from screening_core.hr_output import (
     safe_pack_id,
 )
 from screening_core.job_state import load_job_state, record_screen_run, save_job_state
+from screening_core.demo_mode import apply_demo_defaults
 from screening_core.report_fingerprint import FINGERPRINTS_NAME
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
@@ -604,6 +605,7 @@ def main() -> int:
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure.")
     parser.add_argument("--max-retries", type=int, default=2, help="Extra attempts per candidate step.")
     args = parser.parse_args()
+    apply_demo_defaults(args, repo_root=REPO_ROOT)
     if args.target:
         if args.jas_dir or args.records_url:
             parser.error("use either a positional folder/URL or --jas-dir/--records-url, not both")
