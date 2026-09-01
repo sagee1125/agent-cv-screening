@@ -51,12 +51,64 @@ def _changed_payload() -> dict:
     return payload
 
 
-def _run(module, argv, monkeypatch, capsys):
-    """Run check_updates.main() with argv and return (exit_code, stdout, stderr)."""
+def _run(module, argv, monkeypatch, capsys, driver="http"):
+    """Run check_updates.main() with argv and return (exit_code, stdout, stderr).
+
+    Most tests monkeypatch fetch_job_payload, i.e. they exercise the HTTP path, so the
+    driver is pinned to http unless the test overrides it. Pass driver=None to run with
+    the CLI default (webbridge).
+    """
+    if driver is not None and "--driver" not in argv:
+        argv = [*argv, "--driver", driver]
     monkeypatch.setattr(sys, "argv", [module.__file__, *argv])
     exit_code = module.main()
     captured = capsys.readouterr()
     return exit_code, captured.out, captured.err
+
+
+# Minimal JAS records page that job_payload_from_html can parse.
+BROWSER_RECORDS_HTML = (
+    '<html><body>'
+    '<table id="f-list" class="listTable job-detail-table">'
+    '<thead><tr><th>Application no.</th><th>Status</th><th>CV</th></tr></thead>'
+    '<tbody><tr>'
+    '<td class="f-data-1">123456</td>'
+    '<td class="f-data-1">S</td>'
+    '<td class="f-data-1"><a href="https://example.com/cv.pdf">cv</a></td>'
+    '</tr></tbody></table>'
+    '<p>Job advertisement information</p>'
+    '<table id="f-list"><tbody>'
+    '<tr><td class="f-header">Reference number</td><td class="f-data-1">260818001</td></tr>'
+    '<tr><td class="f-header">Post title</td><td class="f-data-1">Project Associate</td></tr>'
+    '<tr><td class="f-header">Description</td><td class="f-data-1">Python SQL</td></tr>'
+    '</tbody></table>'
+    '</body></html>'
+)
+
+
+class _FakeBrowser:
+    """Stand-in for WebBridgeClient: records navigation and returns canned JAS HTML."""
+
+    navigated: list[str] = []
+
+    def __init__(self, **kwargs):
+        pass
+
+    def navigate(self, url, *, new_tab=True, group_title=None):
+        _FakeBrowser.navigated.append(url)
+
+    def page_html(self):
+        return BROWSER_RECORDS_HTML
+
+
+# Installs a fake WebBridge client so the browser path runs without a real daemon.
+def _patch_webbridge(monkeypatch, client_cls=None) -> list[str]:
+    import webridge_collect.client as wb_client_module
+
+    _FakeBrowser.navigated = []
+    monkeypatch.setattr(wb_client_module, "WebBridgeClient", client_cls or _FakeBrowser)
+    monkeypatch.setattr(wb_client_module, "ensure_webbridge_daemon", lambda **kw: True)
+    return _FakeBrowser.navigated
 
 
 # First check stores a baseline; a second check with the same page reports no change.
@@ -234,41 +286,7 @@ def test_check_prefers_last_screen_over_last_check(tmp_path, monkeypatch, capsys
 # The WebBridge driver navigates the browser and parses the returned HTML.
 def test_check_webbridge_driver_parses_browser_html(tmp_path, monkeypatch, capsys) -> None:
     module = _import_module()
-
-    fetched_urls: list[str] = []
-
-    class FakeClient:
-        # Stand-in for WebBridgeClient: records navigation and returns canned JAS HTML.
-        def __init__(self, **kwargs):
-            pass
-
-        def navigate(self, url, *, new_tab=True, group_title=None):
-            fetched_urls.append(url)
-
-        # Return a minimal JAS records page that job_payload_from_html can parse.
-        def page_html(self):
-            return (
-                '<html><body>'
-                '<table id="f-list" class="listTable job-detail-table">'
-                '<thead><tr><th>Application no.</th><th>Status</th><th>CV</th></tr></thead>'
-                '<tbody><tr>'
-                '<td class="f-data-1">123456</td>'
-                '<td class="f-data-1">S</td>'
-                '<td class="f-data-1"><a href="https://example.com/cv.pdf">cv</a></td>'
-                '</tr></tbody></table>'
-                '<p>Job advertisement information</p>'
-                '<table id="f-list"><tbody>'
-                '<tr><td class="f-header">Reference number</td><td class="f-data-1">260818001</td></tr>'
-                '<tr><td class="f-header">Post title</td><td class="f-data-1">Project Associate</td></tr>'
-                '<tr><td class="f-header">Description</td><td class="f-data-1">Python SQL</td></tr>'
-                '</tbody></table>'
-                '</body></html>'
-            )
-
-    import webridge_collect.client as wb_client_module
-
-    monkeypatch.setattr(wb_client_module, "WebBridgeClient", FakeClient)
-    monkeypatch.setattr(wb_client_module, "ensure_webbridge_daemon", lambda **kw: True)
+    fetched_urls = _patch_webbridge(monkeypatch)
 
     exit_code, out, _ = _run(
         module,
@@ -282,6 +300,25 @@ def test_check_webbridge_driver_parses_browser_html(tmp_path, monkeypatch, capsy
     assert payload["refno"] == "260818001"
     assert payload["candidate_count"] == 1
     assert fetched_urls, "browser was not navigated"
+
+
+# WebBridge is the CLI default: omitting --driver must still use the browser flow.
+def test_check_defaults_to_webbridge_driver(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    fetched_urls = _patch_webbridge(monkeypatch)
+
+    exit_code, out, _ = _run(
+        module,
+        ["260818001", "--state-dir", str(tmp_path / "state")],
+        monkeypatch,
+        capsys,
+        driver=None,
+    )
+    assert exit_code == 0
+    payload = json.loads(out)
+    assert payload["status"] == "success"
+    assert payload["refno"] == "260818001"
+    assert fetched_urls, "default driver did not use the browser"
 
 
 # A WebBridge daemon-down error maps to need_input(jas_session).

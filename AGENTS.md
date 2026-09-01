@@ -48,7 +48,7 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
    ```
 
-   - The WebBridge human flow is the default; `run_webridge_collect.py --driver webbridge`
+   - The WebBridge human flow is the default everywhere; `run_webridge_collect.py --driver webbridge`
      auto-starts the Kimi WebBridge daemon when it is down (probes `http://127.0.0.1:10086/status`).
    - Only if the daemon still cannot be started (or HR explicitly asks for the offline/HTTP path),
      fall back to the headless HTTP driver:
@@ -59,6 +59,8 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    - `demo_mode.json` at the repo root supplies `--base-url` / `--allow-host` /
      `--no-cookie` automatically, so do not pass them by hand.
    - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
+   - The update checker `check_updates.py` uses the same WebBridge default; it only opens the
+     records page (no CV download, no report). Add `--driver http` for the offline/cookie path.
 3. If there is no refno, link, or folder, do not invent a screener. The CLI returns `need_input` (`refno`). Ask HR in the language they used (or both) for the job reference number or the records page link.
 4. Do not write or edit `screening.html` / `screening_report.html`. Do not add JS parsers or localhost demos. Do not pass `--skip-reports`.
 5. Reports go to `Desktop/workbuddy-cv-screen/<refno>/` (not the WorkBuddy session folder). Files: `ranking-overview.html`, `<appno>.html`, `<appno>.pdf`.

@@ -32,6 +32,9 @@ def format_candidate_label(refno: str | None, appno: str | None) -> str:
 
 
 # True when the value is a bare JAS job reference number (digits only).
+# TODO: Check with HR
+# is it only 6-12 digits? or can it contain letters?
+# and the length is fixed? or can it be variable?
 def is_jas_refno(value: str | None) -> bool:
     text = (value or "").strip()
     return bool(text.isdigit() and 6 <= len(text) <= 12)

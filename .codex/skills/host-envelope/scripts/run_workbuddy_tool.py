@@ -80,6 +80,17 @@ def _read_pipeline_manifest(skill_stdout: dict[str, Any]) -> dict[str, Any]:
         return {}
 
 
+# Reports whether JAS access was available for a run: both the browser session
+# (webbridge) and the cookie jar (http) count as granted, so the only reliable signal
+# of a real problem is the skill asking for a JAS session itself.
+def _jas_session(payload: dict[str, Any]) -> str:
+    if payload.get("status") != "need_input":
+        return "granted"
+    ask = payload.get("ask") if isinstance(payload.get("ask"), dict) else {}
+    missing = payload.get("missing") or ask.get("missing") or []
+    return "missing" if "jas_session" in missing else "granted"
+
+
 # Tries to read the JAS manifest for HR status mapping.
 def _read_jas_manifest(skill_stdout: dict[str, Any]) -> dict[str, Any]:
     hr_files = skill_stdout.get("hr_files") or ""
@@ -122,7 +133,7 @@ def _run_screen_refno(args: argparse.Namespace) -> int:
         tool="screen_refno",
         payload=projection_input,
         jas_manifest=jas_manifest or None,
-        jas_session="granted" if args.driver == "http" or looks_like_folder else None,
+        jas_session="granted" if looks_like_folder else _jas_session(payload),
         cookie_file_present=False,
     )
     print(json.dumps(envelope, ensure_ascii=False, indent=2))
@@ -145,7 +156,7 @@ def _run_check_updates(args: argparse.Namespace) -> int:
     envelope = project_host_return(
         tool="check_updates",
         payload=payload,
-        jas_session="granted" if args.driver == "http" else None,
+        jas_session=_jas_session(payload),
     )
     print(json.dumps(envelope, ensure_ascii=False, indent=2))
     if envelope["status"] == "need_input":
@@ -190,8 +201,8 @@ def main() -> int:
     check_parser.add_argument(
         "--driver",
         choices=("webbridge", "http"),
-        default="http",
-        help="Collection driver (default http for update checks).",
+        default="webbridge",
+        help="Collection driver (default webbridge, same as screening).",
     )
     check_parser.set_defaults(func=_run_check_updates)
 

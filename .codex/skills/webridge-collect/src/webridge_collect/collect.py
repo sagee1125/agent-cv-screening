@@ -113,7 +113,7 @@ def collect_job(
     *,
     records_url: str,
     folder: Path,
-    driver: str = "http",
+    driver: str = "webbridge",
     base_url: str | None = None,
     refno: str | None = None,
     allowed_hosts: tuple[str, ...] | None = None,

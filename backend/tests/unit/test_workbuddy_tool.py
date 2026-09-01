@@ -273,3 +273,55 @@ def test_check_updates_error_returns_exit_code_1(monkeypatch, capsys) -> None:
     assert exit_code == 1
     envelope = json.loads(out)
     assert envelope["status"] == "error"
+
+
+# The WebBridge browser session counts as granted JAS access (it is the default driver).
+def test_check_updates_webbridge_reports_session_granted(monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    def fake_run_skill(cmd):
+        return 0, {"status": "success", "refno": "260818001", "has_changes": False, "changes": {}}
+
+    monkeypatch.setattr(module, "_run_skill", fake_run_skill)
+
+    exit_code, out, _ = _run(module, ["check_updates", "260818001"], monkeypatch, capsys)
+    assert exit_code == 0
+    envelope = json.loads(out)
+    assert envelope["auth"]["jas_session"] == "granted"
+
+
+# A dead WebBridge daemon asks for jas_session, so auth must not claim access was granted.
+def test_check_updates_daemon_down_reports_session_missing(monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    def fake_run_skill(cmd):
+        return 2, {
+            "status": "need_input",
+            "missing": ["jas_session"],
+            "questions": ["Please start Kimi WebBridge."],
+        }
+
+    monkeypatch.setattr(module, "_run_skill", fake_run_skill)
+
+    exit_code, out, _ = _run(module, ["check_updates", "260818001"], monkeypatch, capsys)
+    assert exit_code == 2
+    envelope = json.loads(out)
+    assert envelope["auth"]["jas_session"] == "missing"
+    assert envelope["ask"]["missing"] == ["jas_session"]
+
+
+# screen_refno over WebBridge also reports the browser session as granted access.
+def test_screen_refno_webbridge_reports_session_granted(monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    def fake_run_skill(cmd):
+        return 0, {"status": "success", "refno": "260818001", "candidates": []}
+
+    monkeypatch.setattr(module, "_run_skill", fake_run_skill)
+    monkeypatch.setattr(module, "_read_pipeline_manifest", lambda s: {})
+    monkeypatch.setattr(module, "_read_jas_manifest", lambda s: {})
+
+    exit_code, out, _ = _run(module, ["screen_refno", "260818001"], monkeypatch, capsys)
+    assert exit_code == 0
+    envelope = json.loads(out)
+    assert envelope["auth"]["jas_session"] == "granted"

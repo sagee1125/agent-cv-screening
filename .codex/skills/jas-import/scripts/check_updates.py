@@ -56,9 +56,9 @@ def _print_need_input(missing: list[str], questions: list[str], **extra: object)
     return EXIT_NEED_INPUT
 
 
-# Fetch the job payload via the chosen driver (http or webbridge).
+# Fetch the job payload via the chosen driver (webbridge by default, http on request).
 def _fetch_job(records_url: str, args: argparse.Namespace, allowed_hosts: tuple[str, ...]) -> dict:
-    if getattr(args, "driver", "http") == "webbridge":
+    if getattr(args, "driver", "webbridge") == "webbridge":
         from webridge_collect.client import WebBridgeClient, WebBridgeError
 
         browser = WebBridgeClient(
@@ -104,8 +104,8 @@ def main() -> int:
     parser.add_argument(
         "--driver",
         choices=("webbridge", "http"),
-        default="http",
-        help="Collection driver: webbridge uses the live browser session; http fetches directly (default http).",
+        default="webbridge",
+        help="Collection driver: webbridge drives the live browser session (default); http fetches directly.",
     )
     parser.add_argument("--session", default="jes-update-check", help="WebBridge session (tab group) name.")
     parser.add_argument("--daemon-url", default="http://127.0.0.1:10086", help="WebBridge daemon URL.")
@@ -117,6 +117,8 @@ def main() -> int:
     if args.target:
         if is_jas_refno(args.target):
             refno = args.target.strip()
+        # Temporarily allow the target to be a records URL
+        # otherwise, it's a records URL
         else:
             records_url = args.target
     if records_url and not refno:
@@ -157,6 +159,7 @@ def main() -> int:
         return EXIT_ERROR
 
     # A records page that returns a different job means the requested refno does not exist.
+    # Poka-yoke: prevent users from entering a wrong refno
     if refno and str(job.get("refno") or "").strip() != refno:
         print(
             json.dumps(
@@ -170,6 +173,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return EXIT_ERROR
+
+    ############################################################
+    # Early return
+    ############################################################
+    # Main logic starts here
+    ############################################################
 
     job_refno = str(job.get("refno") or refno or "job")
     state_dir = Path(args.state_dir) if args.state_dir else (_bootstrap.REPO_ROOT / "data" / "jas_state")

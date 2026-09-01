@@ -13,12 +13,12 @@ python .codex/skills/jas-import/scripts/run_jas_import.py "C:\Users\User\Desktop
 
 Reports: `Desktop\workbuddy-cv-screen\<refno>\ranking-overview.html`
 
-| HR says                                | Command (from repo root)                                                                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| 用 jas-import 離綫篩選 `<folder>`      | `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`                     |
-| Screen this job / 筛一下 + records URL | `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<url>" --driver webbridge`   |
+| HR says                                | Command (from repo root)                                                                              |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 用 jas-import 離綫篩選 `<folder>`      | `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`                                |
+| Screen this job / 筛一下 + records URL | `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<url>" --driver webbridge`    |
 | Screen refno / 筛 `<digits>`           | `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<digits>" --driver webbridge` |
-| No refno, link, or folder              | Do not run yet. Ask in the language HR used (or both EN+ZH).                               |
+| No refno, link, or folder              | Do not run yet. Ask in the language HR used (or both EN+ZH).                                          |
 
 > For a **refno or URL** prefer `webridge-collect`: it drives the real browser via Kimi
 > WebBridge and shows the human flow, then calls this same pipeline. Use `jas-import`
@@ -218,9 +218,13 @@ python .codex/skills/jas-import/scripts/run_jas_screening.py \
 
 ```bash
 python .codex/skills/jas-import/scripts/check_updates.py <refno-or-records-url> \
-  [--base-url URL] [--allow-host HOST] [--cookie-file jar] [--state-dir dir] [--no-store]
+  [--driver webbridge|http] [--base-url URL] [--allow-host HOST] [--cookie-file jar] \
+  [--state-dir dir] [--no-store]
 ```
 
+- `--driver webbridge` is the **default**: it opens the records page in the user's real
+  browser through Kimi WebBridge (auto-starting the daemon) and reuses that login
+  session. Use `--driver http` for the offline/cookie path or public demo pages.
 - Fetches the records page and compares the JD hash + candidate roster against the
   last check (or last screen), then prints a PII-free envelope:
   `has_changes`, `changes.{jd_changed,added,removed,status_changed}`, `first_check`,
