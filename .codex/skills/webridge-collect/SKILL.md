@@ -49,6 +49,8 @@ python .codex/skills/webridge-collect/scripts/run_webridge_collect.py 2600827001
 ## Behavior
 
 - Writes `<collect-dir>/<refno>/records.html` + `cvs/<appno>.pdf` + `_webridge-manifest.json`.
+- WebBridge driver simulates a human: it opens the job list page, types the refno into the Ref no. filter,
+  locates the job row, and opens its View link (falls back to the records URL directly when the row is not found).
 - Then runs `run_jas_import.py <folder>` -> `Desktop/workbuddy-cv-screen/<refno>/`.
 - Exit codes: `0` success/partial_success, `1` error, `2` need_input (`refno` or `jas_session`).
 - WebBridge daemon down -> `need_input` with an instruction to start it (or use `--driver http`).

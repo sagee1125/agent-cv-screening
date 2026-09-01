@@ -18,6 +18,7 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
 from screening_core.candidate_id import is_jas_refno, refno_from_url
+from screening_core.demo_mode import apply_demo_defaults
 from screening_core.hr_output import HR_PACK_FOLDER
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
 from webridge_collect.client import WebBridgeClient, WebBridgeError
@@ -110,6 +111,7 @@ def main() -> int:
     parser.add_argument("--cleanup", action="store_true", help="Delete the collected folder after a successful pipeline run.")
     args = parser.parse_args()
 
+    apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
     refno = args.refno
     records_url = args.records_url
     if args.target:
@@ -139,6 +141,7 @@ def main() -> int:
             folder=folder,
             driver=args.driver,
             base_url=args.base_url,
+            refno=refno,
             allowed_hosts=allowed_hosts,
             cookie_file=args.cookie_file,
             client=client,

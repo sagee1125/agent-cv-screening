@@ -43,6 +43,7 @@ async def _request(
     cookie_file: str | Path | None,
     timeout: float,
     allowed_hosts: tuple[str, ...] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     cookies = load_cookie_file(cookie_file) if cookie_file else None
     current_url = validate_url(url, flag="request URL", allowed_hosts=allowed_hosts)
@@ -50,7 +51,9 @@ async def _request(
         timeout=timeout, follow_redirects=False, cookies=cookies, verify=resolve_ssl_verify()
     ) as client:
         for _redirect in range(MAX_REDIRECTS + 1):
-            response = await client.get(current_url)
+            response = await client.get(current_url, headers=headers)
+            if response.status_code == 304:
+                return response
             if response.is_redirect:
                 location = response.headers.get("location")
                 if not location:
@@ -90,6 +93,35 @@ async def download_to(
     path = Path(dest)
     path.write_bytes(response.content)
     return path
+
+
+# Downloads a file only when its server ETag / Last-Modified changed (304 reuse).
+async def download_to_if_changed(
+    url: str,
+    dest: str | Path,
+    *,
+    cookie_file: str | Path | None = None,
+    timeout: float = DOWNLOAD_TIMEOUT,
+    allowed_hosts: tuple[str, ...] | None = None,
+    etag: str | None = None,
+    last_modified: str | None = None,
+) -> tuple[bool, dict[str, str]]:
+    headers: dict[str, str] = {}
+    if etag:
+        headers["If-None-Match"] = etag
+    if last_modified:
+        headers["If-Modified-Since"] = last_modified
+    response = await _request(url, cookie_file, timeout, allowed_hosts=allowed_hosts, headers=headers or None)
+    meta = {
+        "etag": response.headers.get("etag") or "",
+        "last_modified": response.headers.get("last-modified") or "",
+    }
+    if response.status_code == 304:
+        return False, meta
+    if not response.content:
+        raise ValueError(f"empty download from {url}")
+    Path(dest).write_bytes(response.content)
+    return True, meta
 
 
 # Strips HTML tags into plain text (fallback for non-JAS pages).
@@ -151,6 +183,7 @@ def cv_filename_for_url(url: str, *, fallback_ext: str = ".pdf") -> str:
 __all__ = [
     "cv_filename_for_url",
     "download_to",
+    "download_to_if_changed",
     "fetch_html",
     "fetch_jd_text",
     "fetch_job_payload",

@@ -9,7 +9,14 @@ import sys
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
-from screening_core.input_policy import validate_extracted_reference, validate_path, validate_reference
+from screening_core.input_policy import (
+    ALLOWED_URL_HOSTS,
+    extra_allowed_hosts_from_env,
+    merge_allowed_hosts,
+    validate_extracted_reference,
+    validate_path,
+    validate_reference,
+)
 
 REPO_ROOT = _bootstrap.REPO_ROOT
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -141,8 +148,16 @@ def _pipeline_cmd(args: argparse.Namespace, out_dir: Path, resume: bool) -> list
         cmd += ["--cookie-file", args.cookie_file]
     if getattr(args, "scratch_dir", None):
         cmd += ["--scratch-dir", args.scratch_dir]
-    if getattr(args, "keep_cvs", False):
-        cmd.append("--keep-cvs")
+    if getattr(args, "cleanup_cvs", False):
+        cmd.append("--cleanup-cvs")
+    for host in getattr(args, "allow_host", []) or []:
+        cmd += ["--allow-host", host]
+    if getattr(args, "base_url", None):
+        cmd += ["--base-url", args.base_url]
+    if getattr(args, "no_cookie", False):
+        cmd.append("--no-cookie")
+    if getattr(args, "state_dir", None):
+        cmd += ["--state-dir", args.state_dir]
     return cmd
 
 
@@ -295,6 +310,12 @@ def _run_loop(args: argparse.Namespace) -> tuple[int, dict]:
     return EXIT_ERROR, _final_payload("error", out_dir, runs, latest)
 
 
+# Build the effective URL host allowlist: defaults + env + --allow-host flags.
+def _effective_allowed_hosts(args: argparse.Namespace) -> tuple[str, ...]:
+    extra = tuple(getattr(args, "allow_host", []) or [])
+    return merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), extra)
+
+
 # Validates path/URL inputs under the PII-safe input contract.
 def _validate_input_policy(args: argparse.Namespace) -> None:
     for flag, value in (("--jd-file", args.jd_file), ("--jd-json", args.jd_json)):
@@ -309,10 +330,11 @@ def _validate_input_policy(args: argparse.Namespace) -> None:
         )
     if args.polyu_detail_url:
         validate_reference(args.polyu_detail_url, flag="--polyu-detail-url")
+    allowed_hosts = _effective_allowed_hosts(args)
     if getattr(args, "jd_url", None):
-        validate_reference(args.jd_url, flag="--jd-url")
+        validate_reference(args.jd_url, flag="--jd-url", allowed_hosts=allowed_hosts)
     for value in getattr(args, "cv_url", []) or []:
-        validate_reference(value, flag="--cv-url")
+        validate_reference(value, flag="--cv-url", allowed_hosts=allowed_hosts)
     if getattr(args, "cookie_file", None):
         validate_path(args.cookie_file, flag="--cookie-file")
 
@@ -352,7 +374,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt used for authenticated JAS fetches.")
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
-    parser.add_argument("--keep-cvs", action="store_true", help="Keep CVs downloaded from --cv-url after the run.")
+    parser.add_argument("--cleanup-cvs", action="store_true", help="Delete CVs downloaded from --cv-url after the run (default keeps them for reuse).")
+    parser.add_argument("--no-cookie", action="store_true", help="Allow unauthenticated JAS fetches for public demo hosts.")
+    parser.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        metavar="HOST",
+        help="Extra allowlisted URL host (repeatable; public demo hosts).",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Base URL for CV link resolution in fetched pages (public demo).",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Directory for per-refno job state (default repo data/jas_state).",
+    )
     parser.add_argument("--position", default=None, help="Job title shown on reports.")
     parser.add_argument("--refno", default=None, help="Job reference number; candidates are labeled by refno/appno, never by name.")
     parser.add_argument("--engine", choices=("legacy", "matching"), default="legacy", help="Scoring engine for pipeline.")

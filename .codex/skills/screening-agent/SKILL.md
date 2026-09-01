@@ -115,8 +115,12 @@ Enforcement lives in `.codex/skills/_shared/src/screening_core/input_policy.py`.
 - `--jd-url` — JAS records page URL to fetch and parse as JD text.
 - `--cv-url <URL>` (repeatable) — JAS CV file URLs to download.
 - `--cookie-file <path>` — local Netscape `cookies.txt` for authenticated fetches.
+- `--no-cookie` — allow unauthenticated fetches for public demo hosts.
+- `--allow-host <HOST>` (repeatable) — extra allowlisted URL host (public demo).
+- `--base-url <URL>` — base URL for CV links / refno URL building (public demo).
+- `--state-dir <dir>` — per-refno job state (run history + CV metadata).
 - `--scratch-dir <dir>` — where downloaded CVs are saved (default `data/jas_scratch`).
-- `--keep-cvs` — retain downloaded CVs; they are removed after the run by default.
+- `--cleanup-cvs` — delete downloaded CVs after the run (they are kept by default).
 
 The same allowlist and cookie rules as the pipeline apply; see the pipeline
 SKILL.md "Live fetch" section for details.

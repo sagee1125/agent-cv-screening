@@ -106,12 +106,19 @@ def test_collect_http_driver_writes_folder(tmp_path, monkeypatch) -> None:
     assert manifest["cv_downloaded"] == ["2600827004"]
 
 
-# The WebBridge driver drives a fake browser and writes the same folder layout.
+# The WebBridge driver simulates a human (list page -> View link) and writes the same folder layout.
 def test_collect_webridge_driver_writes_folder(tmp_path) -> None:
     class FakeBrowser:
-        # Record the records URL and return the demo page HTML.
+        # Record navigations and return the demo page HTML.
+        def __init__(self):
+            self.urls = []
+
         def navigate(self, url, *, new_tab=True, group_title=None):
-            self.url = url
+            self.urls.append(url)
+
+        # Simulate the human flow: the list page was read and the View link was found.
+        def evaluate(self, code):
+            return {"typed": True, "clicked": True, "href": RECORDS_URL, "text": "View"}
 
         # Return the saved demo page HTML for the collected records file.
         def page_html(self):
@@ -128,13 +135,72 @@ def test_collect_webridge_driver_writes_folder(tmp_path) -> None:
         folder=folder,
         driver="webbridge",
         base_url=DEMO_BASE_URL,
+        refno="2600827001",
         client=browser,  # type: ignore[arg-type]
     )
 
-    assert browser.url == RECORDS_URL
+    # Human flow: land on the job list page first, then open the row's View link.
+    assert browser.urls == [DEMO_BASE_URL + "/", RECORDS_URL]
     assert (folder / "records.html").is_file()
     assert (folder / "cvs" / "2600827004.pdf").read_bytes() == b"%PDF"
     assert manifest["cv_downloaded"] == ["2600827004"]
+
+
+# When the job row is not found on the list page, the WebBridge flow falls back to the records URL directly.
+def test_collect_webridge_human_flow_falls_back_to_records_url(tmp_path) -> None:
+    class FakeBrowser:
+        # Record navigations and return the demo page HTML.
+        def __init__(self):
+            self.urls = []
+
+        def navigate(self, url, *, new_tab=True, group_title=None):
+            self.urls.append(url)
+
+        # Simulate the list page not containing the requested job.
+        def evaluate(self, code):
+            return {"typed": False, "clicked": False, "reason": "row-not-found"}
+
+        def page_html(self):
+            return DEMO_HTML
+
+        def fetch_bytes(self, url):
+            return b"%PDF"
+
+    browser = FakeBrowser()
+    folder = tmp_path / "job"
+    manifest = collect.collect_job(
+        records_url=RECORDS_URL,
+        folder=folder,
+        driver="webbridge",
+        base_url=DEMO_BASE_URL,
+        refno="2600827001",
+        client=browser,  # type: ignore[arg-type]
+    )
+
+    assert browser.urls == [DEMO_BASE_URL + "/", RECORDS_URL]
+    assert manifest["refno"] == "2600827001"
+
+
+# A records page that returns the wrong job is refused (never collects a wrong report).
+def test_collect_webridge_refuses_wrong_job(tmp_path, monkeypatch) -> None:
+    async def fake_fetch_html(url, cookie_file=None, allowed_hosts=None):
+        return DEMO_HTML  # DEMO_HTML carries refno 2600827001
+
+    async def fake_download_to(url, dest, cookie_file=None, allowed_hosts=None):
+        Path(dest).write_bytes(b"%PDF")
+        return Path(dest)
+
+    monkeypatch.setattr(collect._jas_fetch, "fetch_html", fake_fetch_html)
+    monkeypatch.setattr(collect._jas_fetch, "download_to", fake_download_to)
+    with pytest.raises(ValueError):
+        collect.collect_job(
+            records_url=RECORDS_URL,
+            folder=tmp_path / "job",
+            driver="http",
+            base_url=DEMO_BASE_URL,
+            refno="260806012",
+            allowed_hosts=ALLOWED,
+        )
 
 
 # A CV download failure is recorded without aborting the job.
@@ -173,6 +239,44 @@ def test_webridge_client_fetch_bytes_chunks(monkeypatch) -> None:
     monkeypatch.setattr(client, "evaluate", fake_evaluate)
     assert client.fetch_bytes("https://jes-web-demo.vercel.app/uploads/CV.pdf") == b"hello"
     assert len(calls) == 2
+
+
+# WebBridgeClient unwraps the daemon's {"ok": true, "data": {...}} envelope.
+def test_webridge_client_unwraps_daemon_envelope(monkeypatch) -> None:
+    client = WebBridgeClient(session="test-session")
+
+    def fake_post(url, json=None, timeout=None):
+        class FakeResponse:
+            status_code = 200
+            text = '{"ok": true, "data": {"type": "string", "value": "hi"}}'
+
+            def json(self):
+                return {"ok": True, "data": {"type": "string", "value": "hi"}}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert client.evaluate("1+1") == "hi"
+
+
+# WebBridgeClient surfaces daemon-level errors from {"ok": false, "error": {...}}.
+def test_webridge_client_daemon_error_raises(monkeypatch) -> None:
+    client = WebBridgeClient(session="test-session")
+
+    def fake_post(url, json=None, timeout=None):
+        class FakeResponse:
+            status_code = 200
+            text = '{"ok": false, "error": {"code": "extension_error", "message": "boom"}}'
+
+            def json(self):
+                return {"ok": False, "error": {"code": "extension_error", "message": "boom"}}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    with pytest.raises(WebBridgeError) as exc:
+        client.command("evaluate", {"code": "x"})
+    assert exc.value.reason == "extension_error"
 
 
 # An unreachable daemon raises WebBridgeError with a machine-readable reason.

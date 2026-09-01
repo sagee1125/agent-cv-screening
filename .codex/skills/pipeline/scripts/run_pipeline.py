@@ -35,7 +35,15 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
 from screening_core.hr_output import RANKING_OVERVIEW_HTML, candidate_match_stem
-from screening_core.input_policy import validate_extracted_reference, validate_path, validate_reference
+from screening_core.input_policy import (
+    ALLOWED_URL_HOSTS,
+    extra_allowed_hosts_from_env,
+    merge_allowed_hosts,
+    validate_extracted_reference,
+    validate_path,
+    validate_reference,
+)
+from screening_core.job_state import load_job_state, save_job_state
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
     candidate_report_fingerprint,
@@ -46,7 +54,7 @@ from screening_core.report_fingerprint import (
     sha256_file,
     stale_cv_slugs,
 )
-from jas_import.fetch import cv_filename_for_url, download_to, fetch_jd_text
+from jas_import.fetch import cv_filename_for_url, download_to_if_changed, fetch_jd_text
 
 REPO_ROOT = _bootstrap.REPO_ROOT
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -237,10 +245,11 @@ def _enforce_input_policy(args: argparse.Namespace, out_dir: Path) -> None:
         validate_extracted_reference(value, out_dir=out_dir, trusted=args.trust_extracted, flag="--extracted")
     if args.polyu_detail_url:
         validate_reference(args.polyu_detail_url, flag="--polyu-detail-url")
+    allowed_hosts = _effective_allowed_hosts(args)
     if args.jd_url:
-        validate_reference(args.jd_url, flag="--jd-url")
+        validate_reference(args.jd_url, flag="--jd-url", allowed_hosts=allowed_hosts)
     for value in args.cv_url:
-        validate_reference(value, flag="--cv-url")
+        validate_reference(value, flag="--cv-url", allowed_hosts=allowed_hosts)
     if args.cookie_file:
         validate_path(args.cookie_file, flag="--cookie-file")
 
@@ -797,20 +806,57 @@ def _resolve_scratch_dir(scratch_dir: str) -> Path:
 
 
 # Fetches URL inputs into local files and returns downloaded CV paths.
+# Build the effective URL host allowlist: defaults + env + --allow-host flags.
+def _effective_allowed_hosts(args: argparse.Namespace) -> tuple[str, ...]:
+    extra = tuple(getattr(args, "allow_host", []) or [])
+    return merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), extra)
+
+
+# Resolve the job-state directory (default repo data/jas_state).
+def _resolve_state_dir(args: argparse.Namespace) -> Path:
+    raw = getattr(args, "state_dir", None) or "data/jas_state"
+    path = Path(raw)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path
+
+
 def _resolve_url_inputs(args: argparse.Namespace, out_dir: Path) -> list[Path]:
     downloaded_cvs: list[Path] = []
+    allowed_hosts = _effective_allowed_hosts(args)
+    base_url = getattr(args, "base_url", None)
     if args.jd_url:
-        jd_text = asyncio.run(fetch_jd_text(args.jd_url, cookie_file=args.cookie_file))
+        jd_text = asyncio.run(
+            fetch_jd_text(args.jd_url, cookie_file=args.cookie_file, base_url=base_url, allowed_hosts=allowed_hosts)
+        )
         dest = out_dir / "jd-from-url.txt"
         dest.write_text(jd_text, encoding="utf-8")
         args.jd_file = str(dest)
     if args.cv_url:
         scratch = _resolve_scratch_dir(args.scratch_dir)
+        refno = getattr(args, "refno", None) or "job"
+        state_dir = _resolve_state_dir(args)
+        prev_cv_meta = load_job_state(state_dir, refno).get("cv_meta") or {}
+        cv_meta: dict[str, dict[str, str]] = {}
         for url in args.cv_url:
             dest = scratch / cv_filename_for_url(url)
-            asyncio.run(download_to(url, dest, cookie_file=args.cookie_file))
+            prev_meta = prev_cv_meta.get(url) or {}
+            downloaded, new_meta = asyncio.run(
+                download_to_if_changed(
+                    url,
+                    dest,
+                    cookie_file=args.cookie_file,
+                    allowed_hosts=allowed_hosts,
+                    etag=prev_meta.get("etag") if dest.is_file() else None,
+                    last_modified=prev_meta.get("last_modified") if dest.is_file() else None,
+                )
+            )
+            cv_meta[url] = new_meta if downloaded else prev_meta
             args.cv.append(str(dest))
             downloaded_cvs.append(dest)
+        state = load_job_state(state_dir, refno)
+        state["cv_meta"] = cv_meta
+        save_job_state(state_dir, refno, state)
     return downloaded_cvs
 
 
@@ -838,7 +884,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             return _run_matching_engine(args, out_dir, jd_source, candidates, failures)
         return _run_legacy_engine(args, out_dir, jd_source, candidates, failures)
     finally:
-        if not args.keep_cvs:
+        if getattr(args, "cleanup_cvs", False):
             for path in downloaded_cvs:
                 path.unlink(missing_ok=True)
 
@@ -870,8 +916,30 @@ def main() -> int:
     parser.add_argument("--extracted", action="append", default=[], metavar="FILE", help="Existing extracted candidate JSON; skips cv-parser; repeatable.")
     parser.add_argument("--trust-extracted", action="store_true", help="Allow --extracted profiles from outside --output-dir (trusted, pre-masked data only).")
     parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt used for authenticated JAS fetches.")
+    parser.add_argument("--no-cookie", action="store_true", help="Allow unauthenticated JAS fetches for public demo hosts.")
+    parser.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        metavar="HOST",
+        help="Extra allowlisted URL host (repeatable; public demo hosts).",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Base URL for CV link resolution in fetched pages (public demo).",
+    )
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
-    parser.add_argument("--keep-cvs", action="store_true", help="Keep CVs downloaded from --cv-url after the run.")
+    parser.add_argument(
+        "--cleanup-cvs",
+        action="store_true",
+        help="Delete CVs downloaded from --cv-url after the run (default keeps them for reuse).",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Directory for per-refno job state (CV hashes/metadata; default repo data/jas_state).",
+    )
     parser.add_argument("--position", default=None, help="Job title shown on reports (required unless --skip-reports).")
     parser.add_argument("--refno", default=None, help="Job reference number; together with application no. identifies a candidate (names are never shown).")
     parser.add_argument("--output-dir", default="data/pipeline_out", help="Directory for intermediate JSONs (default data/pipeline_out).")

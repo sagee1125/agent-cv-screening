@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "base_url": "https://jes-web-demo.vercel.app",
+  "allow_hosts": ["jes-web-demo.vercel.app"]
+}

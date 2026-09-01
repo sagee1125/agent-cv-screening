@@ -13,12 +13,12 @@ python .codex/skills/jas-import/scripts/run_jas_import.py "C:\Users\User\Desktop
 
 Reports: `Desktop\workbuddy-cv-screen\<refno>\ranking-overview.html`
 
-| HR says | Command (from repo root) |
-| --- | --- |
-| 用 jas-import 離綫篩選 `<folder>` | `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"` |
-| Screen this job / 筛一下 + records URL | `python .codex/skills/jas-import/scripts/run_jas_import.py "<url>" --cookie-file <jar>` |
-| Screen refno / 筛 `<digits>` | `python .codex/skills/jas-import/scripts/run_jas_import.py "<digits>" --cookie-file <jar>` |
-| No refno, link, or folder | Do not run yet. Ask in the language HR used (or both EN+ZH). |
+| HR says                                | Command (from repo root)                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 用 jas-import 離綫篩選 `<folder>`      | `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`                     |
+| Screen this job / 筛一下 + records URL | `python .codex/skills/jas-import/scripts/run_jas_import.py "<url>" --cookie-file <jar>`    |
+| Screen refno / 筛 `<digits>`           | `python .codex/skills/jas-import/scripts/run_jas_import.py "<digits>" --cookie-file <jar>` |
+| No refno, link, or folder              | Do not run yet. Ask in the language HR used (or both EN+ZH).                               |
 
 Forbidden:
 
@@ -208,8 +208,24 @@ python .codex/skills/jas-import/scripts/run_jas_screening.py \
   or to a CA bundle path for a custom root.
 - The status label `T` is now parsed as `TBC` (demo pages render TBC as `T`).
 
-## Live URL mode (--records-url, Phase 1 skeleton)
+## Check for updates (no report generation)
 
+```bash
+python .codex/skills/jas-import/scripts/check_updates.py <refno-or-records-url> \
+  [--base-url URL] [--allow-host HOST] [--cookie-file jar] [--state-dir dir] [--no-store]
+```
+
+- Fetches the records page and compares the JD hash + candidate roster against the
+  last check (or last screen), then prints a PII-free envelope:
+  `has_changes`, `changes.{jd_changed,added,removed,status_changed}`, `first_check`,
+  `last_check_at`. It **never** downloads CVs or generates reports.
+- Stores the snapshot in the job state (`data/jas_state/<refno>.json`) unless
+  `--no-store`, so repeated calls report `no_change` until the job actually changes.
+- Exit codes: `0` success, `2` need_input (`refno` / `jas_session`), `1` error.
+- A later `run_jas_import.py` screen of the same job appends to the same run history,
+  giving HR an audit trail of every check and screen.
+
+## Live URL mode (--records-url, Phase 1 skeleton)
 
 When internal access (or an HR-run session with a cookie jar) is available:
 
@@ -224,8 +240,10 @@ python .codex/skills/jas-import/scripts/run_jas_screening.py \
 - Automatically downloads every candidate CV into
   `data/jas_scratch/<refno>/<appno>.pdf` (private, appno-keyed).
 - Runs the same pipeline tail (JD parse -> cv parse -> score/rank -> reports).
-- **Downloaded CVs are deleted after the run by default**; pass `--keep-cvs`
-  to retain them for inspection.
+- **Downloaded CVs are kept in `--scratch-dir` for reuse**; unchanged CVs are
+  not re-downloaded on later runs (SHA-256 based). Pass `--cleanup-cvs` to delete
+  them after the run instead.
+- `--state-dir` stores per-refno run history + CV hashes (default repo `data/jas_state`).
 - `--cookie-file` reads a Netscape `cookies.txt` on disk; cookies are never
   accepted as CLI arguments.
 - The records URL host must be allowlisted (`jobs.polyu.edu.hk`), enforced by
