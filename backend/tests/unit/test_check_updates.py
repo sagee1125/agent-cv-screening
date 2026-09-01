@@ -268,6 +268,7 @@ def test_check_webbridge_driver_parses_browser_html(tmp_path, monkeypatch, capsy
     import webridge_collect.client as wb_client_module
 
     monkeypatch.setattr(wb_client_module, "WebBridgeClient", FakeClient)
+    monkeypatch.setattr(wb_client_module, "ensure_webbridge_daemon", lambda **kw: True)
 
     exit_code, out, _ = _run(
         module,
@@ -303,6 +304,7 @@ def test_check_webbridge_daemon_down_need_input(tmp_path, monkeypatch, capsys) -
     import webridge_collect.client as wb_client_module
 
     monkeypatch.setattr(wb_client_module, "WebBridgeClient", FakeClient)
+    monkeypatch.setattr(wb_client_module, "ensure_webbridge_daemon", lambda **kw: True)
 
     exit_code, out, _ = _run(
         module,

@@ -22,7 +22,12 @@ for path in (COLLECT_SRC, SHARED_SRC, JAS_SRC):
 
 from jas_import.errors import JobNotFoundError  # noqa: E402
 from webridge_collect import collect  # noqa: E402
-from webridge_collect.client import WebBridgeClient, WebBridgeError  # noqa: E402
+from webridge_collect import client as client_mod  # noqa: E402
+from webridge_collect.client import (  # noqa: E402
+    WebBridgeClient,
+    WebBridgeError,
+    ensure_webbridge_daemon,
+)
 
 RECORDS_URL = "https://jes-web-demo.vercel.app/records.html?refno=2600827001"
 DEMO_BASE_URL = "https://jes-web-demo.vercel.app"
@@ -346,6 +351,8 @@ def test_cli_webbridge_daemon_down_need_input(tmp_path, monkeypatch, capsys) -> 
         raise WebBridgeError("daemon unreachable", reason="daemon-unreachable")
 
     monkeypatch.setattr(module, "collect_job", fake_collect_job)
+    # Pre-check passes; the daemon dies mid-run so the except-branch handles it.
+    monkeypatch.setattr(module, "ensure_webbridge_daemon", lambda daemon_url: True)
     monkeypatch.setattr(sys, "argv", [module.__file__, "2600827001", "--driver", "webbridge", "--collect-dir", str(tmp_path)])
     exit_code = module.main()
     captured = capsys.readouterr()
@@ -421,3 +428,95 @@ def test_cli_not_found_reports_error_code(monkeypatch, capsys) -> None:
     assert payload["status"] == "error"
     assert payload["error_code"] == "not_found"
     assert "999999999" in payload["error_message"]
+
+
+# When the refno is typed into the filter but no row matches, collect stops with not found
+# and the browser stays on the search page (it is never navigated to the fallback URL).
+def test_collect_webridge_search_not_found_keeps_page_open(tmp_path) -> None:
+    class FakeBrowser:
+        # Record navigations; the search finds no row, so the list page must stay open.
+        def __init__(self):
+            self.urls = []
+            self.cdp_calls = []
+
+        def navigate(self, url, *, new_tab=True, group_title=None):
+            self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            self.cdp_calls.append(method)
+
+        # Simulate typing the refno into the filter with no matching row.
+        def evaluate(self, code):
+            return {"typed": True, "clicked": False, "reason": "row-not-found"}
+
+        def page_html(self):
+            return DEMO_HTML
+
+        def fetch_bytes(self, url):
+            return b"%PDF"
+
+    browser = FakeBrowser()
+    folder = tmp_path / "job"
+    with pytest.raises(JobNotFoundError):
+        collect.collect_job(
+            records_url=RECORDS_URL,
+            folder=folder,
+            driver="webbridge",
+            base_url=DEMO_BASE_URL,
+            refno="999999999",
+            client=browser,  # type: ignore[arg-type]
+        )
+    # Only the list page was opened; the search page was never navigated away from.
+    assert browser.urls == [DEMO_BASE_URL + "/"]
+    assert not (folder / "records.html").exists()
+
+
+# ensure_webbridge_daemon returns True immediately when the daemon is already up.
+def test_ensure_daemon_already_running(monkeypatch) -> None:
+    monkeypatch.setattr(client_mod, "_daemon_reachable", lambda url, timeout=2.0: True)
+    calls = {"start": 0}
+
+    def fake_start():
+        calls["start"] += 1
+        return True
+
+    monkeypatch.setattr(client_mod, "_start_daemon_process", fake_start)
+    assert ensure_webbridge_daemon(wait_seconds=0.5) is True
+    assert calls["start"] == 0
+
+
+# ensure_webbridge_daemon starts the daemon once and waits for it to come up.
+def test_ensure_daemon_auto_starts(monkeypatch) -> None:
+    state = {"reachable": False}
+
+    def fake_reachable(url, timeout=2.0):
+        state["reachable"] = True  # daemon comes up right after being started
+        return state["reachable"]
+
+    monkeypatch.setattr(client_mod, "_daemon_reachable", fake_reachable)
+    monkeypatch.setattr(client_mod, "_start_daemon_process", lambda: True)
+    monkeypatch.setattr(client_mod.time, "sleep", lambda *a, **k: None)
+    assert ensure_webbridge_daemon(wait_seconds=0.5) is True
+
+
+# ensure_webbridge_daemon fails fast when the daemon cannot be started.
+def test_ensure_daemon_start_fails(monkeypatch) -> None:
+    monkeypatch.setattr(client_mod, "_daemon_reachable", lambda url, timeout=2.0: False)
+    monkeypatch.setattr(client_mod, "_start_daemon_process", lambda: False)
+    assert ensure_webbridge_daemon(wait_seconds=0.5) is False
+
+
+# CLI with a daemon that cannot start returns need_input(jas_session) instead of HTTP fallback.
+def test_cli_webbridge_daemon_auto_start_fails_need_input(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_cli()
+    monkeypatch.setattr(module, "ensure_webbridge_daemon", lambda daemon_url: False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [module.__file__, "2600827001", "--driver", "webbridge", "--collect-dir", str(tmp_path)],
+    )
+    exit_code = module.main()
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    payload = json.loads(captured.out)
+    assert payload["missing"] == ["jas_session"]

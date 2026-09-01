@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import subprocess
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -10,6 +14,50 @@ import httpx
 DEFAULT_DAEMON_URL = "http://127.0.0.1:10086"
 DEFAULT_SESSION = "jes-demo-screen"
 CV_CHUNK_BYTES = 512 * 1024
+DAEMON_START_WAIT = 25.0
+
+
+# True when the WebBridge daemon answers a status probe on the given URL.
+def _daemon_reachable(daemon_url: str, *, timeout: float = 2.0) -> bool:
+    try:
+        response = httpx.post(f"{daemon_url.rstrip('/')}/status", timeout=timeout)
+        return response.status_code < 400
+    except httpx.HTTPError:
+        return False
+
+
+# Best-effort start of the local Kimi WebBridge daemon process (non-blocking).
+def _start_daemon_process() -> bool:
+    candidates = [
+        os.environ.get("KIMI_WEBRIDGE_BIN", ""),
+        str(Path.home() / ".kimi-webbridge" / "bin" / "kimi-webbridge.exe"),
+        str(Path.home() / ".kimi-webbridge" / "bin" / "kimi-webbridge"),
+    ]
+    for binary in candidates:
+        if not binary:
+            continue
+        if not Path(binary).is_file():
+            continue
+        try:
+            subprocess.Popen([binary, "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+# Ensure the WebBridge daemon is running, auto-starting it once when needed.
+def ensure_webbridge_daemon(daemon_url: str = DEFAULT_DAEMON_URL, *, wait_seconds: float = DAEMON_START_WAIT) -> bool:
+    if _daemon_reachable(daemon_url):
+        return True
+    if not _start_daemon_process():
+        return False
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if _daemon_reachable(daemon_url):
+            return True
+        time.sleep(1.0)
+    return False
 
 
 # Raised when the WebBridge daemon rejects a command or is unreachable.
@@ -132,4 +180,5 @@ __all__ = [
     "DEFAULT_SESSION",
     "WebBridgeClient",
     "WebBridgeError",
+    "ensure_webbridge_daemon",
 ]

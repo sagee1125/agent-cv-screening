@@ -127,6 +127,16 @@ def main() -> int:
         records_url = screening.build_records_url_for_refno(refno, args.base_url)
 
     allowed_hosts = merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), tuple(args.allow_host))
+    # Reuse the live browser session by default: auto-start the daemon instead of degrading to HTTP.
+    if args.driver == "webbridge":
+        from webridge_collect.client import ensure_webbridge_daemon
+
+        if not ensure_webbridge_daemon(daemon_url=args.daemon_url):
+            return _print_need_input(
+                ["jas_session"],
+                list(ASK_WEBRIDGE),
+                detail="Kimi WebBridge daemon could not be started automatically",
+            )
     try:
         job = _fetch_job(records_url, args, allowed_hosts)
     except JobNotFoundError as exc:

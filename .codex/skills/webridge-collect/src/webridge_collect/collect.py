@@ -90,8 +90,8 @@ def _focus_current_tab(browser: WebBridgeClient) -> None:
         pass
 
 
-# Open the records page like a human: focus the tab, drive the ghost cursor through the filter, then return the row's View link.
-def navigate_like_human(browser: WebBridgeClient, *, refno: str, base_url: str, records_url: str) -> str:
+# Search the list page like a human: return the row's View link when found, None when no row matches (page stays open).
+def navigate_like_human(browser: WebBridgeClient, *, refno: str, base_url: str, records_url: str) -> str | None:
     list_url = f"{base_url.rstrip('/')}/"
     browser.navigate(list_url, new_tab=True, group_title="JES demo screening")
     _focus_current_tab(browser)
@@ -101,6 +101,10 @@ def navigate_like_human(browser: WebBridgeClient, *, refno: str, base_url: str, 
         found = None
     if isinstance(found, dict) and found.get("clicked") and found.get("href"):
         return str(found["href"])
+    # The refno was typed into the filter but no matching row appeared: report not found
+    # without navigating away, so HR sees the empty search result and the tab stays open.
+    if isinstance(found, dict) and found.get("typed") and not found.get("clicked"):
+        return None
     return records_url
 
 
@@ -128,6 +132,9 @@ def collect_job(
         if base_url and refno:
             # Human-like flow: find the job on the list page, then open its View link.
             target = navigate_like_human(browser, refno=refno, base_url=base_url, records_url=records_url)
+            if target is None:
+                # The list-page search found no matching row; keep the page open and report not found.
+                raise JobNotFoundError(f"no JAS job found for refno {refno} (no matching row in the records list)")
             browser.navigate(target, new_tab=False, group_title="JES demo screening")
             _focus_current_tab(browser)
         else:

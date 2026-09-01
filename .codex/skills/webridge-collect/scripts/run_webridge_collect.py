@@ -22,7 +22,7 @@ from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.demo_mode import apply_demo_defaults
 from screening_core.hr_output import HR_PACK_FOLDER
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
-from webridge_collect.client import WebBridgeClient, WebBridgeError
+from webridge_collect.client import WebBridgeClient, WebBridgeError, ensure_webbridge_daemon
 from webridge_collect.collect import COLLECT_ROOT_NAME, build_records_url, collect_job
 
 EXIT_OK = 0
@@ -131,6 +131,14 @@ def main() -> int:
     allowed_hosts = merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), tuple(args.allow_host))
     collect_root = Path(args.collect_dir) if args.collect_dir else (_bootstrap.REPO_ROOT / "data" / COLLECT_ROOT_NAME)
     folder = collect_root / (refno or "job")
+
+    # The browser human flow is the default: auto-start the daemon instead of degrading to HTTP.
+    if args.driver == "webbridge" and not ensure_webbridge_daemon(daemon_url=args.daemon_url):
+        return _print_need_input(
+            ["jas_session"],
+            list(ASK_WEBRIDGE),
+            detail="Kimi WebBridge daemon could not be started automatically",
+        )
 
     client = None
     if args.driver == "webbridge":

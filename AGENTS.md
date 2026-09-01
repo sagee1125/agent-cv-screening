@@ -48,10 +48,10 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
    ```
 
-   - Kimi WebBridge must be running; check first with
-     `curl -s -m 5 -X POST http://127.0.0.1:10086/status`. If it is not, start it with
-     `& "$env:USERPROFILE\.kimi-webbridge\bin\kimi-webbridge.exe" start`.
-   - If the daemon is down and cannot be started, fall back to the headless HTTP driver:
+   - The WebBridge human flow is the default; `run_webridge_collect.py --driver webbridge`
+     auto-starts the Kimi WebBridge daemon when it is down (probes `http://127.0.0.1:10086/status`).
+   - Only if the daemon still cannot be started (or HR explicitly asks for the offline/HTTP path),
+     fall back to the headless HTTP driver:
      `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno>" --driver http`
    - Only if HR explicitly asks for the offline/HTTP path, or hands over an **already exported
      folder** (`records.html` + `cvs/`), run jas-import directly:

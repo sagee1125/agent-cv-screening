@@ -51,7 +51,9 @@ python .codex/skills/host-envelope/scripts/run_host_envelope.py --tool screen_re
 
 - Never `--skip-reports`. Never `--output-dir` inside this repo or the export folder.
 - Live URL or refno for the internal JAS: add `--cookie-file` only after JAS access is granted.
-- If the WebBridge daemon is down, fall back to `--driver http` for the public demo.
+- The wrapper auto-starts the Kimi WebBridge daemon when it is down; never silently fall
+  back to `--driver http` for a refno/URL — the visible browser human flow is the default.
+  Use `--driver http` only when HR explicitly asks for the offline/public-demo HTTP path.
 - Exit codes: `0` success/partial_success, `2` need_input, `1` error (JSON on stderr).
 
 ## Tool map: HR question -> command -> what is safe to quote
@@ -104,7 +106,9 @@ Only the "safe to quote" fields may enter this conversation. Everything else sta
 
 - `error_code: "not_found"` (status `error`) means the refno has no matching job on
   the JAS system. Tell HR in the language they used and stop — do NOT re-run, do not
-  ask for CVs/JD, and do not retry with another driver. Example replies:
+  ask for CVs/JD, and do not retry with another driver. In WebBridge mode the browser
+  stays open on the list page with the refno typed into the search filter (no results),
+  so HR can see the search themselves; never close that tab. Example replies:
   > 查無此職位／查不到這個 refno，請再確認編號是否正確。
   > No job was found for that reference number; please double-check it.
 - Only quote the refno back; never paste the raw error text if it contains URLs or paths.

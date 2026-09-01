@@ -59,7 +59,9 @@ python .codex/skills/webridge-collect/scripts/run_webridge_collect.py 2600827001
   cursor that glides to the filter, types the refno, and presses the View link, so HR watches the interaction.
 - Then runs `run_jas_import.py <folder>` -> `Desktop/workbuddy-cv-screen/<refno>/`.
 - Exit codes: `0` success/partial_success, `1` error, `2` need_input (`refno` or `jas_session`).
-- WebBridge daemon down -> `need_input` with an instruction to start it (or use `--driver http`).
+- WebBridge daemon down -> the script auto-starts it (and waits for it to come up);
+  only if it still cannot start -> `need_input` asking to start it. It never silently
+  degrades to `--driver http` for a refno/URL.
 - CV filenames are derived from application numbers only; person-named files are never used.
 - TLS: the HTTP driver respects `JAS_SSL_VERIFY` (`system` / `0` / `false` / CA bundle
   path) like the jas-import fetcher; WebBridge mode uses the browser's own trust store.
