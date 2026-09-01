@@ -5,6 +5,10 @@ description: "Collect one JAS job (records.html + all candidate CVs) using Kimi 
 
 # WebBridge Collect Skill
 
+**This is the default entry point for "screen refno \<digits\>" / "筛 \<digits\>" (see AGENTS.md).**
+It drives the user's real browser so HR watches the full human flow; `jas-import` is only
+used directly when HR supplies an already-exported folder.
+
 Simulate a human in a real browser (Kimi WebBridge) to open the job records page,
 save the full HTML, download every candidate CV named by application number, and
 then hand the folder to the existing `jas-import` pipeline for scoring and reports.
@@ -51,6 +55,8 @@ python .codex/skills/webridge-collect/scripts/run_webridge_collect.py 2600827001
 - Writes `<collect-dir>/<refno>/records.html` + `cvs/<appno>.pdf` + `_webridge-manifest.json`.
 - WebBridge driver simulates a human: it opens the job list page, types the refno into the Ref no. filter,
   locates the job row, and opens its View link (falls back to the records URL directly when the row is not found).
+- The human flow auto-focuses the new browser tab (CDP `Page.bringToFront`) and drives a visible ghost
+  cursor that glides to the filter, types the refno, and presses the View link, so HR watches the interaction.
 - Then runs `run_jas_import.py <folder>` -> `Desktop/workbuddy-cv-screen/<refno>/`.
 - Exit codes: `0` success/partial_success, `1` error, `2` need_input (`refno` or `jas_session`).
 - WebBridge daemon down -> `need_input` with an instruction to start it (or use `--driver http`).

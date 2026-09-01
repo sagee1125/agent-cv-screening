@@ -109,12 +109,16 @@ def test_collect_http_driver_writes_folder(tmp_path, monkeypatch) -> None:
 # The WebBridge driver simulates a human (list page -> View link) and writes the same folder layout.
 def test_collect_webridge_driver_writes_folder(tmp_path) -> None:
     class FakeBrowser:
-        # Record navigations and return the demo page HTML.
+        # Record navigations + CDP calls and return the demo page HTML.
         def __init__(self):
             self.urls = []
+            self.cdp_calls = []
 
         def navigate(self, url, *, new_tab=True, group_title=None):
             self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            self.cdp_calls.append(method)
 
         # Simulate the human flow: the list page was read and the View link was found.
         def evaluate(self, code):
@@ -139,8 +143,9 @@ def test_collect_webridge_driver_writes_folder(tmp_path) -> None:
         client=browser,  # type: ignore[arg-type]
     )
 
-    # Human flow: land on the job list page first, then open the row's View link.
+    # Human flow: land on the job list page first, then open the row's View link, keeping the tab focused.
     assert browser.urls == [DEMO_BASE_URL + "/", RECORDS_URL]
+    assert browser.cdp_calls.count("Page.bringToFront") == 2
     assert (folder / "records.html").is_file()
     assert (folder / "cvs" / "2600827004.pdf").read_bytes() == b"%PDF"
     assert manifest["cv_downloaded"] == ["2600827004"]
@@ -149,12 +154,16 @@ def test_collect_webridge_driver_writes_folder(tmp_path) -> None:
 # When the job row is not found on the list page, the WebBridge flow falls back to the records URL directly.
 def test_collect_webridge_human_flow_falls_back_to_records_url(tmp_path) -> None:
     class FakeBrowser:
-        # Record navigations and return the demo page HTML.
+        # Record navigations + CDP calls and return the demo page HTML.
         def __init__(self):
             self.urls = []
+            self.cdp_calls = []
 
         def navigate(self, url, *, new_tab=True, group_title=None):
             self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            self.cdp_calls.append(method)
 
         # Simulate the list page not containing the requested job.
         def evaluate(self, code):
@@ -277,6 +286,20 @@ def test_webridge_client_daemon_error_raises(monkeypatch) -> None:
     with pytest.raises(WebBridgeError) as exc:
         client.command("evaluate", {"code": "x"})
     assert exc.value.reason == "extension_error"
+
+
+# WebBridgeClient.cdp forwards a CDP method and returns the result payload.
+def test_webridge_client_cdp_forwards(monkeypatch) -> None:
+    client = WebBridgeClient(session="test-session")
+    calls: list[tuple[str, dict | None]] = []
+
+    def fake_command(action, args=None):
+        calls.append((action, args))
+        return {"result": {"ok": True}}
+
+    monkeypatch.setattr(client, "command", fake_command)
+    assert client.cdp("Page.bringToFront", {"x": 1}) == {"ok": True}
+    assert calls == [("cdp", {"method": "Page.bringToFront", "params": {"x": 1}})]
 
 
 # An unreachable daemon raises WebBridgeError with a machine-readable reason.

@@ -75,6 +75,16 @@ class WebBridgeClient:
             args["group_title"] = group_title
         return self.command("navigate", args)
 
+    # Run a raw Chrome DevTools Protocol command (e.g. Page.bringToFront) through the daemon.
+    def cdp(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        args: dict[str, Any] = {"method": method}
+        if params:
+            args["params"] = params
+        data = self.command("cdp", args)
+        if isinstance(data, dict) and "result" in data:
+            return data["result"]
+        return data
+
     # Run JS in the current tab and return its JSON-encodable value.
     def evaluate(self, code: str) -> Any:
         data = self.command("evaluate", {"code": code})

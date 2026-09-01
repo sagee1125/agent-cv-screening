@@ -18,23 +18,51 @@ from webridge_collect.client import WebBridgeClient
 COLLECT_ROOT_NAME = "jes_webridge"
 MANIFEST_NAME = "_webridge-manifest.json"
 
-# JS run in the browser: type the refno into the Ref no. column filter, then locate and read the job row's View link.
-HUMAN_LIST_JS = """(() => {
+# JS run in the browser: drive a visible ghost cursor to type the refno into the filter and press the row's View link.
+GHOST_CURSOR_JS = """(async () => {
   const refno = %r;
+  const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+  let cursor = document.getElementById('jes-ghost-cursor');
+  if (!cursor) {
+    cursor = document.createElement('div');
+    cursor.id = 'jes-ghost-cursor';
+    cursor.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;width:34px;height:34px;transition:left .4s ease, top .4s ease;';
+    cursor.innerHTML = '<svg width="34" height="34" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 2 L4 17 L8.5 12.5 L12 20 L15 18.5 L11.5 11 L16 11 Z" fill="white" stroke="#1f2937" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+    document.body.appendChild(cursor);
+  }
+  const move = async (el) => {
+    const rect = el.getBoundingClientRect();
+    cursor.style.left = (rect.left + rect.width / 2 - 3) + 'px';
+    cursor.style.top = (rect.top + rect.height / 2 - 3) + 'px';
+    await sleep(450);
+  };
   // Type the reference number into the first (Ref no.) column search box, like a human.
   const inputs = Array.from(document.querySelectorAll('thead input[aria-label="Search column"], thead input[placeholder*="Filter" i]'));
   let typed = false;
   if (inputs.length) {
+    const filter = inputs[0];
+    await move(filter);
+    filter.focus();
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    setter.call(inputs[0], refno);
-    for (const evt of ['input', 'keyup', 'change']) inputs[0].dispatchEvent(new Event(evt, {bubbles: true}));
+    for (let i = 0; i <= refno.length; i++) {
+      setter.call(filter, refno.slice(0, i));
+      filter.dispatchEvent(new Event('input', {bubbles: true}));
+      filter.dispatchEvent(new Event('keyup', {bubbles: true}));
+      await sleep(70);
+    }
+    await sleep(250);
     typed = true;
   }
-  // Find the row that carries this reference number and return its View link.
+  // Find the job row and press its View link (visual press only; the script opens the link itself).
   const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.innerText.includes(refno));
   if (!row) return {typed: typed, clicked: false, reason: 'row-not-found'};
   const link = Array.from(row.querySelectorAll('a')).find(a => /view/i.test(a.innerText || '')) || row.querySelector('a');
   if (!link) return {typed: typed, clicked: false, reason: 'link-not-found'};
+  await move(link);
+  link.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
+  await sleep(150);
+  link.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true}));
+  await sleep(200);
   return {typed: typed, clicked: true, href: link.href || '', text: (link.innerText || '').trim()};
 })()"""
 
@@ -52,12 +80,22 @@ def origin_of(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-# Open the records page like a human: land on the job list page, type the refno into the filter, then return the row's View link.
+# Bring the current browser tab to the foreground so HR watches the human flow.
+def _focus_current_tab(browser: WebBridgeClient) -> None:
+    try:
+        if hasattr(browser, "cdp"):
+            browser.cdp("Page.bringToFront")
+    except Exception:
+        pass
+
+
+# Open the records page like a human: focus the tab, drive the ghost cursor through the filter, then return the row's View link.
 def navigate_like_human(browser: WebBridgeClient, *, refno: str, base_url: str, records_url: str) -> str:
     list_url = f"{base_url.rstrip('/')}/"
     browser.navigate(list_url, new_tab=True, group_title="JES demo screening")
+    _focus_current_tab(browser)
     try:
-        found = browser.evaluate(HUMAN_LIST_JS % refno)
+        found = browser.evaluate(GHOST_CURSOR_JS % refno)
     except Exception:
         found = None
     if isinstance(found, dict) and found.get("clicked") and found.get("href"):
@@ -90,8 +128,10 @@ def collect_job(
             # Human-like flow: find the job on the list page, then open its View link.
             target = navigate_like_human(browser, refno=refno, base_url=base_url, records_url=records_url)
             browser.navigate(target, new_tab=False, group_title="JES demo screening")
+            _focus_current_tab(browser)
         else:
             browser.navigate(records_url, new_tab=True, group_title="JES demo screening")
+            _focus_current_tab(browser)
         html = browser.page_html()
     (folder / "records.html").write_text(html, encoding="utf-8")
     job = job_payload_from_html(html, base_url=effective_base)

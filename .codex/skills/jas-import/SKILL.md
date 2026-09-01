@@ -16,9 +16,15 @@ Reports: `Desktop\workbuddy-cv-screen\<refno>\ranking-overview.html`
 | HR says                                | Command (from repo root)                                                                   |
 | -------------------------------------- | ------------------------------------------------------------------------------------------ |
 | 用 jas-import 離綫篩選 `<folder>`      | `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`                     |
-| Screen this job / 筛一下 + records URL | `python .codex/skills/jas-import/scripts/run_jas_import.py "<url>" --cookie-file <jar>`    |
-| Screen refno / 筛 `<digits>`           | `python .codex/skills/jas-import/scripts/run_jas_import.py "<digits>" --cookie-file <jar>` |
+| Screen this job / 筛一下 + records URL | `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<url>" --driver webbridge`   |
+| Screen refno / 筛 `<digits>`           | `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<digits>" --driver webbridge` |
 | No refno, link, or folder              | Do not run yet. Ask in the language HR used (or both EN+ZH).                               |
+
+> For a **refno or URL** prefer `webridge-collect`: it drives the real browser via Kimi
+> WebBridge and shows the human flow, then calls this same pipeline. Use `jas-import`
+> directly only for HR-exported folders, or add `--driver http` when the WebBridge
+> daemon is unavailable. `demo_mode.json` supplies `--base-url` / `--allow-host` /
+> `--no-cookie` automatically.
 
 Forbidden:
 
