@@ -15,6 +15,7 @@ ALLOWED_ERROR_CODES = frozenset(
         "refno_invalid",
         "fetch_failed",
         "need_input",
+        "not_found",
         "pipeline_error",
         "partial_failures",
         "internal",

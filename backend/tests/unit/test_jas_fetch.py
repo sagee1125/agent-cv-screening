@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
 
 from jas_import import fetch  # noqa: E402
+from jas_import.errors import JobNotFoundError  # noqa: E402
 from jas_import.mock import mock_records_html  # noqa: E402
 
 ALLOWED_JD_URL = "https://jobs.polyu.edu.hk/internal/records.php?refno=260818001"
@@ -148,7 +149,7 @@ def test_fetch_jd_text_rejects_page_without_jd_table(monkeypatch) -> None:
         return Response()
 
     monkeypatch.setattr(fetch, "_request", fake_request)
-    with pytest.raises(ValueError, match="job advertisement table"):
+    with pytest.raises(ValueError, match="job advertisement"):
         asyncio.run(fetch.fetch_jd_text(ALLOWED_JD_URL))
 
 
@@ -177,7 +178,7 @@ def test_fetch_job_payload_rejects_page_without_jd_table(monkeypatch) -> None:
         return Response()
 
     monkeypatch.setattr(fetch, "_request", fake_request)
-    with pytest.raises(ValueError, match="job advertisement table"):
+    with pytest.raises(ValueError, match="job advertisement"):
         asyncio.run(fetch.fetch_job_payload(ALLOWED_JD_URL))
 
 
@@ -510,3 +511,36 @@ def test_pipeline_resolve_url_inputs_demo_host(tmp_path, monkeypatch) -> None:
     assert "jes-web-demo.vercel.app" in captured["cv_kwargs"]["allowed_hosts"]
     state = json.loads((tmp_path / "state" / "2600827001.json").read_text(encoding="utf-8"))
     assert state["cv_meta"][demo_cv_url]["etag"] == '"abc"'
+
+
+# A records page without a job reference is reported as not found.
+def test_fetch_job_payload_not_found_raises(monkeypatch) -> None:
+    async def fake_fetch_html(url, cookie_file=None, allowed_hosts=None):
+        return "<html><body>No matching records</body></html>"
+
+    monkeypatch.setattr(fetch, "fetch_html", fake_fetch_html)
+    with pytest.raises(JobNotFoundError):
+        asyncio.run(
+            fetch.fetch_job_payload(
+                ALLOWED_JD_URL,
+                base_url="https://jobs.polyu.edu.hk",
+                allowed_hosts=("jobs.polyu.edu.hk",),
+            )
+        )
+
+
+# A records page with a JD but no job reference is also reported as not found.
+def test_fetch_job_payload_missing_refno_raises(monkeypatch) -> None:
+    async def fake_fetch_html(url, cookie_file=None, allowed_hosts=None):
+        return "<html><body><table><tr><td>Post title</td><td>Engineer</td></tr></table></body></html>"
+
+    monkeypatch.setattr(fetch, "fetch_html", fake_fetch_html)
+    with pytest.raises(JobNotFoundError):
+        asyncio.run(
+            fetch.fetch_job_payload(
+                ALLOWED_JD_URL,
+                base_url="https://jobs.polyu.edu.hk",
+                allowed_hosts=("jobs.polyu.edu.hk",),
+            )
+        )
+

@@ -230,3 +230,36 @@ def test_project_check_updates_error() -> None:
     assert envelope["error_code"] == "pipeline_error"
     assert "C:" not in (envelope.get("error_message") or "")
     assert "Users" not in (envelope.get("error_message") or "")
+
+
+# A skill-reported not_found error survives projection for screen_refno.
+def test_project_screen_preserves_not_found_error_code() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "error",
+            "error_code": "not_found",
+            "error_message": "no JAS job found for refno 999999999",
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["status"] == "error"
+    assert envelope["error_code"] == "not_found"
+    assert envelope["ranking"] == []
+
+
+# check_updates projection keeps the explicit not_found error code.
+def test_project_check_updates_preserves_not_found_error_code() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={
+            "status": "error",
+            "error_code": "not_found",
+            "error_message": "no JAS job found for refno 999999999",
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["status"] == "error"
+    assert envelope["error_code"] == "not_found"
+    assert envelope["changes"] is None
+    assert envelope["has_changes"] is None

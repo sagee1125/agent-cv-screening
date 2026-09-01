@@ -100,6 +100,15 @@ Only the "safe to quote" fields may enter this conversation. Everything else sta
   and to give a bare refno, or switch demo mode off for internal JAS.
 - `need_input(missing: candidates)` -> tell HR no CVs were found for this job.
 
+## not_found handling
+
+- `error_code: "not_found"` (status `error`) means the refno has no matching job on
+  the JAS system. Tell HR in the language they used and stop — do NOT re-run, do not
+  ask for CVs/JD, and do not retry with another driver. Example replies:
+  > 查無此職位／查不到這個 refno，請再確認編號是否正確。
+  > No job was found for that reference number; please double-check it.
+- Only quote the refno back; never paste the raw error text if it contains URLs or paths.
+
 ## What to tell HR after success (same language they used)
 
 English:

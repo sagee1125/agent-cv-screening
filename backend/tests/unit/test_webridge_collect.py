@@ -20,6 +20,7 @@ JAS_SRC = SKILLS_DIR / "jas-import" / "src"
 for path in (COLLECT_SRC, SHARED_SRC, JAS_SRC):
     sys.path.insert(0, str(path))
 
+from jas_import.errors import JobNotFoundError  # noqa: E402
 from webridge_collect import collect  # noqa: E402
 from webridge_collect.client import WebBridgeClient, WebBridgeError  # noqa: E402
 
@@ -201,7 +202,7 @@ def test_collect_webridge_refuses_wrong_job(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(collect._jas_fetch, "fetch_html", fake_fetch_html)
     monkeypatch.setattr(collect._jas_fetch, "download_to", fake_download_to)
-    with pytest.raises(ValueError):
+    with pytest.raises(JobNotFoundError):
         collect.collect_job(
             records_url=RECORDS_URL,
             folder=tmp_path / "job",
@@ -398,3 +399,25 @@ def test_cli_http_driver_runs_pipeline(tmp_path, monkeypatch, capsys) -> None:
     assert payload["status"] == "success"
     assert payload["refno"] == "2600827001"
     assert payload["hr_files"] == "Desktop/workbuddy-cv-screen/2600827001"
+
+
+# CLI maps a not-found collection to error_code not_found (exit 1).
+def test_cli_not_found_reports_error_code(monkeypatch, capsys) -> None:
+    module = _import_cli()
+
+    def fake_collect_job(**kwargs):
+        raise JobNotFoundError("no JAS job found for refno 999999999")
+
+    monkeypatch.setattr(module, "collect_job", fake_collect_job)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [module.__file__, "999999999", "--driver", "http", "--collect-dir", "tmp", "--no-pipeline"],
+    )
+    exit_code = module.main()
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "not_found"
+    assert "999999999" in payload["error_message"]

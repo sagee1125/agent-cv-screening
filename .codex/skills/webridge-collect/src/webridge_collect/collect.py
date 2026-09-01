@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from jas_import import fetch as _jas_fetch
+from jas_import.errors import JobNotFoundError
 from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import refno_from_url
 from screening_core.hr_output import safe_pack_id
@@ -135,12 +136,15 @@ def collect_job(
         html = browser.page_html()
     (folder / "records.html").write_text(html, encoding="utf-8")
     job = job_payload_from_html(html, base_url=effective_base)
+    refno_label = refno or refno_from_url(records_url) or "the requested job"
     if not (job.get("refno") or "").strip():
-        raise ValueError(f"URL did not look like a JAS records page: {records_url}")
+        raise JobNotFoundError(f"no JAS job found for {refno_label} (page had no job reference)")
     if refno and str(job.get("refno") or "").strip() != refno:
-        raise ValueError(f"records page returned job {job.get('refno')!r}, expected {refno!r}; refusing to collect the wrong job")
+        raise JobNotFoundError(
+            f"no JAS job found for refno {refno} (records page returned job {job.get('refno')!r})"
+        )
     if not (job.get("jd_text") or "").strip():
-        raise ValueError("JAS page did not contain a recognizable job advertisement table")
+        raise JobNotFoundError(f"no JAS job found for {refno_label} (page had no job advertisement)")
 
     failures: list[dict[str, Any]] = []
     cvs: dict[str, Path] = {}

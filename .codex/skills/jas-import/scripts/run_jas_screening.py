@@ -26,6 +26,7 @@ from urllib.parse import unquote, urlparse
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
+from jas_import.errors import JobNotFoundError
 from jas_import.fetch import download_to_if_changed, fetch_job_payload
 from jas_import.skill import parse_job_skill
 from screening_core.candidate_id import appno_from_filename, is_jas_refno, records_url_for_refno, refno_from_url
@@ -446,6 +447,12 @@ def run_url_screening(args: argparse.Namespace) -> int:
         job = asyncio.run(
             fetch_job_payload(args.records_url, cookie_file=args.cookie_file, base_url=base_url, allowed_hosts=allowed_hosts)
         )
+    except JobNotFoundError as exc:
+        print(
+            json.dumps({"status": "error", "error_code": "not_found", "error_message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     except Exception as exc:
         if _is_auth_failure(exc):
             return _print_need_input(["jas_session"], list(ASK_JAS_SESSION))
@@ -456,6 +463,21 @@ def run_url_screening(args: argparse.Namespace) -> int:
         refno = _safe_identifier(job.get("refno") or "job", label="reference number")
     except ValueError as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return EXIT_ERROR
+
+    requested_refno = refno_from_url(args.records_url)
+    if requested_refno and str(job.get("refno") or "").strip() != requested_refno:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_code": "not_found",
+                    "error_message": f"no JAS job found for refno {requested_refno} (records page returned job {job.get('refno')!r})",
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
         return EXIT_ERROR
     scratch_root = _resolve_scratch_root(args.scratch_dir)
     scratch_job = scratch_root / refno

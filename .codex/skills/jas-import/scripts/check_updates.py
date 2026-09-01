@@ -10,6 +10,7 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 import run_jas_screening as screening  # same-dir URL helpers
 
+from jas_import.errors import JobNotFoundError
 from jas_import.fetch import fetch_job_payload
 from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import is_jas_refno, refno_from_url
@@ -128,6 +129,12 @@ def main() -> int:
     allowed_hosts = merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), tuple(args.allow_host))
     try:
         job = _fetch_job(records_url, args, allowed_hosts)
+    except JobNotFoundError as exc:
+        print(
+            json.dumps({"status": "error", "error_code": "not_found", "error_message": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
     except Exception as exc:
         if args.driver == "webbridge":
             from webridge_collect.client import WebBridgeError
@@ -137,6 +144,21 @@ def main() -> int:
         if screening._is_auth_failure(exc):
             return _print_need_input(["jas_session"], list(ASK_JAS_SESSION))
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return EXIT_ERROR
+
+    # A records page that returns a different job means the requested refno does not exist.
+    if refno and str(job.get("refno") or "").strip() != refno:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_code": "not_found",
+                    "error_message": f"no JAS job found for refno {refno} (records page returned job {job.get('refno')!r})",
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
     job_refno = str(job.get("refno") or refno or "job")

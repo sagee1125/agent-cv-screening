@@ -9,8 +9,10 @@ from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 
+from jas_import.errors import JobNotFoundError
 from jas_import.records import build_jd_text, parse_job_html
 from jas_import.skill import job_payload_from_html
+from screening_core.candidate_id import refno_from_url
 from screening_core.input_policy import validate_url
 from screening_core.ssl_verify import resolve_ssl_verify
 
@@ -161,10 +163,11 @@ async def fetch_job_payload(
 ) -> dict[str, Any]:
     html = await fetch_html(url, cookie_file=cookie_file, allowed_hosts=allowed_hosts)
     payload = job_payload_from_html(html, base_url=base_url)
+    refno = refno_from_url(url) or payload.get("refno") or "the requested job"
     if not payload.get("refno"):
-        raise ValueError(f"URL did not look like a JAS records page: {url}")
+        raise JobNotFoundError(f"no JAS job found for {refno} (page had no job reference)")
     if not (payload.get("jd_text") or "").strip():
-        raise ValueError("JAS page did not contain a recognizable job advertisement table")
+        raise JobNotFoundError(f"no JAS job found for {refno} (page had no job advertisement)")
     return payload
 
 

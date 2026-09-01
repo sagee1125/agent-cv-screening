@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+from jas_import.errors import JobNotFoundError
+
 # backend/tests/unit/test_jas_screening_url.py -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -330,7 +332,7 @@ def test_run_url_screening_demo_host_allowed(tmp_path, monkeypatch, capsys) -> N
 
     async def fake_fetch(url, cookie_file=None, **kwargs):
         captured["kwargs"] = kwargs
-        return _job_payload()
+        return _job_payload(refno="2600827001")  # must match the URL refno
 
     async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
@@ -353,7 +355,8 @@ def test_run_url_screening_demo_host_allowed(tmp_path, monkeypatch, capsys) -> N
     assert exit_code == module.EXIT_OK
     assert captured["kwargs"]["base_url"] == DEMO_BASE_URL
     assert "jes-web-demo.vercel.app" in captured["kwargs"]["allowed_hosts"]
-    assert not (tmp_path / "scratch" / "2600827001").exists()
+    # The matching demo job is collected into its own scratch dir (kept for reuse).
+    assert (tmp_path / "scratch" / "2600827001").exists()
 
 
 # main() accepts a bare refno for the public demo without a cookie jar.
@@ -451,3 +454,38 @@ def test_run_url_screening_writes_state(tmp_path, monkeypatch, capsys) -> None:
     assert state["history"][-1]["result"] == "success"
     assert state["cv_hashes"]["123456"]
     assert state["last_screen"]["candidates"]["123456"] == "S"
+
+
+# A not-found job in URL mode is reported with error_code not_found (exit 1).
+def test_run_url_screening_not_found_reports_error_code(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+
+    async def fake_fetch(url, cookie_file=None, **kwargs):
+        raise JobNotFoundError("no JAS job found for refno 260818001")
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    exit_code = module.run_url_screening(_url_args(tmp_path))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "not_found"
+    assert "260818001" in payload["error_message"]
+
+
+# URL mode refuses to screen when the records page returns a different job.
+def test_run_url_screening_wrong_job_reports_not_found(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+
+    async def fake_fetch(url, cookie_file=None, **kwargs):
+        return _job_payload(refno="260806012")  # page returns a different job
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    exit_code = module.run_url_screening(_url_args(tmp_path))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "not_found"
+    assert "260806012" in payload["error_message"]
+

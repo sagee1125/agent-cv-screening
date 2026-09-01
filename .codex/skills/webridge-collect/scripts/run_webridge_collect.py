@@ -17,6 +17,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
+from jas_import.errors import JobNotFoundError
 from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.demo_mode import apply_demo_defaults
 from screening_core.hr_output import HR_PACK_FOLDER
@@ -146,6 +147,8 @@ def main() -> int:
             cookie_file=args.cookie_file,
             client=client,
         )
+    except JobNotFoundError as exc:
+        return _emit({"status": "error", "error_code": "not_found", "error_message": str(exc)}, to_stderr=True)
     except WebBridgeError as exc:
         if exc.reason == "daemon-unreachable":
             return _print_need_input(["jas_session"], list(ASK_WEBRIDGE), detail=str(exc))

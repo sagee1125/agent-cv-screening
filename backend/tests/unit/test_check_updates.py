@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from jas_import.errors import JobNotFoundError
+
 # backend/tests/unit/test_check_updates.py -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
@@ -312,3 +314,35 @@ def test_check_webbridge_daemon_down_need_input(tmp_path, monkeypatch, capsys) -
     payload = json.loads(out)
     assert payload["status"] == "need_input"
     assert payload["missing"] == ["jas_session"]
+
+
+# A missing job is reported as an error with error_code not_found (exit 1).
+def test_check_not_found_reports_error_code(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    async def fake_fetch(url, cookie_file=None, base_url=None, allowed_hosts=None):
+        raise JobNotFoundError("no JAS job found for refno 260818001")
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    exit_code, out, err = _run(module, ["260818001", "--state-dir", str(tmp_path / "state")], monkeypatch, capsys)
+    assert exit_code == 1
+    payload = json.loads(err)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "not_found"
+    assert "260818001" in payload["error_message"]
+
+
+# A records page that returns a different job is reported not_found (never checks the wrong job).
+def test_check_wrong_job_reports_not_found(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    async def fake_fetch(url, cookie_file=None, base_url=None, allowed_hosts=None):
+        return _job_payload(refno="260806012")  # page returns a different job
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    exit_code, out, err = _run(module, ["260818001", "--state-dir", str(tmp_path / "state")], monkeypatch, capsys)
+    assert exit_code == 1
+    payload = json.loads(err)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "not_found"
+    assert "260806012" in payload["error_message"]

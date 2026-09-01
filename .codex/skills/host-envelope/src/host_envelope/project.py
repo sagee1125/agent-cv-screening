@@ -7,6 +7,7 @@ from typing import Any
 
 from host_envelope.sanitize import looks_like_forbidden_payload, looks_like_secret_ask, sanitize_text
 from host_envelope.schema import (
+    ALLOWED_ERROR_CODES,
     ALLOWED_FAILURE_STAGES,
     ALLOWED_HR_STATUS,
     ALLOWED_MISSING,
@@ -85,6 +86,14 @@ def _error_code(status: str, error_message: str | None) -> str | None:
     if "fetch" in text or "http" in text:
         return "fetch_failed"
     return "pipeline_error"
+
+
+# Picks the host error_code: an explicit payload code wins when allowed, else derive from text.
+def _project_error_code(payload: dict[str, Any], status: str, error_message: str | None) -> str | None:
+    code = payload.get("error_code")
+    if code in ALLOWED_ERROR_CODES:
+        return code
+    return _error_code(status, error_message)
 
 
 # Intersects ask.missing with the host enum; empty lists become ["input"].
@@ -328,7 +337,7 @@ def _project_check_updates(payload: dict[str, Any], jas_session: str | None, coo
         "schema_version": SCHEMA_VERSION,
         "tool": "check_updates",
         "status": status,
-        "error_code": _error_code(status, err_text),
+        "error_code": _project_error_code(payload, status, err_text),
         "error_message": err_text if status == "error" else None,
         "run_id": _run_id(None, refno),
         "refno": refno,
@@ -432,7 +441,7 @@ def project_host_return(
         "schema_version": SCHEMA_VERSION,
         "tool": safe_tool,
         "status": status,
-        "error_code": _error_code(status, err_text),
+        "error_code": _project_error_code(skill, status, err_text),
         "error_message": err_text if status == "error" else None,
         "run_id": _run_id(run_id, refno),
         "refno": refno,
