@@ -11,6 +11,7 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 import run_jas_screening as screening  # same-dir URL helpers
 
 from jas_import.fetch import fetch_job_payload
+from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.demo_mode import apply_demo_defaults
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
@@ -35,6 +36,10 @@ ASK_JAS_SESSION = (
     "Please allow access to the internal job records page so the update check can continue.",
     "請允許存取內部招聘記錄頁，以便檢查更新。",
 )
+ASK_WEBRIDGE = (
+    "Please start Kimi WebBridge (or rerun with --driver http for the public demo).",
+    "請啟動 Kimi WebBridge（公開 demo 可直接改用 --driver http）。",
+)
 
 
 # Print a host-projectable need_input envelope and return exit code 2.
@@ -48,6 +53,28 @@ def _print_need_input(missing: list[str], questions: list[str], **extra: object)
     }
     print(json.dumps(payload, ensure_ascii=False))
     return EXIT_NEED_INPUT
+
+
+# Fetch the job payload via the chosen driver (http or webbridge).
+def _fetch_job(records_url: str, args: argparse.Namespace, allowed_hosts: tuple[str, ...]) -> dict:
+    if getattr(args, "driver", "http") == "webbridge":
+        from webridge_collect.client import WebBridgeClient, WebBridgeError
+
+        browser = WebBridgeClient(
+            daemon_url=getattr(args, "daemon_url", "http://127.0.0.1:10086"),
+            session=getattr(args, "session", "jes-update-check"),
+        )
+        browser.navigate(records_url, new_tab=True, group_title="JES update check")
+        html = browser.page_html()
+        return job_payload_from_html(html, base_url=args.base_url)
+    return asyncio.run(
+        fetch_job_payload(
+            records_url,
+            cookie_file=args.cookie_file,
+            base_url=args.base_url,
+            allowed_hosts=allowed_hosts,
+        )
+    )
 
 
 # Build the argparse CLI for the update checker.
@@ -73,6 +100,14 @@ def main() -> int:
     parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt for authenticated fetches.")
     parser.add_argument("--state-dir", default=None, help="Job-state directory (default repo data/jas_state).")
     parser.add_argument("--no-store", action="store_true", help="Report changes without updating stored state.")
+    parser.add_argument(
+        "--driver",
+        choices=("webbridge", "http"),
+        default="http",
+        help="Collection driver: webbridge uses the live browser session; http fetches directly (default http).",
+    )
+    parser.add_argument("--session", default="jes-update-check", help="WebBridge session (tab group) name.")
+    parser.add_argument("--daemon-url", default="http://127.0.0.1:10086", help="WebBridge daemon URL.")
     args = parser.parse_args()
     apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
 
@@ -92,10 +127,13 @@ def main() -> int:
 
     allowed_hosts = merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), tuple(args.allow_host))
     try:
-        job = asyncio.run(
-            fetch_job_payload(records_url, cookie_file=args.cookie_file, base_url=args.base_url, allowed_hosts=allowed_hosts)
-        )
+        job = _fetch_job(records_url, args, allowed_hosts)
     except Exception as exc:
+        if args.driver == "webbridge":
+            from webridge_collect.client import WebBridgeError
+
+            if isinstance(exc, WebBridgeError) and exc.reason == "daemon-unreachable":
+                return _print_need_input(["jas_session"], list(ASK_WEBRIDGE), detail=str(exc))
         if screening._is_auth_failure(exc):
             return _print_need_input(["jas_session"], list(ASK_JAS_SESSION))
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -104,7 +142,9 @@ def main() -> int:
     job_refno = str(job.get("refno") or refno or "job")
     state_dir = Path(args.state_dir) if args.state_dir else (_bootstrap.REPO_ROOT / "data" / "jas_state")
     state = load_job_state(state_dir, job_refno)
-    previous = state.get("last_check") or state.get("last_screen")
+    # Prefer the last successful screen snapshot so a failed screening doesn't
+    # mask still-pending changes; fall back to the last check when no screen ran.
+    previous = state.get("last_screen") or state.get("last_check")
     snapshot = current_snapshot(job)
     first_check = previous is None
     changes = (

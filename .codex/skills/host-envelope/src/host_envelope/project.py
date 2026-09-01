@@ -41,6 +41,9 @@ def rejected_envelope(tool: str, message: str) -> dict[str, Any]:
         "ranking": [],
         "reports": None,
         "scratch_retained": None,
+        "has_changes": None,
+        "first_check": None,
+        "changes": None,
     }
 
 
@@ -295,6 +298,59 @@ def _payload_is_dirty(value: Any) -> bool:
     return False
 
 
+# Projects a check_updates stdout payload into the host envelope (no ranking, just change summary).
+def _project_check_updates(payload: dict[str, Any], jas_session: str | None, cookie_file_present: bool | None) -> dict[str, Any]:
+    status = _status(payload.get("status"))
+    refno = str(payload.get("refno") or "").strip() or None
+    if refno and not str(refno).isdigit():
+        refno = None
+    title = sanitize_text(payload.get("post_title"), 120) if payload.get("post_title") else None
+    if title and looks_like_forbidden_payload(title):
+        title = None
+    err_text = sanitize_text(payload.get("error_message"), 160) if payload.get("error_message") else None
+    if err_text and looks_like_forbidden_payload(err_text):
+        err_text = "update check failed"
+    raw_changes = payload.get("changes") or {}
+    changes = {
+        "jd_changed": bool(raw_changes.get("jd_changed", False)),
+        "added": [str(a) for a in (raw_changes.get("added") or [])][:200],
+        "removed": [str(r) for r in (raw_changes.get("removed") or [])][:200],
+        "status_changed": {
+            str(k): str(v) if isinstance(v, str) else str(v.get("to", "")) if isinstance(v, dict) else ""
+            for k, v in (raw_changes.get("status_changed") or {}).items()
+        } if isinstance(raw_changes.get("status_changed"), dict) else {},
+    }
+    session = jas_session if jas_session in ALLOWED_SESSION else None
+    auth = None
+    if session is not None:
+        auth = {"jas_session": session, "cookie_file_present": bool(cookie_file_present)}
+    envelope = {
+        "schema_version": SCHEMA_VERSION,
+        "tool": "check_updates",
+        "status": status,
+        "error_code": _error_code(status, err_text),
+        "error_message": err_text if status == "error" else None,
+        "run_id": _run_id(None, refno),
+        "refno": refno,
+        "post_title": title,
+        "engine": None,
+        "candidate_count": payload.get("candidate_count"),
+        "failed_count": None,
+        "auth": auth,
+        "ask": _project_ask({**payload, "status": status}) if status == "need_input" else None,
+        "ranking": [],
+        "reports": None,
+        "scratch_retained": None,
+        "has_changes": payload.get("has_changes"),
+        "first_check": payload.get("first_check"),
+        "changes": changes if status != "error" else None,
+    }
+    errors = validate_envelope(envelope)
+    if errors or _payload_is_dirty(envelope):
+        return rejected_envelope("check_updates", "check_updates envelope failed validation")
+    return envelope
+
+
 # Projects skill stdout (and optional JAS manifest) into a HostToolReturn object.
 def project_host_return(
     *,
@@ -333,6 +389,9 @@ def project_host_return(
             "ranking": [],
             "reports": None,
             "scratch_retained": None,
+            "has_changes": None,
+            "first_check": None,
+            "changes": None,
         }
         if session != "granted":
             envelope["status"] = "need_input"
@@ -340,6 +399,12 @@ def project_host_return(
         if errors or _payload_is_dirty(envelope):
             return rejected_envelope(safe_tool, "auth envelope failed validation")
         return envelope
+
+    if safe_tool == "check_updates":
+        skill = unwrap_skill_payload(payload) if payload else {}
+        if _payload_is_dirty(skill) or (payload and _payload_is_dirty(payload)):
+            return rejected_envelope(safe_tool, "skill stdout contained a forbidden payload")
+        return _project_check_updates(skill, jas_session, cookie_file_present)
 
     skill = unwrap_skill_payload(payload)
     if _payload_is_dirty(skill) or _payload_is_dirty(payload):
@@ -380,6 +445,9 @@ def project_host_return(
         "ranking": ranking,
         "reports": _project_reports(skill),
         "scratch_retained": scratch_retained,
+        "has_changes": None,
+        "first_check": None,
+        "changes": None,
     }
     errors = validate_envelope(envelope)
     if errors or _payload_is_dirty(envelope):

@@ -13,6 +13,16 @@ URL_PATTERN = re.compile(
     r"\b(?:https?://|www\.)[^\s<>()]+|\b(?:linkedin\.com/in|github\.com)/[A-Za-z0-9_.-]+",
     flags=re.IGNORECASE,
 )
+# Hong Kong ID card: one or two uppercase letters, six digits, a check digit in parentheses or appended.
+# The space before the check-digit parentheses (AB123456 (7)) is optional and common in real CVs.
+HKID_PATTERN = re.compile(r"\b[A-Z]{1,2}\d{6}\s?\([0-9A]\)|\b[A-Z]{1,2}\d{6}\s?[0-9A]\b")
+# Salary / compensation expressions: currency prefix + amount, optional per-month/annual suffix.
+# \d+(?:,\d{3})* matches both plain-digit (10000) and thousand-separated (25,000) amounts.
+SALARY_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z])(?:HKD|HK\$|USD|RMB|CNY|\$|€|£)\s?\d+(?:,\d{3})*(?:\.\d+)?"
+    r"(?:\s?(?:k|K|thousand))?"
+    r"(?:\s?(?:per\s+month|/mo|monthly|per\s+annum|/yr|annually|p\.a\.|p\.m\.))?(?![A-Za-z])"
+)
 DATE_RANGE_PATTERN = re.compile(
     r"^(?:(?:19|20)\d{2}(?:[./-]\d{1,2})?)"
     r"\s*(?:-|–|—|to)\s*"
@@ -56,6 +66,8 @@ CONTACT_PLACEHOLDERS = {
     "phone": "[PHONE_REDACTED]",
     "private": "[PRIVATE_REDACTED]",
     "url": "[URL_REDACTED]",
+    "hkid": "[HKID_REDACTED]",
+    "salary": "[SALARY_REDACTED]",
 }
 
 
@@ -148,6 +160,12 @@ def detect_contact_entities(
         start = match.start() + leading_space_count
         entities.append(PIIEntity("phone", candidate, start, start + len(candidate)))
 
+    for match in HKID_PATTERN.finditer(raw_text):
+        entities.append(PIIEntity("hkid", match.group(0), match.start(), match.end()))
+
+    for match in SALARY_PATTERN.finditer(raw_text):
+        entities.append(PIIEntity("salary", match.group(0).strip(), match.start(), match.end()))
+
     for name in extract_name_candidates(raw_text, extra_names):
         flexible_name_pattern = r"\s+".join(re.escape(part) for part in name.split())
         name_match = re.search(flexible_name_pattern, raw_text, flags=re.IGNORECASE)
@@ -187,6 +205,8 @@ def extract_contact_hints_local(
         "name": first_value("name"),
         "email": first_value("email"),
         "phone": first_value("phone"),
+        "hkid": first_value("hkid"),
+        "salary": first_value("salary"),
     }
 
 

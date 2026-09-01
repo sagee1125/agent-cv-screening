@@ -1,0 +1,35 @@
+{
+  "$comment": "WorkBuddy host runtime file-read denylist. The host LLM must never Read, cat, or echo the contents of files matching these patterns. This is a machine-readable contract for the WorkBuddy runtime; it must be enforced by the host's file-access layer, not by the LLM prompt.",
+  "version": "1.0.0",
+  "deny_patterns": [
+    "**/_pipeline/**",
+    "**/_pipeline/*.json",
+    "**/records.html",
+    "**/extracted-*.json",
+    "**/score-*.json",
+    "**/detail-*.json",
+    "**/agent-state.json",
+    "**/planner-state.json",
+    "**/jas-manifest.json",
+    "**/manifest.json",
+    "**/report-fingerprints.json",
+    "**/jd.txt",
+    "**/jd-parse.json",
+    "**/config.json",
+    "**/rows.json",
+    "**/data/jas_scratch/**",
+    "**/data/jes_webridge/**",
+    "**/data/jas_state/**",
+    "**/.env",
+    "**/cookies.txt",
+    "**/jas_cookies.txt"
+  ],
+  "deny_extensions": [
+    ".pdf"
+  ],
+  "allow_patterns": [
+    "**/ranking-overview.html",
+    "**/*.html"
+  ],
+  "$allow_note": "ranking-overview.html and per-candidate <appno>.html are safe for the host UI to open in a browser panel; they contain refno/appno labels only, no names or PII. The host LLM must still not Read their raw HTML into the model context."
+}

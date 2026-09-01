@@ -10,7 +10,7 @@
     "schema_version": { "const": "1.0.0" },
     "tool": {
       "type": "string",
-      "enum": ["request_jas_access", "screen_refno", "get_run_status"]
+      "enum": ["request_jas_access", "screen_refno", "get_run_status", "check_updates"]
     },
     "status": {
       "type": "string",
@@ -139,6 +139,27 @@
         }
       }
     },
-    "scratch_retained": { "type": ["boolean", "null"] }
+    "scratch_retained": { "type": ["boolean", "null"] },
+    "has_changes": { "type": ["boolean", "null"] },
+    "first_check": { "type": ["boolean", "null"] },
+    "changes": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "jd_changed": { "type": "boolean" },
+        "added": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$" }
+        },
+        "removed": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$" }
+        },
+        "status_changed": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
   }
 }

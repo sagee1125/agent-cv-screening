@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 SCHEMA_VERSION = "1.0.0"
-ALLOWED_TOOLS = frozenset({"request_jas_access", "screen_refno", "get_run_status"})
+ALLOWED_TOOLS = frozenset({"request_jas_access", "screen_refno", "get_run_status", "check_updates"})
 ALLOWED_STATUS = frozenset({"success", "partial_success", "need_input", "error"})
 ALLOWED_ERROR_CODES = frozenset(
     {
@@ -42,6 +42,9 @@ TOP_KEYS = frozenset(
         "ranking",
         "reports",
         "scratch_retained",
+        "has_changes",
+        "first_check",
+        "changes",
     }
 )
 RANKING_KEYS = frozenset(

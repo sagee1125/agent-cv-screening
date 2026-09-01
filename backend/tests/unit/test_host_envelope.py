@@ -147,3 +147,86 @@ def test_host_envelope_cli_projects_example(tmp_path) -> None:
     envelope = json.loads(result.stdout)
     assert envelope["ranking"][0]["appno"] == "123456"
     assert "Alice" not in result.stdout
+
+
+# check_updates stdout projects into a host-safe envelope with has_changes and changes.
+def test_project_check_updates_success() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={
+            "status": "success",
+            "tool": "check_updates",
+            "refno": "260818001",
+            "post_title": "Project Associate",
+            "candidate_count": 3,
+            "first_check": False,
+            "has_changes": True,
+            "changes": {
+                "jd_changed": False,
+                "added": ["999888"],
+                "removed": [],
+                "status_changed": {"123456": {"from": "TBC", "to": "S"}},
+            },
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["tool"] == "check_updates"
+    assert envelope["status"] == "success"
+    assert envelope["refno"] == "260818001"
+    assert envelope["has_changes"] is True
+    assert envelope["first_check"] is False
+    assert envelope["changes"]["added"] == ["999888"]
+    assert envelope["changes"]["status_changed"]["123456"] == "S"
+    assert envelope["ranking"] == []
+    assert envelope["candidate_count"] == 3
+
+
+# check_updates with first_check=True and has_changes=False still validates.
+def test_project_check_updates_first_check() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={
+            "status": "success",
+            "tool": "check_updates",
+            "refno": "260818001",
+            "post_title": "Project Associate",
+            "candidate_count": 2,
+            "first_check": True,
+            "has_changes": False,
+            "changes": {"jd_changed": False, "added": [], "removed": [], "status_changed": {}},
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["first_check"] is True
+    assert envelope["has_changes"] is False
+    assert envelope["changes"]["added"] == []
+
+
+# check_updates need_input maps to ask.missing with refno.
+def test_project_check_updates_need_input() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={
+            "status": "need_input",
+            "missing": ["refno"],
+            "questions": ["Please send the job reference number."],
+        },
+    )
+    assert envelope["status"] == "need_input"
+    assert envelope["ask"]["missing"] == ["refno"]
+    assert envelope["has_changes"] is None
+
+
+# check_updates error maps to error envelope without leaking details.
+def test_project_check_updates_error() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={
+            "status": "error",
+            "error_message": "Connection refused to C:\\Users\\hr\\secret.html",
+        },
+    )
+    assert envelope["status"] == "error"
+    assert envelope["error_code"] == "pipeline_error"
+    assert "C:" not in (envelope.get("error_message") or "")
+    assert "Users" not in (envelope.get("error_message") or "")
