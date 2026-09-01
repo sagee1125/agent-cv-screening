@@ -61,6 +61,7 @@ def _args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
         "cvs_dir": None,
         "cv": [],
         "output_dir": str(tmp_path / "out"),
+        "state_dir": str(tmp_path / "state"),
         "engine": "legacy",
         "max_retries": 2,
         "skip_reports": False,

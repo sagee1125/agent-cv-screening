@@ -26,7 +26,7 @@ from urllib.parse import unquote, urlparse
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
-from jas_import.fetch import download_to, fetch_job_payload
+from jas_import.fetch import download_to_if_changed, fetch_job_payload
 from jas_import.skill import parse_job_skill
 from screening_core.candidate_id import appno_from_filename, is_jas_refno, records_url_for_refno, refno_from_url
 from screening_core.hr_output import (
@@ -37,6 +37,7 @@ from screening_core.hr_output import (
     resolve_hr_job_dir,
     safe_pack_id,
 )
+from screening_core.job_state import load_job_state, record_screen_run, save_job_state
 from screening_core.report_fingerprint import FINGERPRINTS_NAME
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
@@ -88,6 +89,15 @@ def build_records_url_for_refno(refno: str, base_url: str | None) -> str:
     if base_url:
         return f"{base_url.rstrip('/')}/records.html?refno={refno.strip()}"
     return records_url_for_refno(refno)
+
+
+# Resolve the job-state directory (default repo data/jas_state).
+def _resolve_state_dir(args: argparse.Namespace) -> Path:
+    raw = getattr(args, "state_dir", None) or "data/jas_state"
+    path = Path(raw)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path
 
 
 # Prints a host-projectable need_input envelope and returns exit code 2.
@@ -344,6 +354,15 @@ def _run_screening(
         report_dir=job_dir,
     )
     exit_code, payload = _run_pipeline(cmd)
+    # Persist run history + CV hashes so later runs can skip unchanged downloads.
+    record_screen_run(
+        _resolve_state_dir(args),
+        refno or "job",
+        job=job,
+        cv_paths={appno: path for appno, path in staged},
+        result=str(payload.get("status", "error")),
+        output=str(job_dir),
+    )
     hr_files = (
         f"Desktop/{HR_PACK_FOLDER}/{job_dir.name}"
         if job_dir.parent.name == HR_PACK_FOLDER
@@ -440,6 +459,10 @@ def run_url_screening(args: argparse.Namespace) -> int:
     scratch_root = _resolve_scratch_root(args.scratch_dir)
     scratch_job = scratch_root / refno
     scratch_job.mkdir(parents=True, exist_ok=True)
+    # Reuse previously downloaded CVs whose server content has not changed.
+    state_dir = _resolve_state_dir(args)
+    prev_cv_meta = load_job_state(state_dir, refno).get("cv_meta") or {}
+    cv_meta: dict[str, dict[str, str]] = {}
 
     try:
         cvs: list[tuple[str, Path]] = []
@@ -456,12 +479,20 @@ def run_url_screening(args: argparse.Namespace) -> int:
                 download_failures.append({"appno": str(raw_appno), "error_message": str(exc)})
                 continue
             dest = scratch_job / f"{appno}.pdf"
-            if args.resume and dest.is_file():
-                cvs.append((appno, dest))
-                continue
+            prev_meta = prev_cv_meta.get(appno) or {}
             try:
-                asyncio.run(download_to(cv_url, dest, cookie_file=args.cookie_file, allowed_hosts=allowed_hosts))
+                downloaded, new_meta = asyncio.run(
+                    download_to_if_changed(
+                        cv_url,
+                        dest,
+                        cookie_file=args.cookie_file,
+                        allowed_hosts=allowed_hosts,
+                        etag=prev_meta.get("etag") if dest.is_file() else None,
+                        last_modified=prev_meta.get("last_modified") if dest.is_file() else None,
+                    )
+                )
                 cvs.append((appno, dest))
+                cv_meta[appno] = new_meta if downloaded else prev_meta
             except Exception as exc:
                 download_failures.append({"appno": appno, "error_message": str(exc)})
 
@@ -478,9 +509,13 @@ def run_url_screening(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return EXIT_ERROR
+        # Persist CV server metadata so the next run can skip unchanged downloads.
+        state = load_job_state(state_dir, refno)
+        state["cv_meta"] = cv_meta
+        save_job_state(state_dir, refno, state)
         return _run_screening(job, cvs, args, download_failures=download_failures or None)
     finally:
-        if not args.keep_cvs:
+        if getattr(args, "cleanup_cvs", False):
             _remove_scratch_dir(scratch_job, scratch_root)
 
 
@@ -533,7 +568,16 @@ def main() -> int:
         default=None,
         help="Base URL for CV link resolution and refno URL building (public demo).",
     )
-    parser.add_argument("--keep-cvs", action="store_true", help="Keep downloaded CVs in --scratch-dir after the run.")
+    parser.add_argument(
+        "--cleanup-cvs",
+        action="store_true",
+        help="Delete downloaded CVs from --scratch-dir after the run (default keeps them for reuse).",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Directory for per-refno job state (run history + CV hashes; default repo data/jas_state).",
+    )
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Root directory for downloaded CVs.")
     parser.add_argument(
         "--output-dir",

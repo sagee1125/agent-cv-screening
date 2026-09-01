@@ -80,7 +80,7 @@ def test_request_rejects_redirect_to_disallowed_host(monkeypatch) -> None:
             return None
 
         # Returns a redirect to a non-allowlisted host.
-        async def get(self, url):
+        async def get(self, url, headers=None):
             request = fetch.httpx.Request("GET", url)
             return fetch.httpx.Response(
                 302,
@@ -214,20 +214,25 @@ def test_pipeline_resolve_url_inputs(tmp_path, monkeypatch) -> None:
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    async def fake_fetch_jd_text(url, cookie_file=None):
+    async def fake_fetch_jd_text(url, cookie_file=None, **kwargs):
         return "Post title: Project Associate\nDescription: Python SQL"
 
-    async def fake_download_to(url, dest, cookie_file=None):
+    async def fake_download_to(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "fetch_jd_text", fake_fetch_jd_text)
-    monkeypatch.setattr(module, "download_to", fake_download_to)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download_to)
 
     args = argparse.Namespace(
         jd_url=ALLOWED_JD_URL,
         cv_url=[ALLOWED_CV_URL],
         cookie_file=None,
+        no_cookie=False,
+        allow_host=[],
+        base_url=None,
+        state_dir=str(tmp_path / "state"),
+        refno="260818001",
         scratch_dir=str(tmp_path / "scratch"),
         jd_file=None,
         cv=[],
@@ -247,7 +252,7 @@ def test_pipeline_resolve_url_inputs(tmp_path, monkeypatch) -> None:
 def test_pipeline_jd_url_reaches_need_input_for_candidates(tmp_path, monkeypatch, capsys) -> None:
     module = _import_script("pipeline", "run_pipeline.py")
 
-    async def fake_fetch_jd_text(url, cookie_file=None):
+    async def fake_fetch_jd_text(url, cookie_file=None, **kwargs):
         return "Post title: Project Associate\nDescription: Python"
 
     monkeypatch.setattr(module, "fetch_jd_text", fake_fetch_jd_text)
@@ -268,11 +273,11 @@ def test_pipeline_missing_jd_does_not_download_cv(tmp_path, monkeypatch, capsys)
     module = _import_script("pipeline", "run_pipeline.py")
     downloaded: list[str] = []
 
-    async def fake_download_to(url, dest, cookie_file=None):
+    async def fake_download_to(url, dest, cookie_file=None, **kwargs):
         downloaded.append(url)
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
-    monkeypatch.setattr(module, "download_to", fake_download_to)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download_to)
     exit_code, out, _err = _run_module(
         module,
         ["--cv-url", ALLOWED_CV_URL, "--skip-reports", "--output-dir", str(tmp_path / "out")],
@@ -291,12 +296,12 @@ def test_pipeline_cleans_downloaded_cv_after_failure(tmp_path, monkeypatch, caps
     jd.write_text("Requirements: Python", encoding="utf-8")
     scratch = tmp_path / "scratch"
 
-    async def fake_download_to(url, dest, cookie_file=None):
+    async def fake_download_to(url, dest, cookie_file=None, **kwargs):
         Path(dest).parent.mkdir(parents=True, exist_ok=True)
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
-    monkeypatch.setattr(module, "download_to", fake_download_to)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download_to)
     monkeypatch.setattr(module, "_resolve_jd_source", lambda args, out_dir: (_ for _ in ()).throw(RuntimeError("stop")))
     exit_code, _out, err = _run_module(
         module,
@@ -307,6 +312,9 @@ def test_pipeline_cleans_downloaded_cv_after_failure(tmp_path, monkeypatch, caps
             ALLOWED_CV_URL,
             "--scratch-dir",
             str(scratch),
+            "--cleanup-cvs",
+            "--state-dir",
+            str(tmp_path / "state"),
             "--skip-reports",
         ],
         monkeypatch,
@@ -404,7 +412,7 @@ def test_request_passes_resolved_ssl_verify(monkeypatch) -> None:
             return None
 
         # Returns a plain 200 response for the allowlisted URL.
-        async def get(self, url):
+        async def get(self, url, headers=None):
             request = fetch.httpx.Request("GET", url)
             return fetch.httpx.Response(200, content=b"ok", request=request)
 
@@ -413,3 +421,92 @@ def test_request_passes_resolved_ssl_verify(monkeypatch) -> None:
     html = asyncio.run(fetch.fetch_html(ALLOWED_JD_URL))
     assert html == "ok"
     assert captured["verify"] is False
+
+
+
+# download_to_if_changed writes on 200 and returns server metadata.
+def test_download_to_if_changed_writes_on_200(tmp_path, monkeypatch) -> None:
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None, headers=None):
+        class Response:
+            status_code = 200
+            content = b"%PDF-v2"
+            headers = {"etag": '"abc"', "last-modified": "Mon, 31 Aug 2026 09:11:06 GMT"}
+        return Response()
+
+    monkeypatch.setattr(fetch, "_request", fake_request)
+    dest = tmp_path / "123456.pdf"
+    downloaded, meta = asyncio.run(
+        fetch.download_to_if_changed(
+            "https://jobs.polyu.edu.hk/x/cv",
+            dest,
+            etag='"old"',
+            last_modified="Mon, 31 Aug 2026 09:11:06 GMT",
+        )
+    )
+    assert downloaded is True
+    assert dest.read_bytes() == b"%PDF-v2"
+    assert meta["etag"] == '"abc"'
+
+
+# download_to_if_changed returns False on 304 without rewriting the file.
+def test_download_to_if_changed_reuses_on_304(tmp_path, monkeypatch) -> None:
+    async def fake_request(url, cookie_file, timeout, allowed_hosts=None, headers=None):
+        class Response:
+            status_code = 304
+            content = b""
+            headers = {"etag": '"abc"'}
+        return Response()
+
+    monkeypatch.setattr(fetch, "_request", fake_request)
+    dest = tmp_path / "123456.pdf"
+    dest.write_bytes(b"%PDF-old")
+    downloaded, meta = asyncio.run(fetch.download_to_if_changed("https://jobs.polyu.edu.hk/x/cv", dest, etag='"abc"'))
+    assert downloaded is False
+    assert dest.read_bytes() == b"%PDF-old"
+    assert meta["etag"] == '"abc"'
+
+
+# Pipeline --jd-url/--cv-url honor --allow-host and --base-url for public demo hosts.
+def test_pipeline_resolve_url_inputs_demo_host(tmp_path, monkeypatch) -> None:
+    module = _import_script("pipeline", "run_pipeline.py")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    captured: dict = {}
+    demo_cv_url = "https://jes-web-demo.vercel.app/uploads/CV.pdf"
+
+    async def fake_fetch_jd_text(url, cookie_file=None, **kwargs):
+        captured["jd_kwargs"] = kwargs
+        return "Post title: Project Associate\nDescription: Python"
+
+    async def fake_download_to_if_changed(url, dest, cookie_file=None, **kwargs):
+        captured["cv_kwargs"] = kwargs
+        Path(dest).write_bytes(b"%PDF")
+        return True, {"etag": '"abc"', "last_modified": "Mon, 31 Aug 2026 09:11:06 GMT"}
+
+    monkeypatch.setattr(module, "fetch_jd_text", fake_fetch_jd_text)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download_to_if_changed)
+
+    args = argparse.Namespace(
+        jd_url="https://jes-web-demo.vercel.app/records.html?refno=2600827001",
+        cv_url=[demo_cv_url],
+        cookie_file=None,
+        no_cookie=True,
+        allow_host=["jes-web-demo.vercel.app"],
+        base_url="https://jes-web-demo.vercel.app",
+        state_dir=str(tmp_path / "state"),
+        refno="2600827001",
+        scratch_dir=str(tmp_path / "scratch"),
+        jd_file=None,
+        cv=[],
+        extracted=[],
+        jd_json=None,
+        polyu_ref=None,
+        polyu_detail_url=None,
+    )
+    module._resolve_url_inputs(args, out_dir)
+
+    assert "jes-web-demo.vercel.app" in captured["jd_kwargs"]["allowed_hosts"]
+    assert captured["jd_kwargs"]["base_url"] == "https://jes-web-demo.vercel.app"
+    assert "jes-web-demo.vercel.app" in captured["cv_kwargs"]["allowed_hosts"]
+    state = json.loads((tmp_path / "state" / "2600827001.json").read_text(encoding="utf-8"))
+    assert state["cv_meta"][demo_cv_url]["etag"] == '"abc"'

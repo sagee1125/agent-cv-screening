@@ -231,7 +231,7 @@ Top-level keys only. Nested objects may only use keys listed under them.
 | `ask`              | object or null  | See 5.2.3; set when `status=need_input`                                                     |
 | `ranking`          | array           | Max 200 items; see 5.2.4                                                                    |
 | `reports`          | object or null  | **Opaque paths for the UI**, see 5.2.5. Model may show “report ready”, must not read files. |
-| `scratch_retained` | boolean or null | Whether CVs were kept (`--keep-cvs`); never list files                                      |
+| `scratch_retained` | boolean or null | Whether downloaded CVs were retained (kept by default); never list files                                      |
 
 #### 5.2.1 `error_code` enum
 

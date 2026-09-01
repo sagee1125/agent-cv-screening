@@ -62,7 +62,7 @@ def main() -> int:
     parser.add_argument(
         "--scratch-retained",
         action="store_true",
-        help="Set scratch_retained true when --keep-cvs was used.",
+        help="Set scratch_retained true (downloaded CVs are kept by default).",
     )
     parser.add_argument("--post-title", default=None, help="Override post title (job metadata only).")
     args = parser.parse_args()

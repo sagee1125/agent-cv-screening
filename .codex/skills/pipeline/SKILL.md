@@ -174,11 +174,14 @@ python .codex/skills/pipeline/scripts/run_pipeline.py \
 - `--jd-url` fetches the records page and parses it into JD text
   (`jd-from-url.txt` in `--output-dir`).
 - `--cv-url` (repeatable) downloads each CV into `--scratch-dir`
-  (default `data/jas_scratch`) named by application no. Downloads are removed
-  after the run by default; pass `--keep-cvs` to retain them.
+  (default `data/jas_scratch`) named by application no. Downloads are kept for
+  reuse and unchanged CVs are skipped via conditional HTTP (ETag); pass
+  `--cleanup-cvs` to delete them after the run.
 - `--cookie-file` reads a Netscape `cookies.txt` on disk; cookies are never
   accepted as CLI arguments (they would leak into process lists / the host).
 - URL hosts are allowlisted (`jobs.polyu.edu.hk`) by the input policy; the
-  initial URL, every redirect, and parsed CV URLs are all validated.
+  initial URL, every redirect, and parsed CV URLs are all validated. For the
+  public demo, pass `--allow-host jes-web-demo.vercel.app --base-url
+  https://jes-web-demo.vercel.app --no-cookie`.
 - This skeleton is unit-tested with mocks; it cannot be validated against the
   real JAS until internal access or an HR-run session is available.

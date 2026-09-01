@@ -135,7 +135,7 @@ MVP success means: given either (a) an HR-exported folder (`records.html` + `cvs
 
 #### Module 1: Live fetch + downloads
 
-- **AC1.1** Given a JAS records URL and a stubbed network, When `run_url_screening` runs, Then it downloads `data/jas_scratch/{refno}/{appno}.pdf` for each candidate and deletes the scratch dir after the run (unless `--keep-cvs`).
+- **AC1.1** Given a JAS records URL and a stubbed network, When `run_url_screening` runs, Then it downloads `data/jas_scratch/{refno}/{appno}.pdf` for each candidate, keeps them for reuse, and skips unchanged downloads via conditional HTTP (ETag); `--cleanup-cvs` deletes them.
 - **AC1.2** Given a records URL whose host is not allowlisted, When the URL mode runs, Then it exits 1 before any network call.
 - **AC1.3** Given that every CV download fails, When the URL mode runs, Then it exits 1 with an error envelope and still cleans the scratch dir.
 
@@ -193,16 +193,16 @@ MVP success means: given either (a) an HR-exported folder (`records.html` + `cvs
 3. The CLI produces JD text + candidate `appno`/status/CV URLs; live mode downloads each CV to `data/jas_scratch/{refno}/{appno}.pdf`.
 4. The CLI delegates to the `pipeline` skill (JD parse -> cv parse -> score/rank -> reports).
 5. HR receives a ranked report keyed by `appno` and maps appnos back in JAS if needed.
-6. Live mode deletes downloaded CVs after the run unless `--keep-cvs`.
+6. Live mode keeps downloaded CVs for reuse; unchanged CVs are not re-downloaded (conditional HTTP / ETag), and `--cleanup-cvs` deletes them.
 
 ### 4.2 Backend/System Workflow
 
 1. Offline: `parse-list` / `parse-job` read HTML -> catalog / job payload JSON (identity columns dropped).
 2. Live: `fetch_job_payload(url, cookie_file)` fetches the records page and reuses the same `job_payload_from_html` parsing path.
-3. `run_url_screening` downloads each `cv_url` into `data/jas_scratch/{refno}/{appno}.pdf` via `download_to`; failures are collected, and a run with zero downloadable CVs errors out.
+3. `run_url_screening` fetches each `cv_url` into `data/jas_scratch/{refno}/{appno}.pdf` via `download_to_if_changed` (conditional HTTP / ETag); failures are collected, and a run with zero downloadable CVs errors out.
 4. Shared tail `_run_screening` writes `jd.txt` + `jas-manifest.json` (appno-keyed), then invokes the pipeline with `--cv` file paths.
 5. Downstream `jd-parser`/`cv-parser`/`scorer`/`report-gen` consume the same contracts as the public flow.
-6. URL mode removes the scratch subdir after the run (success or error) unless `--keep-cvs`.
+6. URL mode keeps the scratch subdir after the run (success or error) unless `--cleanup-cvs`.
 
 ```mermaid
 sequenceDiagram
@@ -250,7 +250,8 @@ stateDiagram-v2
 | `--records-url`       | Live     | -                                               | JAS records page URL for live mode                                   |
 | `--cookie-file`       | No       | -                                               | Local Netscape `cookies.txt` (0600); cookies are never CLI arguments |
 | `--scratch-dir`       | No       | `data/jas_scratch`                              | Root for downloaded CVs (`{refno}/{appno}.pdf`)                      |
-| `--keep-cvs`          | No       | false                                           | Retain downloaded CVs after the run                                  |
+| `--cleanup-cvs`      | No       | false                                           | Delete downloaded CVs after the run (default keeps them for reuse)   |
+| `--state-dir`         | No       | `data/jas_state`                              | Per-refno run history + CV hashes/metadata (audit + dedup)            |
 | `--trust-extracted`   | No       | false                                           | Allow `--extracted` profiles from outside `--output-dir`             |
 | External dependencies | Phase 0  | stdlib only                                     | Parsing makes no network calls                                       |
 | External dependencies | Phase 1  | `httpx` (already in `backend/requirements.txt`) | Live fetch and downloads                                             |
@@ -365,7 +366,7 @@ data/jas_scratch/
 
 Data lifecycle rules:
 
-- Scratch files are deleted after the recruitment run by default (`--keep-cvs` retains); deletion also happens on error.
+- Scratch files are kept after the recruitment run by default for reuse; unchanged CVs are not re-downloaded (conditional HTTP / ETag), and `--cleanup-cvs` deletes them (also on error).
 - No candidate identity data is persisted in JSON artifacts; only `refno`/`appno` references remain.
 - `--cookie-file` contents must never be logged or returned in stdout; the file should be `0600` and never committed.
 
@@ -404,7 +405,7 @@ Data lifecycle rules:
 - Always emit a JSON error envelope on failure (no raw tracebacks).
 - Always resolve `cv_url`/`record_detail_url` against the configured base URL.
 - Always mark candidates with no CV as `cv_url=null` rather than failing the whole job.
-- Always delete the live-mode scratch dir after the run unless `--keep-cvs`.
+- Keep the live-mode scratch dir after the run by default; delete only with `--cleanup-cvs`.
 
 ---
 
@@ -455,7 +456,7 @@ Data lifecycle rules:
 - [ ] `schema_version: 1.0.0` emitted by catalog and job payloads and enforced.
 - [ ] `jas-import` registered in `screening_core.bootstrap`.
 - [ ] Input policy guards every path/URL entry point; inline content and out-of-scratch `--extracted` rejected.
-- [ ] URL mode downloads CVs keyed by appno and deletes the scratch dir after the run (unless `--keep-cvs`).
+- [ ] URL mode downloads CVs keyed by appno, keeps them for reuse, and skips unchanged downloads via conditional HTTP (ETag); `--cleanup-cvs` deletes them.
 - [ ] CLI error-envelope, PII-drop, input-policy, and URL-mode tests green.
 - [ ] Mock data generator reproducible (`run_jas_import.py mock`).
 - [ ] No changes to existing public `polyu-import` behavior.

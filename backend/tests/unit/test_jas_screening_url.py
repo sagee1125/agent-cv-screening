@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import sys
@@ -60,7 +61,8 @@ def _url_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
         "no_cookie": False,
         "allow_host": [],
         "base_url": None,
-        "keep_cvs": False,
+        "cleanup_cvs": False,
+        "state_dir": str(tmp_path / "state"),
         "scratch_dir": str(tmp_path / "scratch"),
         "output_dir": str(tmp_path / "out"),
         "engine": "legacy",
@@ -74,8 +76,8 @@ def _url_args(tmp_path: Path, **overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
-# Default URL mode: downloads CVs to scratch, runs, then cleans scratch.
-def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, capsys) -> None:
+# Default URL mode: downloads CVs to scratch, runs, and keeps them for reuse.
+def test_run_url_screening_downloads_runs_and_keeps(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
     async def fake_fetch(url, cookie_file=None, **kwargs):
@@ -83,7 +85,7 @@ def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, caps
 
     async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     captured_cmd: list[list[str]] = []
 
@@ -92,14 +94,14 @@ def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, caps
         return 0, {"status": "success", "candidates": []}
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
     monkeypatch.setattr(module, "_run_pipeline", fake_pipeline)
 
     exit_code = module.run_url_screening(_url_args(tmp_path, engine="matching"))
     capsys.readouterr()
 
     assert exit_code == module.EXIT_OK
-    assert not (tmp_path / "scratch" / "260818001").exists(), "scratch should be cleaned by default"
+    assert (tmp_path / "scratch" / "260818001" / "123456.pdf").is_file(), "CVs should be kept by default"
 
     out_dir = tmp_path / "out"
     manifest = json.loads((out_dir / "260818001" / "_pipeline" / "jas-manifest.json").read_text(encoding="utf-8"))
@@ -113,8 +115,8 @@ def test_run_url_screening_downloads_runs_and_cleans(tmp_path, monkeypatch, caps
     assert any("260818001" in token and "654321.pdf" in token for token in cmd)
 
 
-# --keep-cvs retains the downloaded CVs in scratch.
-def test_run_url_screening_keep_cvs_retains(tmp_path, monkeypatch, capsys) -> None:
+# --cleanup-cvs removes the downloaded CVs from scratch after the run.
+def test_run_url_screening_cleanup_cvs_removes(tmp_path, monkeypatch, capsys) -> None:
     module = _import_screening_module()
 
     async def fake_fetch(url, cookie_file=None, **kwargs):
@@ -122,19 +124,17 @@ def test_run_url_screening_keep_cvs_retains(tmp_path, monkeypatch, capsys) -> No
 
     async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
     monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
 
-    exit_code = module.run_url_screening(_url_args(tmp_path, keep_cvs=True))
+    exit_code = module.run_url_screening(_url_args(tmp_path, cleanup_cvs=True))
     capsys.readouterr()
 
     assert exit_code == module.EXIT_OK
-    scratch_job = tmp_path / "scratch" / "260818001"
-    assert (scratch_job / "123456.pdf").is_file()
-    assert (scratch_job / "654321.pdf").is_file()
+    assert not (tmp_path / "scratch" / "260818001").exists()
 
 
 # When every download fails, the run errors and scratch is still cleaned.
@@ -148,9 +148,9 @@ def test_run_url_screening_no_cv_error_cleans(tmp_path, monkeypatch, capsys) -> 
         raise RuntimeError("network down")
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
 
-    exit_code = module.run_url_screening(_url_args(tmp_path))
+    exit_code = module.run_url_screening(_url_args(tmp_path, cleanup_cvs=True))
     captured = capsys.readouterr()
 
     assert exit_code == module.EXIT_ERROR
@@ -191,10 +191,10 @@ def test_run_url_screening_rejects_disallowed_candidate_url(tmp_path, monkeypatc
 
     async def fake_download(url, dest, cookie_file=None, **kwargs):
         downloaded.append(url)
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
     exit_code = module.run_url_screening(_url_args(tmp_path))
     captured = capsys.readouterr()
 
@@ -230,10 +230,10 @@ def test_run_url_screening_reports_partial_download_failures(tmp_path, monkeypat
         if "654321" in url:
             raise RuntimeError("network down")
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
     monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
 
     exit_code = module.run_url_screening(_url_args(tmp_path))
@@ -261,10 +261,10 @@ def test_main_url_mode_dispatches(tmp_path, monkeypatch, capsys) -> None:
 
     async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
     monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
     monkeypatch.setattr(
         sys,
@@ -279,6 +279,7 @@ def test_main_url_mode_dispatches(tmp_path, monkeypatch, capsys) -> None:
             str(tmp_path / "out"),
             "--scratch-dir",
             str(tmp_path / "scratch"),
+            "--cleanup-cvs",
             "--skip-reports",
         ],
     )
@@ -333,10 +334,10 @@ def test_run_url_screening_demo_host_allowed(tmp_path, monkeypatch, capsys) -> N
 
     async def fake_download(url, dest, cookie_file=None, **kwargs):
         Path(dest).write_bytes(b"%PDF")
-        return Path(dest)
+        return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
-    monkeypatch.setattr(module, "download_to", fake_download)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
     monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
 
     args = _url_args(
@@ -386,3 +387,67 @@ def test_main_refno_with_base_url_no_cookie(monkeypatch, capsys) -> None:
     assert exit_code == module.EXIT_OK
     assert captured["records_url"] == f"{DEMO_BASE_URL}/records.html?refno=2600827001"
     assert captured["allow_host"] == ["jes-web-demo.vercel.app"]
+
+# A kept CV whose server ETag still matches is reused (304) instead of re-downloaded.
+def test_run_url_screening_skips_unchanged_cv_download(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+    scratch_job = tmp_path / "scratch" / "260818001"
+    scratch_job.mkdir(parents=True)
+    (scratch_job / "123456.pdf").write_bytes(b"%PDF-v1")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    state = {
+        "schema_version": "job-state-v1",
+        "refno": "260818001",
+        "history": [],
+        "cv_meta": {"123456": {"etag": '"abc123"', "last_modified": "Mon, 31 Aug 2026 09:11:06 GMT"}},
+    }
+    (state_dir / "260818001.json").write_text(json.dumps(state), encoding="utf-8")
+
+    downloaded: list[str] = []
+
+    async def fake_fetch(url, cookie_file=None, **kwargs):
+        return _job_payload()
+
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
+        if kwargs.get("etag"):
+            return False, {"etag": kwargs["etag"], "last_modified": kwargs.get("last_modified") or ""}
+        downloaded.append(url)
+        Path(dest).write_bytes(b"%PDF-v2")
+        return True, {"etag": '"new-etag"', "last_modified": "Mon, 31 Aug 2026 10:00:00 GMT"}
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
+    monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
+
+    exit_code = module.run_url_screening(_url_args(tmp_path))
+    capsys.readouterr()
+
+    assert exit_code == module.EXIT_OK
+    assert len(downloaded) == 1 and "654321" in downloaded[0], "only the changed/new CV should be re-downloaded"
+
+
+# URL mode records run history and CV hashes in the per-refno state file.
+def test_run_url_screening_writes_state(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_screening_module()
+
+    async def fake_fetch(url, cookie_file=None, **kwargs):
+        return _job_payload()
+
+    async def fake_download(url, dest, cookie_file=None, **kwargs):
+        Path(dest).write_bytes(b"%PDF")
+        return True, {"etag": None, "last_modified": None}
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    monkeypatch.setattr(module, "download_to_if_changed", fake_download)
+    monkeypatch.setattr(module, "_run_pipeline", lambda cmd: (0, {"status": "success", "candidates": []}))
+
+    exit_code = module.run_url_screening(_url_args(tmp_path))
+    capsys.readouterr()
+
+    assert exit_code == module.EXIT_OK
+    state = json.loads((tmp_path / "state" / "260818001.json").read_text(encoding="utf-8"))
+    assert state["history"][-1]["kind"] == "screen"
+    assert state["history"][-1]["result"] == "success"
+    assert state["cv_hashes"]["123456"]
+    assert state["last_screen"]["candidates"]["123456"] == "S"

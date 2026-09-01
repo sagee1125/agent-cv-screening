@@ -1,6 +1,7 @@
 # Tests L1 screening-agent loop behavior over pipeline JSON envelopes.
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import subprocess
@@ -295,3 +296,84 @@ def test_retry_decision_reports_retry_action() -> None:
     )
     assert decision["action"] == "retry"
     assert decision["reason"] == "retryable_failures_detected"
+
+
+
+# Screening-agent forwards demo-host URL flags to the pipeline command.
+def test_agent_forwards_demo_host_flags(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_script()
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        captured.append(cmd)
+        return _proc(0, {"status": "success", "candidates": [], "failures": [], "ask": None})
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    code, _out, _err = _run_cli(
+        module,
+        [
+            "--jd-url",
+            "https://jes-web-demo.vercel.app/records.html?refno=2600827001",
+            "--cv-url",
+            "https://jes-web-demo.vercel.app/uploads/CV.pdf",
+            "--allow-host",
+            "jes-web-demo.vercel.app",
+            "--base-url",
+            "https://jes-web-demo.vercel.app",
+            "--no-cookie",
+            "--state-dir",
+            str(tmp_path / "state"),
+            "--output-dir",
+            str(tmp_path),
+            "--skip-reports",
+        ],
+        monkeypatch,
+        capsys,
+    )
+    assert code == 0
+    cmd = captured[0]
+    assert "--allow-host" in cmd and "jes-web-demo.vercel.app" in cmd
+    assert "--base-url" in cmd and "https://jes-web-demo.vercel.app" in cmd
+    assert "--no-cookie" in cmd
+    assert "--state-dir" in cmd and str(tmp_path / "state") in cmd
+
+
+# Input-policy validation accepts a public demo host when allowlisted.
+def test_validate_input_policy_accepts_demo_host(tmp_path) -> None:
+    module = _import_script()
+    args = argparse.Namespace(
+        jd_file=None,
+        jd_json=None,
+        cv=[],
+        extracted=[],
+        jd_url="https://jes-web-demo.vercel.app/records.html?refno=2600827001",
+        cv_url=["https://jes-web-demo.vercel.app/uploads/CV.pdf"],
+        polyu_ref=None,
+        polyu_detail_url=None,
+        cookie_file=None,
+        allow_host=["jes-web-demo.vercel.app"],
+        output_dir=str(tmp_path),
+        trust_extracted=False,
+    )
+    module._validate_input_policy(args)  # should not raise
+
+
+# Non-allowlisted hosts are still rejected.
+def test_validate_input_policy_rejects_disallowed_host(tmp_path) -> None:
+    module = _import_script()
+    args = argparse.Namespace(
+        jd_file=None,
+        jd_json=None,
+        cv=[],
+        extracted=[],
+        jd_url=None,
+        cv_url=["https://evil.example.com/CV.pdf"],
+        polyu_ref=None,
+        polyu_detail_url=None,
+        cookie_file=None,
+        allow_host=[],
+        output_dir=str(tmp_path),
+        trust_extracted=False,
+    )
+    with pytest.raises(Exception, match="not allowlisted"):
+        module._validate_input_policy(args)
