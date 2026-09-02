@@ -153,6 +153,16 @@ async def fetch_jd_text(
     raise ValueError("JAS page did not contain a recognizable job advertisement table")
 
 
+# Raises JobNotFoundError when a parsed page has no job reference or no advertisement.
+def validate_job_payload(payload: dict[str, Any], refno: str | None = None) -> dict[str, Any]:
+    label = refno or payload.get("refno") or "the requested job"
+    if not payload.get("refno"):
+        raise JobNotFoundError(f"no JAS job found for {label} (page had no job reference)")
+    if not (payload.get("jd_text") or "").strip():
+        raise JobNotFoundError(f"no JAS job found for {label} (page had no job advertisement)")
+    return payload
+
+
 # Fetches a JAS records page and returns the full job payload (JD + candidates).
 async def fetch_job_payload(
     url: str,
@@ -163,12 +173,7 @@ async def fetch_job_payload(
 ) -> dict[str, Any]:
     html = await fetch_html(url, cookie_file=cookie_file, allowed_hosts=allowed_hosts)
     payload = job_payload_from_html(html, base_url=base_url)
-    refno = refno_from_url(url) or payload.get("refno") or "the requested job"
-    if not payload.get("refno"):
-        raise JobNotFoundError(f"no JAS job found for {refno} (page had no job reference)")
-    if not (payload.get("jd_text") or "").strip():
-        raise JobNotFoundError(f"no JAS job found for {refno} (page had no job advertisement)")
-    return payload
+    return validate_job_payload(payload, refno_from_url(url))
 
 
 # Derives a safe local filename for a downloaded CV from its URL.
@@ -192,4 +197,5 @@ __all__ = [
     "fetch_job_payload",
     "html_to_text",
     "load_cookie_file",
+    "validate_job_payload",
 ]

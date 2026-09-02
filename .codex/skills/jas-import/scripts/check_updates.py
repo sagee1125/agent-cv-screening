@@ -11,7 +11,7 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 import run_jas_screening as screening  # same-dir URL helpers
 
 from jas_import.errors import JobNotFoundError
-from jas_import.fetch import fetch_job_payload
+from jas_import.fetch import fetch_job_payload, validate_job_payload
 from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.demo_mode import apply_demo_defaults
@@ -38,9 +38,13 @@ ASK_JAS_SESSION = (
     "請允許存取內部招聘記錄頁，以便檢查更新。",
 )
 ASK_WEBRIDGE = (
-    "Please start Kimi WebBridge (or rerun with --driver http for the public demo).",
-    "請啟動 Kimi WebBridge（公開 demo 可直接改用 --driver http）。",
+    "Please start Kimi WebBridge and open Chrome/Edge with its extension connected "
+    "(or rerun with --driver http for the public demo).",
+    "請啟動 Kimi WebBridge，並開啟已連接擴充的 Chrome/Edge（公開 demo 可直接改用 --driver http）。",
 )
+
+# WebBridge failures that mean "the browser is not usable yet" rather than a real error.
+BROWSER_UNAVAILABLE_REASONS = ("daemon-unreachable", "extension-disconnected")
 
 
 # Print a host-projectable need_input envelope and return exit code 2.
@@ -67,7 +71,13 @@ def _fetch_job(records_url: str, args: argparse.Namespace, allowed_hosts: tuple[
         )
         browser.navigate(records_url, new_tab=True, group_title="JES update check")
         html = browser.page_html()
-        return job_payload_from_html(html, base_url=args.base_url)
+        # Same guard as the HTTP path: a login page or any non-records page must not be
+        # accepted as a snapshot, otherwise the check would report success on nothing.
+        # The URL refno is passed so the error names the job instead of "the requested job".
+        return validate_job_payload(
+            job_payload_from_html(html, base_url=args.base_url),
+            refno_from_url(records_url),
+        )
     return asyncio.run(
         fetch_job_payload(
             records_url,
@@ -117,8 +127,6 @@ def main() -> int:
     if args.target:
         if is_jas_refno(args.target):
             refno = args.target.strip()
-        # Temporarily allow the target to be a records URL
-        # otherwise, it's a records URL
         else:
             records_url = args.target
     if records_url and not refno:
@@ -151,7 +159,7 @@ def main() -> int:
         if args.driver == "webbridge":
             from webridge_collect.client import WebBridgeError
 
-            if isinstance(exc, WebBridgeError) and exc.reason == "daemon-unreachable":
+            if isinstance(exc, WebBridgeError) and exc.reason in BROWSER_UNAVAILABLE_REASONS:
                 return _print_need_input(["jas_session"], list(ASK_WEBRIDGE), detail=str(exc))
         if screening._is_auth_failure(exc):
             return _print_need_input(["jas_session"], list(ASK_JAS_SESSION))
@@ -174,11 +182,6 @@ def main() -> int:
         )
         return EXIT_ERROR
 
-    ############################################################
-    # Early return
-    ############################################################
-    # Main logic starts here
-    ############################################################
 
     job_refno = str(job.get("refno") or refno or "job")
     state_dir = Path(args.state_dir) if args.state_dir else (_bootstrap.REPO_ROOT / "data" / "jas_state")

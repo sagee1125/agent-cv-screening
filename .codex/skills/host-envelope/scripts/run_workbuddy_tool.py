@@ -114,13 +114,17 @@ def _run_screen_refno(args: argparse.Namespace) -> int:
     target = args.target or ""
     # URLs must be routed to WebBridge, never misdetected as folders (URLs contain /).
     is_url = _looks_like_url(target)
-    looks_like_folder = not is_url and (("\\" in target or Path(target).exists()))
+    # Path("") resolves to ".", which always exists, so an empty target must never count
+    # as a folder: it would be routed to jas-import instead of the WebBridge human flow.
+    looks_like_folder = bool(target) and not is_url and ("\\" in target or Path(target).exists())
     if looks_like_folder and not args.refno:
         script = _skill_script("jas-import", "run_jas_import.py")
         cmd = [PYTHON, str(script), target]
     else:
         script = _skill_script("webridge-collect", "run_webridge_collect.py")
-        cmd = [PYTHON, str(script), target or args.refno, "--driver", args.driver]
+        # An empty target still asks the skill, which answers need_input(refno); a bare
+        # None would crash subprocess before the skill could reply.
+        cmd = [PYTHON, str(script), target or args.refno or "", "--driver", args.driver]
         if args.no_open:
             cmd.append("--no-open")
     exit_code, payload = _run_skill(cmd)
@@ -150,8 +154,9 @@ def _run_check_updates(args: argparse.Namespace) -> int:
     cmd = [PYTHON, str(script)]
     if args.target:
         cmd.append(args.target)
-    if args.driver == "webbridge":
-        cmd += ["--driver", "webbridge"]
+    # Forward the driver in every case: the skill defaults to webbridge, so dropping
+    # --driver http would silently send an offline request through the browser.
+    cmd += ["--driver", args.driver]
     exit_code, payload = _run_skill(cmd)
     envelope = project_host_return(
         tool="check_updates",

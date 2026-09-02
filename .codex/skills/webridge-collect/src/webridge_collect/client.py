@@ -15,6 +15,9 @@ DEFAULT_DAEMON_URL = "http://127.0.0.1:10086"
 DEFAULT_SESSION = "jes-demo-screen"
 CV_CHUNK_BYTES = 512 * 1024
 DAEMON_START_WAIT = 25.0
+# The browser extension reconnects several seconds after the daemon starts, so a run that
+# begins as soon as the daemon answers HTTP would fail with "no extension connected".
+EXTENSION_CONNECT_WAIT = 30.0
 
 
 # True when the WebBridge daemon answers a status probe on the given URL.
@@ -24,6 +27,20 @@ def _daemon_reachable(daemon_url: str, *, timeout: float = 2.0) -> bool:
         return response.status_code < 400
     except httpx.HTTPError:
         return False
+
+
+# True when a browser extension is attached to the daemon and can run commands.
+def _extension_connected(daemon_url: str, *, timeout: float = 2.0) -> bool:
+    url = f"{daemon_url.rstrip('/')}/status"
+    for method in (httpx.get, httpx.post):
+        try:
+            response = method(url, timeout=timeout)
+            if response.status_code >= 400:
+                continue
+            return bool(response.json().get("extension_connected"))
+        except (httpx.HTTPError, json.JSONDecodeError, AttributeError):
+            continue
+    return False
 
 
 # Best-effort start of the local Kimi WebBridge daemon process (non-blocking).
@@ -46,15 +63,28 @@ def _start_daemon_process() -> bool:
     return False
 
 
-# Ensure the WebBridge daemon is running, auto-starting it once when needed.
-def ensure_webbridge_daemon(daemon_url: str = DEFAULT_DAEMON_URL, *, wait_seconds: float = DAEMON_START_WAIT) -> bool:
-    if _daemon_reachable(daemon_url):
-        return True
-    if not _start_daemon_process():
-        return False
-    deadline = time.monotonic() + wait_seconds
+# Ensure the WebBridge daemon is running and a browser extension is attached to it.
+def ensure_webbridge_daemon(
+    daemon_url: str = DEFAULT_DAEMON_URL,
+    *,
+    wait_seconds: float = DAEMON_START_WAIT,
+    extension_wait: float = EXTENSION_CONNECT_WAIT,
+) -> bool:
+    if not _daemon_reachable(daemon_url):
+        if not _start_daemon_process():
+            return False
+        deadline = time.monotonic() + wait_seconds
+        while time.monotonic() < deadline:
+            if _daemon_reachable(daemon_url):
+                break
+            time.sleep(1.0)
+        else:
+            return False
+    # The daemon answers HTTP before the extension reconnects, so keep waiting for the
+    # extension instead of letting the first browser command fail.
+    deadline = time.monotonic() + extension_wait
     while time.monotonic() < deadline:
-        if _daemon_reachable(daemon_url):
+        if _extension_connected(daemon_url):
             return True
         time.sleep(1.0)
     return False
@@ -90,6 +120,14 @@ class WebBridgeClient:
                 reason="daemon-unreachable",
             ) from exc
         if response.status_code >= 400:
+            # A reachable daemon with no browser attached answers 502 "no extension
+            # connected"; that needs a different instruction from an unreachable daemon.
+            if response.status_code == 502 and "no extension connected" in response.text:
+                raise WebBridgeError(
+                    "Kimi WebBridge daemon is running but no browser extension is connected. "
+                    "Open Chrome/Edge with the Kimi WebBridge extension enabled, then retry.",
+                    reason="extension-disconnected",
+                )
             raise WebBridgeError(
                 f"WebBridge daemon returned HTTP {response.status_code}: {response.text[:200]}",
                 reason="daemon-error",

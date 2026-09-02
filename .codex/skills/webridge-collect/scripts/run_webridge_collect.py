@@ -34,9 +34,13 @@ ASK_REFNO = (
     "請發送崗位參考編號，或貼上內部招聘記錄頁的連結。",
 )
 ASK_WEBRIDGE = (
-    "Please start Kimi WebBridge (or rerun with --driver http for the public demo).",
-    "請啟動 Kimi WebBridge（公開 demo 可直接改用 --driver http）。",
+    "Please start Kimi WebBridge and open Chrome/Edge with its extension connected "
+    "(or rerun with --driver http for the public demo).",
+    "請啟動 Kimi WebBridge，並開啟已連接擴充的 Chrome/Edge（公開 demo 可直接改用 --driver http）。",
 )
+
+# WebBridge failures that mean "the browser is not usable yet" rather than a real error.
+BROWSER_UNAVAILABLE_REASONS = ("daemon-unreachable", "extension-disconnected")
 
 
 # Print a host-projectable need_input envelope and return exit code 2.
@@ -158,7 +162,7 @@ def main() -> int:
     except JobNotFoundError as exc:
         return _emit({"status": "error", "error_code": "not_found", "error_message": str(exc)}, to_stderr=True)
     except WebBridgeError as exc:
-        if exc.reason == "daemon-unreachable":
+        if exc.reason in BROWSER_UNAVAILABLE_REASONS:
             return _print_need_input(["jas_session"], list(ASK_WEBRIDGE), detail=str(exc))
         return _emit({"status": "error", "error_message": str(exc)}, to_stderr=True)
     except Exception as exc:
