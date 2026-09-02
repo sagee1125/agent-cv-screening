@@ -63,11 +63,13 @@ venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_coll
 - WebBridge daemon down -> the script auto-starts it (and waits for it to come up);
   only if it still cannot start -> `need_input` asking to start it. It never silently
   degrades to `--driver http` for a refno/URL.
-- **Browser cleanup**: once the pipeline succeeds and `ranking-overview.html` is open, the
-  WebBridge session is closed (`close_session`), so every page the run opened disappears and
-  HR is left with the report. Add `--keep-browser` to leave them open. On any failure
-  (not-found, download failure, pipeline error) the pages stay open on purpose so HR can see
-  what went wrong. The close is best-effort: a browser that is already gone never fails the run.
+- **Browser cleanup**: once the pipeline succeeds and `ranking-overview.html` is open,
+  the WebBridge session is closed (`close_session`), so every page the run opened disappears
+  and HR is left with the report. A **not-found** result also closes the tabs (the empty
+  search is an answered question, not something HR needs to keep looking at). Other
+  failures (download failure, pipeline error) keep the pages open so HR can see what went
+  wrong. Add `--keep-browser` to leave them open in any case. The close is best-effort: a
+  browser that is already gone never fails the run.
 - CV filenames are derived from application numbers only; person-named files are never used.
 - TLS: the HTTP driver respects `JAS_SSL_VERIFY` (`system` / `0` / `false` / CA bundle
   path) like the jas-import fetcher; WebBridge mode uses the browser's own trust store.

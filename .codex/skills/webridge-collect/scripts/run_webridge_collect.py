@@ -176,6 +176,10 @@ def main() -> int:
             client=client,
         )
     except JobNotFoundError as exc:
+        # Not-found is a clean, answered result: close the browser tabs the run
+        # opened (the list page with the empty filter) so HR is not left staring
+        # at an empty search, then report the not-found envelope.
+        _close_browser_tabs(client, keep=args.keep_browser)
         return _emit({"status": "error", "error_code": "not_found", "error_message": str(exc)}, to_stderr=True)
     except WebBridgeError as exc:
         if exc.reason in BROWSER_UNAVAILABLE_REASONS:
