@@ -13,14 +13,14 @@ JD text → **jd-parser** → `structured_data` → **build-config** → scoring
 
 ```bash
 # 1. Parse the JD
-python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt --output jd-out.json
+venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt --output jd-out.json
 
 # 2. Build the scoring config from the parsed JD (no hand-written config needed)
-python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured jd-out.json --output config.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py build-config --jd-structured jd-out.json --output config.json
 
 # 3. Score an extracted candidate profile against that config
 #    extracted.json may be the cv-parser --output envelope; the CLI auto-unwraps structured_data.
-python .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json
 ```
 
 ## Run
@@ -28,7 +28,7 @@ python .codex/skills/scorer/scripts/run_score.py score --extracted extracted.jso
 ### `score` — score an extracted candidate
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py score --extracted <extracted.json> --config <config.json> [--rank --items <scored-items.json>] [--output <result.json>]
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py score --extracted <extracted.json> --config <config.json> [--rank --items <scored-items.json>] [--output <result.json>]
 ```
 
 | flag | meaning |
@@ -42,7 +42,7 @@ python .codex/skills/scorer/scripts/run_score.py score --extracted <extracted.js
 ### `build-config` — build a scoring config from a JD
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured <jd_structured.json> [--base-config <base.json>] [--output <config.json>]
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py build-config --jd-structured <jd_structured.json> [--base-config <base.json>] [--output <config.json>]
 ```
 
 | flag | meaning |
@@ -71,7 +71,7 @@ Output JSON:
 Runs the same pure six-dimension engine the frontend candidate-match modal uses. The output detail payload (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions`, `top_strengths`, `key_gaps`, `interview_questions`) feeds `report-gen candidate --detail` to render the modal-style PDF.
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd_structured.json> --cv-extracted <extracted.json> [--reference-date YYYY-MM-DD] [--output detail.json]
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd_structured.json> --cv-extracted <extracted.json> [--reference-date YYYY-MM-DD] [--output detail.json]
 ```
 
 | flag | meaning |
@@ -87,7 +87,7 @@ python .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd_struc
 Example:
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py match \
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py match \
   --jd-structured .codex/skills/scorer/examples/sample-jd-structured.json \
   --cv-extracted .codex/skills/scorer/examples/sample-extracted.json \
   --output detail.json
@@ -135,13 +135,13 @@ python .codex/skills/scorer/scripts/run_score.py match \
 See `examples/sample-extracted.json`, `examples/sample-config.json`, and `examples/sample-output.json` in this skill folder; reproduce with:
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py score --extracted .codex/skills/scorer/examples/sample-extracted.json --config .codex/skills/scorer/examples/sample-config.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py score --extracted .codex/skills/scorer/examples/sample-extracted.json --config .codex/skills/scorer/examples/sample-config.json
 ```
 
 `examples/sample-jd-structured.json` is the `structured_data` from the JD Parser sample output; build a config from it with:
 
 ```bash
-python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured .codex/skills/scorer/examples/sample-jd-structured.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py build-config --jd-structured .codex/skills/scorer/examples/sample-jd-structured.json
 ```
 
 ## Ownership

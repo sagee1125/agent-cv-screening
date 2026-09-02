@@ -2,6 +2,20 @@
 
 Project rules for all agents working in this repository.
 
+## HR screening entry point
+
+The same screening contract is installed as a user-level WorkBuddy skill named
+**`hr-cv-screening`** (`~/.workbuddy-ai/skills/hr-cv-screening/SKILL.md`), so HR can trigger
+it from any folder, not only inside this repo. That skill is the canonical source for the
+command list, the tool map, the privacy red lines, and the reply templates. This file stays
+authoritative for anything repo-specific (paths, code rules) — see the
+"WorkBuddy / HR screening" section below.
+
+Always invoke the CLIs with `venv/Scripts/python.exe`, never a bare `python`: only that venv
+has `httpx`, `openpyxl`, `reportlab`, `pymupdf`, and the OCR stack. As a safety net,
+`screening_core.bootstrap.ensure_venv_interpreter` re-execs the CLI with the venv
+interpreter when those packages are missing from the interpreter that was called.
+
 ## Code Comment Rule
 
 Every code file and every function must include a short English comment explaining its purpose.
@@ -45,17 +59,17 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    CVs, and then runs the screening pipeline — so HR watches the whole human flow.
 
    ```bash
-   python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
+   venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
    ```
 
    - The WebBridge human flow is the default everywhere; `run_webridge_collect.py --driver webbridge`
      auto-starts the Kimi WebBridge daemon when it is down (probes `http://127.0.0.1:10086/status`).
    - Only if the daemon still cannot be started (or HR explicitly asks for the offline/HTTP path),
      fall back to the headless HTTP driver:
-     `python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno>" --driver http`
+     `venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno>" --driver http`
    - Only if HR explicitly asks for the offline/HTTP path, or hands over an **already exported
      folder** (`records.html` + `cvs/`), run jas-import directly:
-     `python .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`
+     `venv/Scripts/python.exe .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`
    - `demo_mode.json` at the repo root supplies `--base-url` / `--allow-host` /
      `--no-cookie` automatically, so do not pass them by hand.
    - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.

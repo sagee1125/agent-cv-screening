@@ -12,14 +12,14 @@ Two modes share the same pipeline / scorer path (no LLM scoring):
 
 ## Prerequisites
 
-- Python packages: `pip install -r backend/requirements.txt`.
+- Python packages: `venv/Scripts/python.exe -m pip install -r backend/requirements.txt`.
 - `.env` at repo root with `ZAI_API_KEY` and `LLM_BASE_URL` for `--planner llm` and for CV parsing.
 - Run commands from the repository root. Planner LLM uses `screening_core.llm_client` (`.codex/skills/_shared`), not `backend/app`.
 
 ## Run (L1 rules, default)
 
 ```bash
-python .codex/skills/screening-agent/scripts/run_agent.py \
+venv/Scripts/python.exe .codex/skills/screening-agent/scripts/run_agent.py \
   --jd-file jd.txt \
   --cv cv1.pdf --cv cv2.pdf \
   --position "Backend Engineer" \
@@ -29,7 +29,7 @@ python .codex/skills/screening-agent/scripts/run_agent.py \
 ## Run (LLM planner)
 
 ```bash
-python .codex/skills/screening-agent/scripts/run_agent.py \
+venv/Scripts/python.exe .codex/skills/screening-agent/scripts/run_agent.py \
   --planner llm \
   --goal "Screen these candidates and retry transient parse failures." \
   --jd-json .codex/skills/scorer/examples/sample-jd-structured.json \

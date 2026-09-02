@@ -12,7 +12,7 @@ Generate a candidate PDF report with a radar profile, dimension details, and sug
 Install the backend Python dependencies from the repository root:
 
 ```bash
-pip install -r backend/requirements.txt
+venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 ```
 
 Run all commands from the repository root so `_bootstrap.py` can locate `backend/app`.
@@ -23,15 +23,15 @@ JD text → **jd-parser** → **build-config** → **score** → **report-gen** 
 
 ```bash
 # 1. Score a candidate (scorer skill)
-python .codex/skills/scorer/scripts/run_score.py score \
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py score \
   --extracted extracted.json --config config.json --output score.json
 
 # 2. Generate the candidate PDF one-pager
-python .codex/skills/report-gen/scripts/run_report.py candidate \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py candidate \
   --extracted extracted.json --score score.json --position "Backend Engineer" --rank 1 --output candidate-report.pdf
 
 # 3. Generate the Excel comparison (ranked rows)
-python .codex/skills/report-gen/scripts/run_report.py comparison \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py comparison \
   --position "Backend Engineer" --rows rows.json --output comparison.xlsx
 ```
 
@@ -40,7 +40,7 @@ python .codex/skills/report-gen/scripts/run_report.py comparison \
 ### `candidate` — one-page PDF report
 
 ```bash
-python .codex/skills/report-gen/scripts/run_report.py candidate \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py candidate \
   --extracted <extracted.json> \
   --score <score.json> \
   --position "<job title>" \
@@ -64,7 +64,7 @@ python .codex/skills/report-gen/scripts/run_report.py candidate \
 ### `comparison` — Excel comparison report
 
 ```bash
-python .codex/skills/report-gen/scripts/run_report.py comparison \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py comparison \
   --position "<job title>" \
   --rows <rows.json> \
   --output <report.xlsx>
@@ -79,7 +79,7 @@ python .codex/skills/report-gen/scripts/run_report.py comparison \
 ### `board` — HTML ranking + radar board (HR browser)
 
 ```bash
-python .codex/skills/report-gen/scripts/run_report.py board \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py board \
   --position "<job title>" \
   --rows <rows.json> \
   [--refno 260818001] \
@@ -132,12 +132,12 @@ Feed the Scorer skill output directly as `--score`:
 ## Example
 
 ```bash
-python .codex/skills/report-gen/scripts/run_report.py candidate \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py candidate \
   --extracted .codex/skills/report-gen/examples/sample-extracted.json \
   --score .codex/skills/report-gen/examples/sample-score.json \
   --position "Backend Engineer" --rank 1 --output /tmp/candidate-report.pdf
 
-python .codex/skills/report-gen/scripts/run_report.py comparison \
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py comparison \
   --position "Backend Engineer" \
   --rows .codex/skills/report-gen/examples/sample-comparison-rows.json \
   --output /tmp/comparison.xlsx

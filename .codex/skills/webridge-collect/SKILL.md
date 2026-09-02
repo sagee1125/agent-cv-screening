@@ -20,16 +20,16 @@ and page/CV content stays on disk.
 - Kimi WebBridge extension installed in Chrome/Edge and the daemon running:
   `& "$env:USERPROFILE\.kimi-webbridge\bin\kimi-webbridge.exe" start`
 - For the public demo (no login), `--driver http` needs no browser at all.
-- Python deps: `pip install -r backend/requirements.txt`.
+- Python deps: `venv/Scripts/python.exe -m pip install -r backend/requirements.txt`.
 
 ## Run
 
 ```bash
 # Real browser path (WebBridge), internal records URL
-python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "https://jobs.polyu.edu.hk/internal/records.php?refno=260818001" --driver webbridge
+venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "https://jobs.polyu.edu.hk/internal/records.php?refno=260818001" --driver webbridge
 
 # Public demo host, direct HTTP (no browser needed)
-python .codex/skills/webridge-collect/scripts/run_webridge_collect.py 2600827001 \
+venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py 2600827001 \
   --driver http --base-url https://jes-web-demo.vercel.app \
   --allow-host jes-web-demo.vercel.app
 ```

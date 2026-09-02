@@ -18,7 +18,7 @@ Fetch PolyU job listings (catalog) and individual job detail pages as plain JD t
 ### `catalog` — fetch the job catalog
 
 ```bash
-python .codex/skills/polyu-import/scripts/run_polyu_import.py catalog [--output catalog.json]
+venv/Scripts/python.exe .codex/skills/polyu-import/scripts/run_polyu_import.py catalog [--output catalog.json]
 ```
 
 Output:
@@ -46,7 +46,7 @@ Output:
 ### `fetch` — fetch one job detail page as JD text
 
 ```bash
-python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch \
+venv/Scripts/python.exe .codex/skills/polyu-import/scripts/run_polyu_import.py fetch \
   [--external-ref REF] \
   [--detail-url URL] \
   [--job-code CODE --title TITLE --department DEPT] \
@@ -63,7 +63,7 @@ At least one of `--external-ref` / `--detail-url` is required.
 ### `fetch-and-parse` — fetch and parse one job
 
 ```bash
-python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse \
+venv/Scripts/python.exe .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse \
   [--external-ref REF | --detail-url URL] \
   [--output result.json]
 ```
@@ -101,15 +101,15 @@ PolyU JD text feeds directly into the JD parser and the rest of the screening pi
 
 ```bash
 # 1. Fetch + parse one PolyU job into structured JD requirements
-python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse --external-ref <REF> --output polyu-parsed.json
+venv/Scripts/python.exe .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse --external-ref <REF> --output polyu-parsed.json
 
 # 2. Build a scoring config from the parsed JD (scorer skill)
-python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured polyu-parsed.json --output config.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py build-config --jd-structured polyu-parsed.json --output config.json
 
 # 3. Parse a candidate CV (cv-parser skill) -> score -> report (report-gen skill)
-python .codex/skills/cv-parser/scripts/run_cv_parse.py --file cv.pdf --output extracted.json
-python .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json --output score.json
-python .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --score score.json --position "..." --output report.pdf
+venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file cv.pdf --output extracted.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json --output score.json
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --score score.json --position "..." --output report.pdf
 ```
 
 `build-config --jd-structured` accepts any of:

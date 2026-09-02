@@ -9,7 +9,7 @@ Run the project CV Parser service directly as a Python script (no HTTP).
 
 ## Prerequisites
 
-- Python dependencies: `pip install -r backend/requirements.txt` (parser still uses the same packages).
+- Python dependencies: `venv/Scripts/python.exe -m pip install -r backend/requirements.txt` (parser still uses the same packages).
 - `.env` at repo root with `ZAI_API_KEY` and `LLM_BASE_URL` (the parser calls the Zhipu LLM).
 - Run every command from the repository root.
 
@@ -18,7 +18,7 @@ The parser implementation lives in this skill (`src/cv_parser/`), not in `backen
 ## Run
 
 ```bash
-python .codex/skills/cv-parser/scripts/run_cv_parse.py --file <path-to-cv.pdf> [--jd-file <jd.txt> | --jd-text "<jd text>"] [--output <result.json>]
+venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file <path-to-cv.pdf> [--jd-file <jd.txt> | --jd-text "<jd text>"] [--output <result.json>]
 ```
 
 | flag | meaning |
@@ -65,7 +65,7 @@ python .codex/skills/cv-parser/scripts/run_cv_parse.py --file <path-to-cv.pdf> [
 Run the bundled `examples/sample-cv.pdf`:
 
 ```bash
-python .codex/skills/cv-parser/scripts/run_cv_parse.py --file .codex/skills/cv-parser/examples/sample-cv.pdf
+venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file .codex/skills/cv-parser/examples/sample-cv.pdf
 ```
 
 Parsing requires the live LLM, so no sample output is bundled; the first run prints the result to stdout (or write it with `--output`).

@@ -266,23 +266,23 @@ flowchart LR
 
 ```bash
 # One command (pipeline skill) — legacy or matching engine
-python .codex/skills/pipeline/scripts/run_pipeline.py \
+venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
   --jd-file jd.txt --cv cv1.pdf --cv cv2.pdf \
   --position "Backend Engineer" --output-dir data/pipeline_out
 
 # Manual chain (same steps as pipeline skill)
 # Option A: JD from PolyU
-python .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse --external-ref <REF> --output polyu.json
-python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured polyu.json --output config.json
+venv/Scripts/python.exe .codex/skills/polyu-import/scripts/run_polyu_import.py fetch-and-parse --external-ref <REF> --output polyu.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py build-config --jd-structured polyu.json --output config.json
 
 # Option B: JD from text file
-python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt --output jd.json
-python .codex/skills/scorer/scripts/run_score.py build-config --jd-structured jd.json --output config.json
+venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file jd.txt --output jd.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py build-config --jd-structured jd.json --output config.json
 
 # Score + report (requires ZAI_API_KEY for cv-parser)
-python .codex/skills/cv-parser/scripts/run_cv_parse.py --file cv.pdf --output extracted.json
-python .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json --output score.json
-python .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --score score.json --position "Job Title" --rank 1 --output report.pdf
+venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file cv.pdf --output extracted.json
+venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py score --extracted extracted.json --config config.json --output score.json
+venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py candidate --extracted extracted.json --score score.json --position "Job Title" --rank 1 --output report.pdf
 ```
 
 **CLI envelope unwrapping (fail-fast on invalid JSON):**
@@ -375,12 +375,12 @@ Implemented in `.codex/skills/screening-agent/scripts/planner.py`. **Target prod
 
 ```bash
 # L1 rules (default)
-python .codex/skills/screening-agent/scripts/run_agent.py \
+venv/Scripts/python.exe .codex/skills/screening-agent/scripts/run_agent.py \
   --jd-file jd.txt --cv cv1.pdf --cv cv2.pdf \
   --position "Backend Engineer" --output-dir data/pipeline_out
 
 # LLM planner (needs ZAI_API_KEY + LLM_BASE_URL)
-python .codex/skills/screening-agent/scripts/run_agent.py \
+venv/Scripts/python.exe .codex/skills/screening-agent/scripts/run_agent.py \
   --planner llm \
   --goal "Screen these candidates and retry transient parse failures." \
   --jd-json .codex/skills/scorer/examples/sample-jd-structured.json \

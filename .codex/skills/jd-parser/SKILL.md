@@ -10,8 +10,8 @@ Run the project JD Parser service directly as a Python script (no HTTP). Rule-ba
 ## Run
 
 ```bash
-python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file <jd.txt>
-python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-text "<jd text>"
+venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file <jd.txt>
+venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-text "<jd text>"
 ```
 
 | flag | meaning |
@@ -52,7 +52,7 @@ python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-text "<jd text>"
 See `examples/sample-jd.txt` and `examples/sample-output.json` in this skill folder; reproduce with:
 
 ```bash
-python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file .codex/skills/jd-parser/examples/sample-jd.txt
+venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file .codex/skills/jd-parser/examples/sample-jd.txt
 ```
 
 ## Ownership

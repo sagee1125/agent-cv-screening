@@ -27,16 +27,16 @@ host-envelope whitelist so only `HostToolReturn` JSON reaches this conversation.
 
 ```bash
 # Screen a job by refno or URL (visible WebBridge human flow)
-python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "<refno-or-url>" --driver webbridge
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "<refno-or-url>" --driver webbridge
 
 # Screen an HR-exported folder
-python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "<folder>"
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "<folder>"
 
 # Check for updates
-python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py check_updates "<refno>"
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py check_updates "<refno>"
 
 # Request JAS access
-python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py request_jas_access --jas-session granted
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py request_jas_access --jas-session granted
 ```
 
 If the wrapper is unavailable, the underlying skill CLIs can be called directly,
@@ -44,9 +44,9 @@ but their stdout must NOT be attached to this conversation — pipe it through
 `run_host_envelope.py` first:
 
 ```bash
-python .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
+venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
 # then:
-python .codex/skills/host-envelope/scripts/run_host_envelope.py --tool screen_refno --input <stdout.json>
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_host_envelope.py --tool screen_refno --input <stdout.json>
 ```
 
 - Never `--skip-reports`. Never `--output-dir` inside this repo or the export folder.
@@ -62,13 +62,13 @@ Only the "safe to quote" fields may enter this conversation. Everything else sta
 
 | HR asks (EN/ZH) | Command (repo root) | Safe to quote to HR | Never quote |
 |---|---|---|---|
-| "Screen refno X" / 篩選：refno X / 筛 X | `python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "X" --driver webbridge` | refno, post_title, candidate_count, ranking (appno, total_score, tier), report-ready booleans (pdf/html exist) | names, emails, phones, HKID, salaries, CV/JD text |
-| "Screen folder" / 用 jas-import 離綫篩選 <folder> | `python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "<folder>"` | same as above | same as above |
-| "Any updates / new applications for X?" / X 有無更新 | `python .codex/skills/host-envelope/scripts/run_workbuddy_tool.py check_updates "<refno>"` | post_title, candidate_count, has_changes, first_check, changes.{jd_changed, added, removed, status_changed} | CV/JD text, names |
-| "What skills/requirements does this JD need?" (JD file) | `python .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file <jd.txt>` | must_skills/preferred_skills display names, education, experience years, language, visa | full JD text (summarize instead) |
-| "What interview questions should I ask?" / 面試問什麼 | `python .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd.json> --cv-extracted <extracted.json>` | fit_band, top_strengths, key_gaps, interview_questions (keyed by appno) | extracted JSON content (contains names) |
-| "Make an Excel comparison" / 做 Excel 比較表 | `python .codex/skills/report-gen/scripts/run_report.py comparison --position "<title>" --rows <rows.json> --output comparison.xlsx` | output file path (opaque handle; open in UI, do not read file content) | file contents (may show education/work details) |
-| "Fetch a PolyU job" / 抓 PolyU 職位 | `python .codex/skills/polyu-import/scripts/run_polyu_import.py catalog` or `fetch ...` | job_code, title, department, closing_date, detail_url | full JD text (summarize instead) |
+| "Screen refno X" / 篩選：refno X / 筛 X | `venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "X" --driver webbridge` | refno, post_title, candidate_count, ranking (appno, total_score, tier), report-ready booleans (pdf/html exist) | names, emails, phones, HKID, salaries, CV/JD text |
+| "Screen folder" / 用 jas-import 離綫篩選 <folder> | `venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py screen_refno "<folder>"` | same as above | same as above |
+| "Any updates / new applications for X?" / X 有無更新 | `venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_workbuddy_tool.py check_updates "<refno>"` | post_title, candidate_count, has_changes, first_check, changes.{jd_changed, added, removed, status_changed} | CV/JD text, names |
+| "What skills/requirements does this JD need?" (JD file) | `venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-file <jd.txt>` | must_skills/preferred_skills display names, education, experience years, language, visa | full JD text (summarize instead) |
+| "What interview questions should I ask?" / 面試問什麼 | `venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd.json> --cv-extracted <extracted.json>` | fit_band, top_strengths, key_gaps, interview_questions (keyed by appno) | extracted JSON content (contains names) |
+| "Make an Excel comparison" / 做 Excel 比較表 | `venv/Scripts/python.exe .codex/skills/report-gen/scripts/run_report.py comparison --position "<title>" --rows <rows.json> --output comparison.xlsx` | output file path (opaque handle; open in UI, do not read file content) | file contents (may show education/work details) |
+| "Fetch a PolyU job" / 抓 PolyU 職位 | `venv/Scripts/python.exe .codex/skills/polyu-import/scripts/run_polyu_import.py catalog` or `fetch ...` | job_code, title, department, closing_date, detail_url | full JD text (summarize instead) |
 
 ## Update policy (repeated screening)
 

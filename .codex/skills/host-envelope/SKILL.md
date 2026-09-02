@@ -16,7 +16,7 @@ WorkBuddy (and any other chat host) must not attach raw skill stdout to the conv
 ## Run
 
 ```bash
-python .codex/skills/host-envelope/scripts/run_host_envelope.py \
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_host_envelope.py \
   --tool screen_refno \
   --input data/pipeline_out/manifest.json \
   --jas-manifest data/jas_out/jas-manifest.json \
@@ -27,7 +27,7 @@ python .codex/skills/host-envelope/scripts/run_host_envelope.py \
 Request JAS access (no skill stdout):
 
 ```bash
-python .codex/skills/host-envelope/scripts/run_host_envelope.py \
+venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_host_envelope.py \
   --tool request_jas_access \
   --jas-session missing
 ```

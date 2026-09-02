@@ -1,8 +1,14 @@
 # Application settings loaded from environment variables.
+from pathlib import Path
 from typing import List
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Returns the repo root from this file's location so .env loads from any cwd.
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[5]
 
 
 # Loads process settings from environment variables and .env.
@@ -73,7 +79,8 @@ class Settings(BaseSettings):
     # Ignore unrelated .env keys so loading never fails on extra input
     # (pydantic-settings defaults to extra="forbid", which breaks when the
     # .env contains aliased keys such as OPENAI_API_KEY).
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The path is absolute so a CLI started from any directory still finds .env.
+    model_config = SettingsConfigDict(env_file=str(_repo_root() / ".env"), extra="ignore")
 
 
 # Instantiates process-wide settings from environment variables and .env.

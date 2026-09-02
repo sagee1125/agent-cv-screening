@@ -13,7 +13,7 @@ to running the steps manually. No backend code is duplicated or modified, and th
 
 ## Prerequisites
 
-- Backend dependencies installed: `pip install -r backend/requirements.txt`.
+- Backend dependencies installed: `venv/Scripts/python.exe -m pip install -r backend/requirements.txt`.
 - `.env` at repo root with `ZAI_API_KEY` and `LLM_BASE_URL` (the cv-parser step calls the Zhipu LLM).
 - Run every command from the repository root.
 - Network access to `https://jobs.polyu.edu.hk` only when using `--polyu-ref` / `--polyu-detail-url`.
@@ -21,7 +21,7 @@ to running the steps manually. No backend code is duplicated or modified, and th
 ## Run
 
 ```bash
-python .codex/skills/pipeline/scripts/run_pipeline.py \
+venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
   --jd-file jd.txt \
   --cv cv1.pdf --cv cv2.pdf \
   --position "Backend Engineer" \
@@ -114,7 +114,7 @@ stdout prints a JSON manifest:
 ## Offline example (no LLM, no network)
 
 ```bash
-python .codex/skills/pipeline/scripts/run_pipeline.py \
+venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
   --jd-json .codex/skills/scorer/examples/sample-jd-structured.json \
   --extracted .codex/skills/report-gen/examples/sample-extracted.json \
   --position "Backend Engineer" \
@@ -164,7 +164,7 @@ The pipeline can also accept JAS URLs directly and download them locally before
 running the same offline chain:
 
 ```bash
-python .codex/skills/pipeline/scripts/run_pipeline.py \
+venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
   --jd-url "https://jobs.polyu.edu.hk/internal/records.php?refno=260818001" \
   --cv-url "https://jobs.polyu.edu.hk/internal/file.php?t=cv&id=123456&refno=260818001" \
   --cookie-file data/jas_cookies.txt \
