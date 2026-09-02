@@ -178,3 +178,57 @@ async def test_chinese_no_less_than_full_parse() -> None:
     assert data["experience_requirement"]["maximum_years"] is None
     skills = {item["display_name"].lower() for item in data["must_skills"]}
     assert "java" in skills
+
+
+POLYU_STYLE_JD = """
+Ref no.: 2608001
+Job group: Research / Project Posts
+Unit: School of Accounting and Finance
+Post title: Research Assistant
+
+Duties
+The appointee will assist in research projects and working papers.
+
+Requirements
+A recognised bachelor degree in a business-related discipline (for example finance, economics, accounting, actuarial studies, data analytics or a related discipline)
+Experience with Python, R, Stata, Git and PostgreSQL
+"""
+
+
+@pytest.mark.asyncio
+async def test_job_metadata_is_not_promoted_to_must_skills() -> None:
+    """Job group / unit / title tokens must not become core must-skills."""
+    service = JDParserService()
+    result = await service.parse_jd(POLYU_STYLE_JD)
+    must = {item["canonical_skill"] for item in result["structured_data"]["must_skills"]}
+    assert "research" not in must
+    assert "accounting" not in must
+    assert {"python", "r", "stata", "git", "postgresql"} <= must
+
+
+@pytest.mark.asyncio
+async def test_degree_examples_go_to_field_of_study() -> None:
+    """Parenthetical degree majors are stored as education fields, not must-skills."""
+    service = JDParserService()
+    result = await service.parse_jd(POLYU_STYLE_JD)
+    field = (result["structured_data"]["education_requirement"].get("field_of_study") or "").lower()
+    must = {item["canonical_skill"] for item in result["structured_data"]["must_skills"]}
+    assert "actuarial science" in field or "actuarial" in field
+    assert "accounting" in field
+    assert "data analysis" in field or "data analytics" in field
+    assert "actuarial_science" not in must
+    assert "data_analysis" not in must
+
+
+@pytest.mark.asyncio
+async def test_degree_line_still_extracts_tools_on_same_line() -> None:
+    """A requirement that mixes degree wording and tools must keep the tools."""
+    service = JDParserService()
+    jd = """Requirements:
+- Bachelor degree and 3+ years of Python experience
+- Experience with Master Data Management and SQL
+"""
+    result = await service.parse_jd(jd)
+    must = {item["canonical_skill"] for item in result["structured_data"]["must_skills"]}
+    assert "python" in must
+    assert "sql" in must

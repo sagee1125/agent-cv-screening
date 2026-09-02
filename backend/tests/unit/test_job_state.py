@@ -19,6 +19,7 @@ from screening_core.job_state import (  # noqa: E402
     record_check,
     record_screen_run,
     save_job_state,
+    score_snapshot,
 )
 
 JOB = {
@@ -124,3 +125,64 @@ def test_record_check(tmp_path) -> None:
     assert state["last_check"]["candidates"]["2600827001"] == "S"
     assert state["history"][-1]["kind"] == "check"
     assert state["history"][-1]["has_changes"] is False
+
+
+# score_snapshot merges pipeline manifest scores with JAS hr statuses (appno only).
+def test_score_snapshot_merges_manifest_and_status() -> None:
+    manifest = {
+        "status": "success",
+        "candidates": [
+            {"rank": 1, "appno": "2600827001", "total_score": 57.4, "tier": "low"},
+            {"rank": 2, "appno": "2600827002", "total_score": 51.7, "tier": "low"},
+        ],
+    }
+    rows = score_snapshot(manifest, JOB)
+    assert rows == [
+        {"appno": "2600827001", "rank": 1, "match_score": 57.4, "fit_band": "low", "hr_status": "S"},
+        {"appno": "2600827002", "rank": 2, "match_score": 51.7, "fit_band": "low", "hr_status": "P"},
+    ]
+
+
+# score_snapshot tolerates missing/failed manifests and skips rows without appno.
+def test_score_snapshot_tolerates_bad_manifests() -> None:
+    assert score_snapshot(None, JOB) == []
+    assert score_snapshot({}, JOB) == []
+    assert score_snapshot({"status": "error", "error_message": "boom"}, JOB) == []
+    rows = score_snapshot({"candidates": [{"rank": 1}, {"rank": 2, "appno": "2600827001"}]}, JOB)
+    assert rows == [{"appno": "2600827001", "rank": 2, "match_score": None, "fit_band": None, "hr_status": "S"}]
+
+
+# record_screen_run stores the per-candidate scores in the history entry when given.
+def test_record_screen_run_stores_scores(tmp_path) -> None:
+    cv = tmp_path / "cvs" / "2600827001.pdf"
+    cv.parent.mkdir(parents=True, exist_ok=True)
+    cv.write_bytes(b"%PDF")
+    scores = [{"appno": "2600827001", "rank": 1, "match_score": 57.4, "fit_band": "low", "hr_status": "S"}]
+    state = record_screen_run(
+        tmp_path / "state",
+        "2600827001",
+        job=JOB,
+        cv_paths={"2600827001": cv},
+        result="success",
+        output="Desktop/workbuddy-cv-screen/2600827001",
+        at="2026-08-31T10:00:00+08:00",
+        scores=scores,
+    )
+    assert state["history"][-1]["scores"] == scores
+
+
+# record_screen_run omits the scores key when no snapshot is provided (legacy shape).
+def test_record_screen_run_without_scores_keeps_entry_shape(tmp_path) -> None:
+    cv = tmp_path / "cvs" / "2600827001.pdf"
+    cv.parent.mkdir(parents=True, exist_ok=True)
+    cv.write_bytes(b"%PDF")
+    state = record_screen_run(
+        tmp_path / "state",
+        "2600827001",
+        job=JOB,
+        cv_paths={"2600827001": cv},
+        result="success",
+        output="Desktop/workbuddy-cv-screen/2600827001",
+        at="2026-08-31T10:00:00+08:00",
+    )
+    assert "scores" not in state["history"][-1]

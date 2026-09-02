@@ -179,6 +179,39 @@ class JDParserService:
         "salary",
         "compensation",
     )
+    # Job-board metadata labels; these must not become must-skills.
+    METADATA_LINE_RE = re.compile(
+        r"^(?:job\s*group|unit|department|faculty|ref(?:erence)?\s*no\.?|"
+        r"post\s*title|job\s*title|posting\s*date|closing\s*date|off-?shelf|"
+        r"list\s*type|number of applications|email notification)\b",
+        re.IGNORECASE,
+    )
+    # Degree / discipline lines: extract acceptable majors (not a whole-line skill skip).
+    DEGREE_FIELD_LINE_RE = re.compile(
+        r"(?:bachelor'?s?|master'?s?|phd|doctorate|doctoral|honou?rs)\s+"
+        r"(?:degree|in\b)|"
+        r"\bdegree\s+(?:in|of)\b|"
+        r"\bdiscipline\b|"
+        r"學士|碩士|博士|學位|學科",
+        re.IGNORECASE,
+    )
+    DEGREE_IN_RE = re.compile(
+        r"(?:degree|bachelor|master|phd|doctorate|學士|碩士|博士)\s+(?:in|of)\s+(?:a\s+)?(.+)",
+        re.IGNORECASE,
+    )
+    FIELD_EXAMPLE_RE = re.compile(
+        r"(?:for example|e\.g\.|eg\.|such as|including|例如)\s*:?\s*(.+)$",
+        re.IGNORECASE,
+    )
+    SKILL_CUE_RE = re.compile(
+        r"(?:experience with|proficient in|knowledge of|familiar with|"
+        r"hands[- ]on|expertise in|熟悉|精通|了解|掌握|"
+        r"\bexperience\b|\bskills?\b|\btools?\b|technolog(?:y|ies)|stack|"
+        r"programming|software|certification|經驗|经验)",
+        re.IGNORECASE,
+    )
+    # Role/org nouns that are not tools unless the line is a skill cue.
+    GENERIC_ROLE_SKILLS = frozenset({"research", "accounting", "teaching"})
     SKILL_INTRO_PATTERNS = [
         re.compile(r"(?:experience with|proficient in|knowledge of|familiar with)\s+(.+)$"),
         re.compile(r"(?:hands[- ]on(?: experience)? with|expertise in)\s+(.+)$"),
@@ -186,6 +219,24 @@ class JDParserService:
     ]
     CONNECTOR_SPLIT_RE = re.compile(r"[,/]|(?:\band\b)|(?:\bor\b)")
     TOKEN_CLEAN_RE = re.compile(r"[^a-z0-9+.#\-\s]")
+    FIELD_STOPWORDS = frozenset(
+        {
+            "a",
+            "an",
+            "or",
+            "and",
+            "related",
+            "discipline",
+            "disciplines",
+            "field",
+            "fields",
+            "subject",
+            "area",
+            "business-related",
+            "recognised",
+            "recognized",
+        }
+    )
 
     def _extract_skills(self, text: str) -> tuple[list[str], list[str]]:
         lowered = self._clean_text(text)
@@ -196,9 +247,16 @@ class JDParserService:
 
         for section_name, lines in sections.items():
             for line in lines:
-                if self._should_ignore_line(line):
+                if self._should_ignore_line(line) or self._is_metadata_line(line):
+                    continue
+                if section_name == "other" and not self._line_has_skill_cue(line):
                     continue
                 skills = self._extract_candidates_from_line(line)
+                if self._is_degree_field_line(line):
+                    field_tokens = {field.casefold() for field in self._fields_from_degree_line(line)}
+                    skills = [skill for skill in skills if skill.casefold() not in field_tokens]
+                if not self._line_has_skill_cue(line):
+                    skills = [skill for skill in skills if skill not in self.GENERIC_ROLE_SKILLS]
                 if not skills:
                     continue
 
@@ -277,6 +335,68 @@ class JDParserService:
 
     def _should_ignore_line(self, line: str) -> bool:
         return any(cue in line for cue in self.IGNORE_LINE_CUES)
+
+    def _is_metadata_line(self, line: str) -> bool:
+        """Return True for job-board header fields such as Job group / Unit."""
+        return bool(self.METADATA_LINE_RE.match((line or "").strip()))
+
+    def _is_degree_field_line(self, line: str) -> bool:
+        """Return True when the line describes a degree or acceptable majors."""
+        return bool(self.DEGREE_FIELD_LINE_RE.search(line or ""))
+
+    def _line_has_skill_cue(self, line: str) -> bool:
+        """Return True when the line is a skills/tools sentence rather than role prose."""
+        return bool(self.SKILL_CUE_RE.search(line or ""))
+
+    def _extract_education_fields(self, text: str) -> str | None:
+        """Collect acceptable fields of study from degree / discipline lines."""
+        lowered = self._clean_text(text)
+        sections = self._split_sections(lowered)
+        fields: list[str] = []
+        seen: set[str] = set()
+        for lines in sections.values():
+            for line in lines:
+                if self._should_ignore_line(line) or self._is_metadata_line(line):
+                    continue
+                if not self._is_degree_field_line(line):
+                    continue
+                for field in self._fields_from_degree_line(line):
+                    key = field.casefold()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    fields.append(field)
+        return ", ".join(fields) if fields else None
+
+    def _fields_from_degree_line(self, line: str) -> list[str]:
+        """Parse taxonomy majors from a degree line, including parenthetical examples."""
+        fields: list[str] = []
+        seen: set[str] = set()
+
+        def add(raw: str | None) -> None:
+            text = (raw or "").strip(" .,:;()[]")
+            if not text or text.casefold() in self.FIELD_STOPWORDS:
+                return
+            cleaned = self.TOKEN_CLEAN_RE.sub(" ", text.lower()).strip()
+            cleaned = re.sub(r"\s+", " ", cleaned)
+            canonical = self._token_to_canonical.get(cleaned)
+            if not canonical:
+                return
+            if canonical.casefold() in seen:
+                return
+            seen.add(canonical.casefold())
+            fields.append(canonical)
+
+        example = self.FIELD_EXAMPLE_RE.search(line)
+        fragment = example.group(1) if example else ""
+        if not fragment:
+            degree_in = self.DEGREE_IN_RE.search(line)
+            fragment = degree_in.group(1) if degree_in else ""
+        if "(" in fragment:
+            fragment = fragment.split("(", 1)[-1]
+        for part in re.split(r"[,/;]|(?:\bor\b)|(?:\band\b)", fragment):
+            add(part)
+        return fields
 
     def _line_target_and_weight(self, section_name: str, line: str) -> tuple[str, int]:
         has_must_cue = any(cue in line for cue in self.MUST_CUES)
@@ -737,7 +857,7 @@ class JDParserService:
             "language_requirements": language_requirements,
             "education_requirement": {
                 "minimum_degree": "bachelor" if "bachelor" in normalized_cleaned else "none",
-                "field_of_study": None,
+                "field_of_study": self._extract_education_fields(cleaned_input),
                 "is_mandatory": "bachelor" in normalized_cleaned,
                 "provenance": "",
             },

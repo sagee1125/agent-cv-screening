@@ -33,12 +33,13 @@ from screening_core.candidate_id import appno_from_filename, is_jas_refno, recor
 from screening_core.hr_output import (
     HR_PACK_FOLDER,
     RANKING_OVERVIEW_HTML,
+    RESUME_LINKS_JSON,
     open_hr_file,
     pipeline_work_dir,
     resolve_hr_job_dir,
     safe_pack_id,
 )
-from screening_core.job_state import load_job_state, record_screen_run, save_job_state
+from screening_core.job_state import load_job_state, record_screen_run, save_job_state, score_snapshot
 from screening_core.demo_mode import apply_demo_defaults
 from screening_core.report_fingerprint import FINGERPRINTS_NAME
 from screening_core.input_policy import (
@@ -341,6 +342,15 @@ def _run_screening(
     staged = _stage_cvs_by_appno(work_dir, cvs)
     manifest = _build_manifest(job, staged, download_failures=download_failures)
     (work_dir / "jas-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Persist appno -> online CV URL so the ranking board can link to the online resume.
+    resume_links = {
+        str(candidate.get("appno")): str(candidate.get("cv_url"))
+        for candidate in job.get("candidates", [])
+        if isinstance(candidate, dict) and candidate.get("appno") and candidate.get("cv_url")
+    }
+    (work_dir / RESUME_LINKS_JSON).write_text(
+        json.dumps(resume_links, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     cmd = _pipeline_cmd(
         jd_text_path,
@@ -357,6 +367,7 @@ def _run_screening(
     )
     exit_code, payload = _run_pipeline(cmd)
     # Persist run history + CV hashes so later runs can skip unchanged downloads.
+    # Per-candidate score snapshot (appno/score/band/hr_status) enables later backtesting.
     record_screen_run(
         _resolve_state_dir(args),
         refno or "job",
@@ -364,6 +375,7 @@ def _run_screening(
         cv_paths={appno: path for appno, path in staged},
         result=str(payload.get("status", "error")),
         output=str(job_dir),
+        scores=score_snapshot(payload, job),
     )
     hr_files = (
         f"Desktop/{HR_PACK_FOLDER}/{job_dir.name}"

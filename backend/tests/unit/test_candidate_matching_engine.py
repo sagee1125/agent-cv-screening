@@ -362,3 +362,123 @@ def test_ranking_uses_business_order_and_dense_ties() -> None:
 
     assert [item["candidate_id"] for item in ranked] == ["a", "b", "c"]
     assert [item["recommendation_rank"] for item in ranked] == [1, 1, 2]
+
+
+# Verifies certification titles contribute canonical skills such as aws.
+def test_certification_name_matches_canonical_must_skill() -> None:
+    jd = {
+        "must_skills": [{"skill_id": "aws_1", "canonical_skill": "aws", "weight": 1.0}],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+    }
+    cv = {
+        "skills": [],
+        "experience": [],
+        "education": [],
+        "certifications": [{"name": "AWS Certified Data Engineer"}],
+        "projects": [],
+        "publications": [],
+    }
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    assert result["radar_dimensions"][0]["score"] == 100.0
+
+
+# Verifies compound skill ids are split with the taxonomy token matcher.
+def test_compound_skill_token_expands_to_canonical_skill() -> None:
+    jd = {
+        "must_skills": [{"skill_id": "aws_1", "canonical_skill": "aws", "weight": 1.0}],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+    }
+    cv = {"skills": [{"canonical_skill": "aws_s3_ec2"}], "experience": [], "education": []}
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    assert result["radar_dimensions"][0]["score"] == 100.0
+
+
+# Verifies job titles and majors can supply taxonomy skill evidence.
+def test_job_title_and_major_count_as_skill_evidence() -> None:
+    jd = {
+        "must_skills": [
+            {"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0},
+            {"skill_id": "actuarial_1", "canonical_skill": "actuarial_science", "weight": 1.0},
+        ],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+    }
+    cv = {
+        "skills": [],
+        "experience": [{"job_title": "Python Developer", "description": "", "skills_used": []}],
+        "education": [{"major": "Actuarial Studies"}],
+    }
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    assert result["radar_dimensions"][0]["score"] == 100.0
+
+
+# Verifies any listed acceptable major can satisfy the education field component.
+def test_education_field_accepts_any_listed_major() -> None:
+    jd = _jd()
+    jd["education_requirement"]["field_of_study"] = "finance, accounting, actuarial science"
+    cv = _cv()
+    cv["education"] = [{"degree": "BSc", "degree_level": "bachelor", "major": "Actuarial Studies"}]
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    education = result["radar_dimensions"][4]
+    assert education["reasoning"]["facts"]["components"]["field"] == 100.0
+
+
+# Verifies R&D job titles do not satisfy an R language must-skill.
+def test_rd_job_title_does_not_match_r_must_skill() -> None:
+    jd = {
+        "must_skills": [{"skill_id": "r_1", "canonical_skill": "r", "weight": 1.0}],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+    }
+    cv = {
+        "skills": [],
+        "experience": [
+            {
+                "job_title": "R&D Engineer",
+                "description": "Led R&D projects and working papers.",
+                "skills_used": [],
+            }
+        ],
+        "education": [],
+    }
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    assert result["radar_dimensions"][0]["score"] == 0.0
+
+
+# Verifies free-text CV prose does not invent computer-vision evidence.
+def test_cv_prose_does_not_match_computer_vision_must_skill() -> None:
+    jd = {
+        "must_skills": [{"skill_id": "cv_1", "canonical_skill": "computer_vision", "weight": 1.0}],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+    }
+    cv = {
+        "skills": [],
+        "experience": [
+            {
+                "job_title": "Research Assistant",
+                "description": "Updated the CV and supporting documents for the lab.",
+                "skills_used": [],
+            }
+        ],
+        "education": [],
+    }
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    assert result["radar_dimensions"][0]["score"] == 0.0

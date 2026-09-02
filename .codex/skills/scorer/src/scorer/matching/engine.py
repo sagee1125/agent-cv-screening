@@ -11,9 +11,20 @@ from typing import Any
 from .config_builder import normalize_token
 from .contracts import DIMENSION_IDS, DIMENSION_LABELS, EffectiveConfig, SkillRelationResolver
 
+_TAXONOMY_LOADER = None
+_TAXONOMY_UNAVAILABLE = False
+
 
 _SENIORITY = ("intern", "junior", "mid", "senior", "lead", "manager", "director", "executive")
 _DEGREES = {"none": 0, "high_school": 1, "associate": 2, "bachelor": 3, "master": 4, "doctorate": 5, "phd": 5}
+# Ordered patterns for classifying free-text degree labels (MPHIL, "BSc (Hons)", "Master of Science in ...").
+_DEGREE_PATTERNS = (
+    (re.compile(r"\b(ph\.?\s?d|d\.?\s?phil|ed\.?\s?d|d\.?b\.?a|doctor(ate|al)?)\b"), "doctorate"),
+    (re.compile(r"\b(m\.?\s?phil|m\.?\s?sc|m\.?\s?res|m\.?\s?ph\b|m\.?\s?a\b|m\.?\s?s\b|m\.?b\.?a|m\.?fin|m\.?eng|m\.?ed|master'?s?)\b"), "master"),
+    (re.compile(r"\b(b\.?\s?sc|b\.?\s?a\b|b\.?b\.?a|b\.?eng|b\.?com|b\.?bus|b\.?ed|bachelor'?s?|undergraduate)\b"), "bachelor"),
+    (re.compile(r"\b(associate'?s?)\b"), "associate"),
+    (re.compile(r"\b(high\s?school|secondary\s?school)\b"), "high_school"),
+)
 _LANGUAGES = {"basic": 0.5, "business": 1.0, "fluent": 2.0, "native": 3.0}
 _OWNERSHIP_SIGNALS = (
     "owned",
@@ -22,15 +33,30 @@ _OWNERSHIP_SIGNALS = (
     "directed",
     "designed",
     "architected",
+    "authored",
+    "co-authored",
+    "coauthored",
+    "conducted",
+    "supervised",
+    "analysed",
+    "analyzed",
+    "investigated",
+    "published",
     "负责",
     "負責",
     "主导",
     "主導",
     "管理",
 )
+# Quantified impact units. The third alternative covers academic and research output
+# (papers, grants, sample sizes) so research CVs are not systematically scored zero here.
 _METRIC_PATTERN = re.compile(
     r"(?:\b\d+(?:\.\d+)?\s*(?:%|x|ms|s|hours?|days?|users?|customers?|requests?|million|billion)\b|"
-    r"(?:increased|reduced|improved|grew|saved|decreased)\s+\w*\s*\d+)",
+    r"(?:increased|reduced|improved|grew|saved|decreased)\s+\w*\s*\d+|"
+    r"\b\d+(?:\.\d+)?\s*(?:papers?|publications?|articles?|citations?|grants?|projects?|"
+    r"participants?|subjects?|respondents?|samples?|surveys?|interviews?|datasets?|records?|"
+    r"cohorts?|trials?)\b|"
+    r"[£€¥$]\s?\d+(?:\.\d+)?(?:\s?(?:k|m|bn|million|billion))?)",
     re.IGNORECASE,
 )
 _PROTECTED_TEXT_PATTERN = re.compile(
@@ -60,35 +86,144 @@ def _parse_month(value: Any, reference_date: date) -> date | None:
     return None
 
 
+# Loads the on-disk taxonomy once for longest-token evidence expansion.
+def _taxonomy_loader() -> Any:
+    global _TAXONOMY_LOADER, _TAXONOMY_UNAVAILABLE
+    if _TAXONOMY_UNAVAILABLE:
+        return None
+    if _TAXONOMY_LOADER is not None:
+        return _TAXONOMY_LOADER
+    try:
+        from screening_core.paths import taxonomy_yaml_path
+        from screening_core.taxonomy import SkillTaxonomyLoader
+
+        path = taxonomy_yaml_path()
+        if not path.is_file():
+            _TAXONOMY_UNAVAILABLE = True
+            return None
+        loader = SkillTaxonomyLoader(str(path))
+        loader.load()
+        _TAXONOMY_LOADER = loader
+        return loader
+    except (OSError, ImportError):
+        _TAXONOMY_UNAVAILABLE = True
+        return None
+
+
+# Returns taxonomy skill tokens found in free text (underscores treated as spaces).
+def _taxonomy_tokens(text: Any) -> list[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    loader = _taxonomy_loader()
+    if loader is None:
+        return []
+    return [normalize_token(name) for name in loader.skills_in_text(raw.replace("_", " "))]
+
+
+# Splits education field_of_study into comparable canonical tokens.
+def _field_token_set(value: Any) -> set[str]:
+    parts: list[str] = []
+    if isinstance(value, list):
+        parts = [str(item) for item in value if item]
+    elif isinstance(value, str) and value.strip():
+        parts = [part.strip() for part in re.split(r"[,;/]", value) if part.strip()]
+    tokens: set[str] = set()
+    for part in parts:
+        token = normalize_token(part)
+        if token:
+            tokens.add(token)
+        tokens.update(_taxonomy_tokens(part))
+    tokens.discard("")
+    return tokens
+
+
+# True when any CV major overlaps any acceptable JD field of study.
+def _fields_satisfied(required: Any, candidate_majors: list[str]) -> bool:
+    need = _field_token_set(required)
+    if not need:
+        return True
+    have: set[str] = set()
+    for major in candidate_majors:
+        token = normalize_token(major)
+        if token:
+            have.add(token)
+        have.update(_taxonomy_tokens(major))
+    return bool(need & have)
+
+
+# Returns canonical skills derived from a single certification record.
+def _certification_skill_tokens(item: dict[str, Any]) -> list[str]:
+    tokens = _taxonomy_tokens(item.get("name"))
+    try:
+        from cv_parser.certifications import certifications_to_skills
+    except ImportError:
+        return tokens
+    derived = [normalize_token(skill) for skill in certifications_to_skills([item])]
+    return list(dict.fromkeys([token for token in tokens + derived if token]))
+
+
+# Records one skill evidence token against its CV source.
+def _add_skill_source(
+    sources: dict[str, list[dict[str, Any]]],
+    token: str,
+    record: dict[str, Any],
+) -> None:
+    if token:
+        sources.setdefault(token, []).append(record)
+
+
 # Returns all explicit technical skill tokens without reading protected fields.
 def _skill_sources(cv: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     sources: dict[str, list[dict[str, Any]]] = {}
     for index, item in enumerate(cv.get("skills") or []):
         value = item.get("canonical_skill") if isinstance(item, dict) else item
-        token = normalize_token(value)
-        if token:
-            sources.setdefault(token, []).append(
-                {"section": "skills", "index": index, "text": str(value), "structured": False}
-            )
+        text = str(value or "")
+        record = {"section": "skills", "index": index, "text": text, "structured": False}
+        _add_skill_source(sources, normalize_token(value), record)
+        for token in _taxonomy_tokens(text):
+            _add_skill_source(sources, token, record)
     for section in ("experience", "projects"):
         for index, item in enumerate(cv.get(section) or []):
             if not isinstance(item, dict):
                 continue
             text = str(item.get("description") or item.get("name") or "")
+            title = str(item.get("job_title") or "")
             for skill in item.get("skills_used") or []:
-                token = normalize_token(skill)
-                if token:
-                    sources.setdefault(token, []).append(
-                        {"section": section, "index": index, "text": text or str(skill), "structured": True}
-                    )
+                record = {
+                    "section": section,
+                    "index": index,
+                    "text": text or str(skill),
+                    "structured": True,
+                }
+                _add_skill_source(sources, normalize_token(skill), record)
+                for token in _taxonomy_tokens(skill):
+                    _add_skill_source(sources, token, record)
+            title_record = {
+                "section": section,
+                "index": index,
+                "text": title or text,
+                "structured": True,
+            }
+            for token in _taxonomy_tokens(title):
+                _add_skill_source(sources, token, title_record)
+    for index, item in enumerate(cv.get("education") or []):
+        if not isinstance(item, dict):
+            continue
+        major = str(item.get("major") or "")
+        if not major:
+            continue
+        record = {"section": "education", "index": index, "text": major, "structured": True}
+        for token in _taxonomy_tokens(major):
+            _add_skill_source(sources, token, record)
     for index, item in enumerate(cv.get("certifications") or []):
         if not isinstance(item, dict):
             continue
-        token = normalize_token(item.get("name"))
-        if token:
-            sources.setdefault(token, []).append(
-                {"section": "certifications", "index": index, "text": str(item.get("name")), "structured": True}
-            )
+        name = str(item.get("name") or "")
+        record = {"section": "certifications", "index": index, "text": name, "structured": True}
+        _add_skill_source(sources, normalize_token(name), record)
+        for token in _certification_skill_tokens(item):
+            _add_skill_source(sources, token, record)
     return sources
 
 
@@ -495,7 +630,18 @@ def _degree_level(value: Any) -> int | None:
     token = normalize_token(value)
     aliases = {"bs": "bachelor", "bsc": "bachelor", "ba": "bachelor", "msc": "master", "ma": "master", "mba": "master", "doctor": "doctorate"}
     token = aliases.get(token, token)
-    return _DEGREES.get(token)
+    level = _DEGREES.get(token)
+    if level is not None:
+        return level
+    # Real CVs write "MPHIL" / "BSc (Hons)" / "Master of Science in Data Science", so fall
+    # back to keyword matching on the raw label instead of requiring an exact token.
+    text = str(value or "").casefold()
+    if not text:
+        return None
+    for pattern, canonical in _DEGREE_PATTERNS:
+        if pattern.search(text):
+            return _DEGREES[canonical]
+    return None
 
 
 # Scores explicit degree, field, and certification requirements.
@@ -505,18 +651,18 @@ def _score_education(config: dict[str, Any], cv: dict[str, Any]) -> dict[str, An
         return _inactive_dimension("education_certification", settings)
     requirement = config.get("education_requirement") or {}
     requested_degree = requirement.get("minimum_degree")
-    requested_field = normalize_token(requirement.get("field_of_study"))
+    requested_field = requirement.get("field_of_study")
     requested_certs = [normalize_token(value) for value in requirement.get("certifications") or []]
     candidate_degrees = [
         _degree_level(item.get("degree_level") or item.get("degree"))
         for item in cv.get("education") or []
         if isinstance(item, dict)
     ]
-    candidate_fields = {
-        normalize_token(item.get("major"))
+    candidate_majors = [
+        str(item.get("major"))
         for item in cv.get("education") or []
         if isinstance(item, dict) and item.get("major")
-    }
+    ]
     candidate_certs = {
         normalize_token(item.get("name"))
         for item in cv.get("certifications") or []
@@ -529,7 +675,7 @@ def _score_education(config: dict[str, Any], cv: dict[str, Any]) -> dict[str, An
         degree_score = 100.0 if candidate_level is not None and candidate_level >= required_level else 50.0 if not requirement.get("is_mandatory") and candidate_level == required_level - 1 else 0.0
         parts.append((0.7, degree_score, "degree"))
     if requested_field:
-        parts.append((0.2, 100.0 if requested_field in candidate_fields else 0.0, "field"))
+        parts.append((0.2, 100.0 if _fields_satisfied(requested_field, candidate_majors) else 0.0, "field"))
     if requested_certs:
         parts.append((0.1, 100.0 * sum(cert in candidate_certs for cert in requested_certs) / len(requested_certs), "certification"))
     for item in config["job_specific_requirements"]:
@@ -704,12 +850,11 @@ def _evaluate_eligibility_rule(
     elif rule_id == "mandatory_education":
         required = _degree_level(parameters.get("minimum_degree"))
         levels = [_degree_level(item.get("degree_level") or item.get("degree")) for item in cv.get("education") or [] if isinstance(item, dict)]
-        required_field = normalize_token(parameters.get("field_of_study"))
-        fields = {
-            normalize_token(item.get("major"))
+        majors = [
+            str(item.get("major"))
             for item in cv.get("education") or []
             if isinstance(item, dict) and item.get("major")
-        }
+        ]
         required_certs = {normalize_token(value) for value in parameters.get("certifications") or []}
         candidate_certs = {
             normalize_token(item.get("name"))
@@ -721,7 +866,7 @@ def _evaluate_eligibility_rule(
             status, reason = "unknown", "CV_EVIDENCE_MISSING"
         elif (
             (required is None or max((value for value in levels if value is not None), default=-1) >= required)
-            and (not required_field or required_field in fields)
+            and _fields_satisfied(parameters.get("field_of_study"), majors)
             and required_certs.issubset(candidate_certs)
         ):
             status, reason = "met", "REQUIREMENT_MET"

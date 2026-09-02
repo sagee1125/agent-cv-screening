@@ -1,10 +1,14 @@
 # Loads skill taxonomy YAML and resolves synonyms, parents, and related skills.
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+# Taxonomy category whose nodes are spoken languages, not job skills.
+_LANGUAGE_CATEGORY = "languages"
 
 
 # Frozen taxonomy node: canonical name, category, synonyms, and optional parent.
@@ -25,6 +29,7 @@ class SkillTaxonomyLoader:
         self.synonym_to_skill: dict[str, str] = {}
         self.children_map: dict[str, set[str]] = {}
         self._nodes_by_lower: dict[str, SkillNode] = {}
+        self._skill_token_re: re.Pattern[str] = re.compile(r"(?!)")
 
     # Parses the YAML file into nodes, synonym indexes, and parent/child maps.
     def load(self) -> None:
@@ -51,11 +56,40 @@ class SkillTaxonomyLoader:
             if node.parent:
                 self.children_map.setdefault(node.parent, set()).add(skill_name)
 
+        self._skill_token_re = self._compile_skill_token_regex()
+
     # Indexes one synonym (or the canonical name) for case-insensitive lookup.
     def _index_synonym(self, value: str, canonical: str) -> None:
         key = value.casefold().strip()
         if key:
             self.synonym_to_skill[key] = canonical
+
+    # Builds a longest-first token regex over canonical names and synonyms.
+    def _compile_skill_token_regex(self) -> re.Pattern[str]:
+        tokens = sorted((key for key in self.synonym_to_skill if key), key=len, reverse=True)
+        if not tokens:
+            return re.compile(r"(?!)")
+        pattern = r"(?<![a-z0-9])(?:" + "|".join(re.escape(token) for token in tokens) + r")(?![a-z0-9])"
+        return re.compile(pattern)
+
+    # Returns unique non-language canonical skills found in free text.
+    def skills_in_text(self, text: str) -> list[str]:
+        found: list[str] = []
+        seen: set[str] = set()
+        for match in self._skill_token_re.finditer((text or "").casefold()):
+            token = match.group(0).casefold()
+            # Very short tokens such as R, CV, ML, Go are too ambiguous in free text.
+            if len(token) <= 2:
+                continue
+            canonical = self.synonym_to_skill.get(token)
+            if not canonical or canonical in seen:
+                continue
+            node = self.nodes.get(canonical)
+            if node and node.category.strip().casefold() == _LANGUAGE_CATEGORY:
+                continue
+            seen.add(canonical)
+            found.append(canonical)
+        return found
 
     # Maps a raw skill/synonym string to the canonical taxonomy skill name.
     def normalize_skill(self, skill_name: str) -> str | None:

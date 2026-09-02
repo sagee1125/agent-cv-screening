@@ -11,6 +11,7 @@ HR_PACK_FOLDER = "workbuddy-cv-screen"
 PIPELINE_SUBDIR = "_pipeline"
 RANKING_OVERVIEW_HTML = "ranking-overview.html"
 RANKING_COMPARISON_XLSX = "ranking-comparison.xlsx"
+RESUME_LINKS_JSON = "resume-links.json"
 
 
 # Keep folder and file names filesystem-safe (refno / appno).
@@ -140,6 +141,7 @@ __all__ = [
     "PIPELINE_SUBDIR",
     "RANKING_COMPARISON_XLSX",
     "RANKING_OVERVIEW_HTML",
+    "RESUME_LINKS_JSON",
     "candidate_match_stem",
     "default_hr_pack_root",
     "is_host_session_dir",

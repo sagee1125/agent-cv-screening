@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-REPORT_FINGERPRINT_VERSION = "hr-report-v1"
+# v2: board shows explicit refno/appno labels, resume links, and a padded radar canvas.
+REPORT_FINGERPRINT_VERSION = "hr-report-v2"
 INPUT_FINGERPRINT_VERSION = "hr-input-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"
 
@@ -104,9 +105,20 @@ def board_report_fingerprint(
     position: str | None,
     refno: str | None,
     candidate_fingerprints: dict[str, str],
+    resume_links_digest: str | None = None,
 ) -> str:
     ordered = [candidate_fingerprints[key] for key in sorted(candidate_fingerprints)]
-    return sha256_text("|".join([REPORT_FINGERPRINT_VERSION, str(position or ""), str(refno or ""), *ordered]))
+    return sha256_text(
+        "|".join(
+            [
+                REPORT_FINGERPRINT_VERSION,
+                str(position or ""),
+                str(refno or ""),
+                *ordered,
+                f"links:{resume_links_digest or ''}",
+            ]
+        )
+    )
 
 
 # Loads previously stored report fingerprints from the pipeline work directory.

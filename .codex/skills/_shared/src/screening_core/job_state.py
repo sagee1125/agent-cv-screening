@@ -83,6 +83,31 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+# Builds a PII-free per-candidate score snapshot (appno only) for backtesting.
+def score_snapshot(pipeline_manifest: dict[str, Any] | None, job: dict[str, Any]) -> list[dict[str, Any]]:
+    manifest = pipeline_manifest if isinstance(pipeline_manifest, dict) else {}
+    statuses = {
+        str(c.get("appno")): c.get("status")
+        for c in job.get("candidates", [])
+        if isinstance(c, dict) and c.get("appno")
+    }
+    rows: list[dict[str, Any]] = []
+    for item in manifest.get("candidates") or []:
+        if not isinstance(item, dict) or not item.get("appno"):
+            continue
+        appno = str(item.get("appno"))
+        rows.append(
+            {
+                "appno": appno,
+                "rank": item.get("rank"),
+                "match_score": item.get("total_score"),
+                "fit_band": item.get("tier"),
+                "hr_status": statuses.get(appno),
+            }
+        )
+    return rows
+
+
 # Appends one history entry and caps the stored history length.
 def append_history(state_dir: str | Path, refno: str, entry: dict[str, Any]) -> None:
     state = load_job_state(state_dir, refno)
@@ -92,7 +117,7 @@ def append_history(state_dir: str | Path, refno: str, entry: dict[str, Any]) -> 
     save_job_state(state_dir, refno, state)
 
 
-# Records a screening run: snapshot + CV hashes + history entry.
+# Records a screening run: snapshot + CV hashes + history entry (+ optional scores).
 def record_screen_run(
     state_dir: str | Path,
     refno: str,
@@ -102,22 +127,24 @@ def record_screen_run(
     result: str,
     output: str,
     at: str | None = None,
+    scores: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     timestamp = at or now_iso()
     state = load_job_state(state_dir, refno)
     state["last_screen"] = {"at": timestamp, **current_snapshot(job)}
     state["cv_hashes"] = {appno: sha256_file(path) for appno, path in cv_paths.items()}
     history = state.setdefault("history", [])
-    history.append(
-        {
-            "at": timestamp,
-            "kind": "screen",
-            "result": result,
-            "refno": str(refno),
-            "candidate_count": len(cv_paths),
-            "output": output,
-        }
-    )
+    entry = {
+        "at": timestamp,
+        "kind": "screen",
+        "result": result,
+        "refno": str(refno),
+        "candidate_count": len(cv_paths),
+        "output": output,
+    }
+    if scores:
+        entry["scores"] = scores
+    history.append(entry)
     state["history"] = history[-HISTORY_LIMIT:]
     save_job_state(state_dir, refno, state)
     return state
@@ -165,4 +192,5 @@ __all__ = [
     "record_check",
     "record_screen_run",
     "save_job_state",
+    "score_snapshot",
 ]

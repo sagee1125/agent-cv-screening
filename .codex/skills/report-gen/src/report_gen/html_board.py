@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from screening_core.candidate_id import format_candidate_label
+from screening_core.candidate_id import format_candidate_label  # noqa: F401  (kept for API compatibility)
 
 _DIMENSION_LABELS = {
     "skill_match": "Skill Match",
@@ -53,7 +53,30 @@ _PAGE_CSS = """
     .questions { padding-left: 1.1rem; }
     .prio { color: #2563eb; font-size: .8rem; text-transform: uppercase; }
     a { color: #1d4ed8; }
+    .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 14px 16px; margin: 20px 0 0; }
+    .note h2 { margin: 0 0 6px; font-size: 1rem; }
+    .note p { margin: 0 0 6px; font-size: .9rem; color: #475569; }
+    .note p:last-child { margin-bottom: 0; }
 """
+
+# Advisory copy shown when the whole pool lands in the low band.
+_LOW_BAND_NOTE_EN = (
+    "Bands are absolute thresholds (high &ge; 80, medium &ge; 60, low &lt; 60) measured against "
+    "this job's requirements; they are not a ranking of this pool. A low band usually means the CVs "
+    "do not state the required evidence in machine-readable fields, not that the candidates are "
+    "unqualified. Compare the per-application reports before shortlisting."
+)
+
+# Short radar axis labels so they never clip outside the SVG canvas.
+_RADAR_SHORT_LABELS = {
+    "Education and Certification": "Education",
+    "Role and Seniority Fit": "Seniority",
+    "Evidence and Impact": "Evidence",
+    "Relevant Experience": "Experience",
+    "Core Skill Match": "Core skills",
+    "Job-Specific Match": "Job-specific",
+    "Work Authorization": "Work auth",
+}
 
 
 # Escape text for HTML text nodes and attributes.
@@ -96,7 +119,8 @@ def _axes(row: dict[str, Any]) -> list[tuple[str, float]]:
 
 
 # Draw a self-contained SVG radar polygon (no external scripts or CDNs).
-def _radar_svg(axes: list[tuple[str, float]], size: int = 280) -> str:
+# The viewBox is padded horizontally so side axis labels never clip at the edges.
+def _radar_svg(axes: list[tuple[str, float]], size: int = 280, pad: int = 80) -> str:
     if len(axes) < 3:
         return '<p class="muted">Not enough dimension scores for a radar chart.</p>'
     cx = cy = size / 2
@@ -122,26 +146,58 @@ def _radar_svg(axes: list[tuple[str, float]], size: int = 280) -> str:
         lx = cx + (radius + 28) * math.cos(angle)
         ly = cy + (radius + 28) * math.sin(angle)
         anchor = "middle" if abs(math.cos(angle)) < 0.35 else ("start" if math.cos(angle) > 0 else "end")
+        short = _RADAR_SHORT_LABELS.get(label, label)
         labels.append(
-            f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" class="axis-label">{_esc(label)}</text>'
+            f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" class="axis-label">{_esc(short)}</text>'
         )
         px = cx + radius * (score / 100.0) * math.cos(angle)
         py = cy + radius * (score / 100.0) * math.sin(angle)
         poly.append(f"{px:.1f},{py:.1f}")
     return (
-        f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" role="img" '
-        f'aria-label="Match radar">'
+        f'<svg viewBox="{-pad} 0 {size + 2 * pad} {size}" role="img" '
+        f'style="width:100%;height:auto;display:block" aria-label="Match radar">'
         f"{''.join(rings)}{''.join(spokes)}"
         f'<polygon points="{" ".join(poly)}" fill="rgba(37,99,235,0.28)" stroke="#2563eb" stroke-width="2"/>'
         f"{''.join(labels)}</svg>"
     )
 
 
-# Candidate header uses refno/appno only; personal names are ignored.
+# Candidate header states which part is the refno and which is the appno (never a name).
 def _label(row: dict[str, Any]) -> str:
-    if row.get("display_label"):
-        return str(row["display_label"])
-    return format_candidate_label(row.get("refno"), row.get("appno"))
+    refno = str(row.get("refno") or "").strip()
+    appno = str(row.get("appno") or "").strip()
+    if refno and appno:
+        return f"refno {refno} · appno {appno}"
+    if appno:
+        return f"appno {appno}"
+    if refno:
+        return f"refno {refno}"
+    return str(row.get("display_label") or "unknown")
+
+
+# Build an advisory block when every scored candidate sits in the low band.
+def _low_band_advisory(ranked: list[dict[str, Any]]) -> str:
+    bands = [str(row.get("tier") or row.get("fit_band") or "").strip().lower() for row in ranked]
+    if not any(band == "low" for band in bands):
+        return ""
+    if any(band not in ("low", "") for band in bands):
+        return ""
+    spread_html = ""
+    scores = [score for score in (_score(row.get("total_score")) for row in ranked) if score is not None]
+    if len(scores) >= 2:
+        spread = max(scores) - min(scores)
+        if spread < 10:
+            spread_html = (
+                "<p><strong>The whole pool spans only "
+                f"{spread:.1f} points</strong> — candidates this close should be treated as "
+                "tied; rank order alone is not a signal.</p>"
+            )
+    return (
+        '<aside class="note"><h2>Why every candidate shows the low band</h2>'
+        f"<p>{_LOW_BAND_NOTE_EN}</p>"
+        f"{spread_html}"
+        "</aside>"
+    )
 
 
 # Render one candidate card: scores, radar, optional interview prompts.
@@ -177,6 +233,14 @@ def _card(row: dict[str, Any]) -> str:
     """
 
 
+# Render the online resume link cell; em dash when no URL is known.
+def _resume_cell(row: dict[str, Any]) -> str:
+    resume_url = str(row.get("resume_url") or "").strip()
+    if not resume_url:
+        return "<span class='muted'>—</span>"
+    return f"<a href='{_esc(resume_url)}' target='_blank' rel='noopener'>Resume</a>"
+
+
 # Write a standalone HTML file HR can open; it never includes personal names.
 def write_screening_board(
     output_path: str,
@@ -199,9 +263,11 @@ def write_screening_board(
             f"<td><a href='{_esc(appno)}.html'>{_esc(_label(row))}</a></td>"
             f"<td>{_esc(row.get('total_score'))}</td>"
             f"<td>{_esc(row.get('tier') or row.get('fit_band') or '')}</td>"
+            f"<td>{_resume_cell(row)}</td>"
             "</tr>"
         )
     cards = "".join(_card(row) for row in ranked) or "<p class='muted'>No scored candidates.</p>"
+    advisory = _low_band_advisory(ranked)
     heading = _esc(position_name)
     sub = _esc(refno) if refno else ""
     page = f"""<!DOCTYPE html>
@@ -216,9 +282,10 @@ def write_screening_board(
   <h1>Ranking overview</h1>
   <p class="lede">{heading}{' · refno ' + sub if sub else ''} · {stamped} · labels are refno/appno only</p>
   <table>
-    <thead><tr><th>Rank</th><th>Application</th><th>Score</th><th>Tier</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Application</th><th>Score</th><th>Tier</th><th>Resume</th></tr></thead>
     <tbody>{''.join(table_rows)}</tbody>
   </table>
+  {advisory}
   <div class="grid">{cards}</div>
 </body>
 </html>

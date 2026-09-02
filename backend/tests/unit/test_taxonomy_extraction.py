@@ -52,6 +52,14 @@ def test_taxonomy_normalizes_aliases_across_industries() -> None:
     assert loader.normalize_skill("postgres") == "PostgreSQL"
 
 
+def test_skills_in_text_ignores_single_letter_false_positives() -> None:
+    """Short taxonomy tokens must not match inside abbreviations such as R&D or CV."""
+    loader = _loader()
+    assert loader.skills_in_text("Led R&D projects and working papers") == []
+    assert loader.skills_in_text("Updated the CV for the application") == []
+    assert "Python" in loader.skills_in_text("Proficient in R and Python")
+
+
 @pytest.mark.asyncio
 async def test_rule_parser_extracts_finance_skills() -> None:
     """Finance JD requirements are extracted via the taxonomy."""
@@ -88,10 +96,12 @@ Requirements:
     result = await service.parse_jd(jd)
     data = result["structured_data"]
     skills = {item["display_name"].lower() for item in data["must_skills"]}
-    assert "nursing" in skills
     assert "patient care" in skills
     assert "cpr" in skills
     assert "infection control" in skills
+    field = (data["education_requirement"].get("field_of_study") or "").lower()
+    assert "nursing" in field
+    assert "nursing" not in skills
 
 
 @pytest.mark.asyncio

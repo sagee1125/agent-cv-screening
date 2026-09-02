@@ -34,7 +34,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
-from screening_core.hr_output import RANKING_OVERVIEW_HTML, candidate_match_stem
+from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
     extra_allowed_hosts_from_env,
@@ -52,6 +52,7 @@ from screening_core.report_fingerprint import (
     load_fingerprints,
     save_fingerprints,
     sha256_file,
+    sha256_text,
     stale_cv_slugs,
 )
 from jas_import.fetch import cv_filename_for_url, download_to_if_changed, fetch_jd_text
@@ -539,9 +540,27 @@ def _run_matching_engine(
     return _build_manifest(args, out_dir, jd_source, None, rows, reports, failures, engine="matching")
 
 
+# Loads the optional appno -> online resume URL map written by the collector.
+def _load_resume_links(out_dir: Path) -> dict[str, str]:
+    path = out_dir / RESUME_LINKS_JSON
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {str(key): str(value) for key, value in payload.items() if value}
+
+
 # Public ranking fields plus radar/interview numbers from matching detail (no identity, no reasoning).
-def _board_row(row: dict) -> dict:
+def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
     public = {key: value for key, value in row.items() if not str(key).startswith("_")}
+    if resume_links and row.get("appno"):
+        resume_url = resume_links.get(str(row.get("appno")))
+        if resume_url:
+            public["resume_url"] = str(resume_url)
     detail_path = row.get("_detail")
     if not detail_path:
         return public
@@ -664,12 +683,14 @@ def _generate_reports(
         row["_pdf"] = pdf_out
     if not rows:
         return reports
-    comparison_rows = [_board_row(row) for row in rows]
+    resume_links = _load_resume_links(out_dir)
+    comparison_rows = [_board_row(row, resume_links) for row in rows]
     html_out = report_dir / RANKING_OVERVIEW_HTML
     board_fp = board_report_fingerprint(
         position=args.position,
         refno=getattr(args, "refno", None),
         candidate_fingerprints=candidate_fps,
+        resume_links_digest=sha256_text(json.dumps(resume_links, sort_keys=True, ensure_ascii=False)),
     )
     reuse_board = previous.get("board") == board_fp and html_out.is_file()
     if reuse_board:
