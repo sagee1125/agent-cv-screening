@@ -18,6 +18,8 @@ DAEMON_START_WAIT = 25.0
 # The browser extension reconnects several seconds after the daemon starts, so a run that
 # begins as soon as the daemon answers HTTP would fail with "no extension connected".
 EXTENSION_CONNECT_WAIT = 30.0
+# Cleanup uses a short HTTP timeout so a hung daemon never delays a finished run.
+CLEANUP_TIMEOUT_SECONDS = 10.0
 
 
 # True when the WebBridge daemon answers a status probe on the given URL.
@@ -106,13 +108,23 @@ class WebBridgeClient:
         self.session = session
         self.timeout = timeout
 
-    # POST one command and return the parsed JSON body.
-    def command(self, action: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+    # POST one command and return the parsed JSON body; timeout overrides the client default.
+    def command(
+        self,
+        action: str,
+        args: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {"action": action, "session": self.session}
         if args:
             payload["args"] = args
         try:
-            response = httpx.post(f"{self.daemon_url}/command", json=payload, timeout=self.timeout)
+            response = httpx.post(
+                f"{self.daemon_url}/command",
+                json=payload,
+                timeout=self.timeout if timeout is None else timeout,
+            )
         except httpx.HTTPError as exc:
             raise WebBridgeError(
                 f"Kimi WebBridge daemon unreachable at {self.daemon_url} ({exc.__class__.__name__}). "
@@ -207,9 +219,44 @@ class WebBridgeClient:
                 break
         return base64.b64decode("".join(chunks))
 
-    # Close every tab this session opened.
-    def close_session(self) -> None:
-        self.command("close_session")
+    # List the tabs this session opened (diagnostics before/after cleanup).
+    def list_tabs(self) -> list[dict[str, Any]]:
+        data = self.command("list_tabs")
+        if isinstance(data, dict):
+            tabs = data.get("tabs")
+            if isinstance(tabs, list):
+                return [tab for tab in tabs if isinstance(tab, dict)]
+        return []
+
+    # Close every tab this session opened; the daemon answers {"success", "closed": n}.
+    def close_session(self, *, timeout: float | None = None) -> dict[str, Any]:
+        data = self.command("close_session", timeout=timeout)
+        return data if isinstance(data, dict) else {}
+
+
+# Best-effort cleanup of the tabs a session opened; never raises, never blocks a run.
+# HR should never see a stack trace (or a failed screening) because the browser was
+# already closed by hand or the extension dropped off while the reports were rendering.
+def close_session_tabs(
+    browser: WebBridgeClient | None,
+    *,
+    delay_seconds: float = 0.0,
+    timeout: float = CLEANUP_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    if browser is None:
+        return {"ok": False, "closed": 0, "reason": "no-browser"}
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+    try:
+        data = browser.close_session(timeout=timeout)
+    except Exception as exc:  # cleanup is best-effort: a dead daemon is not a screening failure
+        return {"ok": False, "closed": 0, "reason": str(exc)[:200]}
+    closed = data.get("closed")
+    return {
+        "ok": bool(data.get("success", True)),
+        "closed": int(closed) if isinstance(closed, (int, float)) else 0,
+        "reason": None,
+    }
 
 
 __all__ = [
@@ -218,5 +265,6 @@ __all__ = [
     "DEFAULT_SESSION",
     "WebBridgeClient",
     "WebBridgeError",
+    "close_session_tabs",
     "ensure_webbridge_daemon",
 ]

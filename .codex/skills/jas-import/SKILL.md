@@ -219,12 +219,17 @@ venv/Scripts/python.exe .codex/skills/jas-import/scripts/run_jas_screening.py \
 ```bash
 venv/Scripts/python.exe .codex/skills/jas-import/scripts/check_updates.py <refno-or-records-url> \
   [--driver webbridge|http] [--base-url URL] [--allow-host HOST] [--cookie-file jar] \
-  [--state-dir dir] [--no-store]
+  [--state-dir dir] [--no-store] [--keep-browser]
 ```
 
 - `--driver webbridge` is the **default**: it opens the records page in the user's real
   browser through Kimi WebBridge (auto-starting the daemon) and reuses that login
   session. Use `--driver http` for the offline/cookie path or public demo pages.
+- **Browser cleanup**: once the check is answered, the WebBridge tab this check opened is
+  closed automatically (`close_session`). Add `--keep-browser` to leave it open. Failures
+  (not-found, auth needed, daemon down) keep the page open so HR can see what went wrong,
+  and the close is best-effort: it never fails the check. A successful webbridge check also
+  reports `browser_tabs_closed` / `browser_closed` in its envelope.
 - Fetches the records page and compares the JD hash + candidate roster against the
   last check (or last screen), then prints a PII-free envelope:
   `has_changes`, `changes.{jd_changed,added,removed,status_changed}`, `first_check`,

@@ -61,11 +61,16 @@ def _print_need_input(missing: list[str], questions: list[str], **extra: object)
 
 
 # Fetch the job payload via the chosen driver (webbridge by default, http on request).
-def _fetch_job(records_url: str, args: argparse.Namespace, allowed_hosts: tuple[str, ...]) -> dict:
+def _fetch_job(
+    records_url: str,
+    args: argparse.Namespace,
+    allowed_hosts: tuple[str, ...],
+    browser: object | None = None,
+) -> dict:
     if getattr(args, "driver", "webbridge") == "webbridge":
         from webridge_collect.client import WebBridgeClient, WebBridgeError
 
-        browser = WebBridgeClient(
+        browser = browser or WebBridgeClient(
             daemon_url=getattr(args, "daemon_url", "http://127.0.0.1:10086"),
             session=getattr(args, "session", "jes-update-check"),
         )
@@ -119,6 +124,11 @@ def main() -> int:
     )
     parser.add_argument("--session", default="jes-update-check", help="WebBridge session (tab group) name.")
     parser.add_argument("--daemon-url", default="http://127.0.0.1:10086", help="WebBridge daemon URL.")
+    parser.add_argument(
+        "--keep-browser",
+        action="store_true",
+        help="Keep the WebBridge tab open (default: close it once the check is done).",
+    )
     args = parser.parse_args()
     apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
 
@@ -138,8 +148,9 @@ def main() -> int:
 
     allowed_hosts = merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), tuple(args.allow_host))
     # Reuse the live browser session by default: auto-start the daemon instead of degrading to HTTP.
+    browser = None
     if args.driver == "webbridge":
-        from webridge_collect.client import ensure_webbridge_daemon
+        from webridge_collect.client import WebBridgeClient, ensure_webbridge_daemon
 
         if not ensure_webbridge_daemon(daemon_url=args.daemon_url):
             return _print_need_input(
@@ -147,8 +158,10 @@ def main() -> int:
                 list(ASK_WEBRIDGE),
                 detail="Kimi WebBridge daemon could not be started automatically",
             )
+        # One client for the whole check: the same session that opened the tab closes it.
+        browser = WebBridgeClient(daemon_url=args.daemon_url, session=args.session)
     try:
-        job = _fetch_job(records_url, args, allowed_hosts)
+        job = _fetch_job(records_url, args, allowed_hosts, browser=browser)
     except JobNotFoundError as exc:
         print(
             json.dumps({"status": "error", "error_code": "not_found", "error_message": str(exc)}, ensure_ascii=False),
@@ -220,6 +233,14 @@ def main() -> int:
         "last_check_at": (previous or {}).get("at"),
         "changes": changes,
     }
+    # The check is answered and nothing is left to look at, so drop the tab this check
+    # opened. Failures return earlier and keep the page open for HR to inspect.
+    if browser is not None and not args.keep_browser:
+        from webridge_collect.client import close_session_tabs
+
+        closed = close_session_tabs(browser)
+        payload["browser_tabs_closed"] = closed.get("closed", 0)
+        payload["browser_closed"] = bool(closed.get("ok"))
     print(json.dumps(payload, ensure_ascii=False))
     return EXIT_OK
 

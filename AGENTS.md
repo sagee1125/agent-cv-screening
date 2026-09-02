@@ -73,6 +73,12 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    - `demo_mode.json` at the repo root supplies `--base-url` / `--allow-host` /
      `--no-cookie` automatically, so do not pass them by hand.
    - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
+   - **Browser cleanup is automatic**: when a run succeeds and `ranking-overview.html` has
+     been opened, the collector calls WebBridge `close_session`, so every page it opened is
+     closed and HR is left with the report. Failures keep the pages open on purpose (HR must
+     see the not-found search result or the failing page). Pass `--keep-browser` to opt out.
+     The same applies to `check_updates.py`, which closes the tab it opened once the check
+     is answered. The close is best-effort and never fails a screening.
    - The update checker `check_updates.py` uses the same WebBridge default; it only opens the
      records page (no CV download, no report). Add `--driver http` for the offline/cookie path.
 3. If there is no refno, link, or folder, do not invent a screener. The CLI returns `need_input` (`refno`). Ask HR in the language they used (or both) for the job reference number or the records page link.

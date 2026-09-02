@@ -87,12 +87,14 @@ BROWSER_RECORDS_HTML = (
 
 
 class _FakeBrowser:
-    """Stand-in for WebBridgeClient: records navigation and returns canned JAS HTML."""
+    """Stand-in for WebBridgeClient: records navigation/closing and returns canned JAS HTML."""
 
     navigated: list[str] = []
+    instances: list["_FakeBrowser"] = []
 
     def __init__(self, **kwargs):
-        pass
+        self.close_calls = 0
+        _FakeBrowser.instances.append(self)
 
     def navigate(self, url, *, new_tab=True, group_title=None):
         _FakeBrowser.navigated.append(url)
@@ -100,12 +102,18 @@ class _FakeBrowser:
     def page_html(self):
         return BROWSER_RECORDS_HTML
 
+    # Record close_session calls; the daemon would report one tab closed per check.
+    def close_session(self, *, timeout=None):
+        self.close_calls += 1
+        return {"success": True, "closed": 1}
+
 
 # Installs a fake WebBridge client so the browser path runs without a real daemon.
 def _patch_webbridge(monkeypatch, client_cls=None) -> list[str]:
     import webridge_collect.client as wb_client_module
 
     _FakeBrowser.navigated = []
+    _FakeBrowser.instances = []
     monkeypatch.setattr(wb_client_module, "WebBridgeClient", client_cls or _FakeBrowser)
     monkeypatch.setattr(wb_client_module, "ensure_webbridge_daemon", lambda **kw: True)
     return _FakeBrowser.navigated
@@ -319,6 +327,43 @@ def test_check_defaults_to_webbridge_driver(tmp_path, monkeypatch, capsys) -> No
     assert payload["status"] == "success"
     assert payload["refno"] == "260818001"
     assert fetched_urls, "default driver did not use the browser"
+
+
+# A successful WebBridge check closes the tab it opened once the answer is out.
+def test_check_webbridge_success_closes_tab(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    _patch_webbridge(monkeypatch)
+
+    exit_code, out, _ = _run(
+        module,
+        ["260818001", "--driver", "webbridge", "--state-dir", str(tmp_path / "state")],
+        monkeypatch,
+        capsys,
+    )
+    assert exit_code == 0
+    payload = json.loads(out)
+    assert payload["status"] == "success"
+    assert payload["browser_tabs_closed"] == 1
+    assert payload["browser_closed"] is True
+    assert _FakeBrowser.instances[0].close_calls == 1
+
+
+# --keep-browser leaves the check's tab open for HR to inspect.
+def test_check_webbridge_keep_browser_leaves_tab_open(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    _patch_webbridge(monkeypatch)
+
+    exit_code, out, _ = _run(
+        module,
+        ["260818001", "--driver", "webbridge", "--keep-browser", "--state-dir", str(tmp_path / "state")],
+        monkeypatch,
+        capsys,
+    )
+    assert exit_code == 0
+    payload = json.loads(out)
+    assert payload["status"] == "success"
+    assert "browser_tabs_closed" not in payload
+    assert _FakeBrowser.instances[0].close_calls == 0
 
 
 # A WebBridge daemon-down error maps to need_input(jas_session).

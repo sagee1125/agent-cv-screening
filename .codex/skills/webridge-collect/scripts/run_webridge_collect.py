@@ -22,7 +22,7 @@ from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.demo_mode import apply_demo_defaults
 from screening_core.hr_output import HR_PACK_FOLDER
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
-from webridge_collect.client import WebBridgeClient, WebBridgeError, ensure_webbridge_daemon
+from webridge_collect.client import WebBridgeClient, WebBridgeError, close_session_tabs, ensure_webbridge_daemon
 from webridge_collect.collect import COLLECT_ROOT_NAME, build_records_url, collect_job
 
 EXIT_OK = 0
@@ -93,6 +93,17 @@ def run_pipeline(folder: Path, *, report_dir: str | None, engine: str, no_open: 
     return proc.returncode, payload
 
 
+# Close the WebBridge tabs once the reports are on screen (HR-facing cleanup).
+def _close_browser_tabs(client: WebBridgeClient | None, *, keep: bool) -> dict | None:
+    if keep or client is None:
+        return None
+    result = close_session_tabs(client)
+    return {
+        "closed": result.get("closed", 0),
+        "ok": bool(result.get("ok")),
+    }
+
+
 # Build the argparse CLI for webridge-collect.
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -114,6 +125,11 @@ def main() -> int:
     parser.add_argument("--no-open", action="store_true", help="Do not open ranking-overview.html after the run.")
     parser.add_argument("--skip-reports", action="store_true", help="Skip HTML/PDF/Excel generation (testing only).")
     parser.add_argument("--cleanup", action="store_true", help="Delete the collected folder after a successful pipeline run.")
+    parser.add_argument(
+        "--keep-browser",
+        action="store_true",
+        help="Keep the WebBridge tabs open (default: close them once the ranking report is on screen).",
+    )
     args = parser.parse_args()
 
     apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
@@ -204,7 +220,19 @@ def main() -> int:
         if exit_code != 0:
             result["status"] = "error"
             result["error_message"] = pipeline_payload.get("error_message") or f"pipeline exited {exit_code}"
+            # Keep the browser on the page that failed: HR has to see what went wrong.
             return _emit(result, to_stderr=True)
+
+        # The run succeeded and ranking-overview.html is on screen (unless --no-open), so
+        # the WebBridge tabs are scaffolding now: close them and leave HR with the report.
+        # Failures return earlier and keep the tabs on screen; with --no-open the report
+        # never replaced the tabs, so the WebBridge pages stay open for HR to inspect.
+        if not args.no_open:
+            closed = _close_browser_tabs(client, keep=args.keep_browser)
+            if closed is not None:
+                result["browser_tabs_closed"] = closed["closed"]
+                result["browser_closed"] = closed["ok"]
+
         if args.cleanup and folder.is_dir():
             shutil.rmtree(folder, ignore_errors=True)
             result["folder"] = "(cleaned)"

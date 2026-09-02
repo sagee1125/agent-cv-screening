@@ -127,6 +127,8 @@ def _run_screen_refno(args: argparse.Namespace) -> int:
         cmd = [PYTHON, str(script), target or args.refno or "", "--driver", args.driver]
         if args.no_open:
             cmd.append("--no-open")
+        if args.keep_browser:
+            cmd.append("--keep-browser")
     exit_code, payload = _run_skill(cmd)
     pipeline_manifest = _read_pipeline_manifest(payload)
     jas_manifest = _read_jas_manifest(payload)
@@ -157,6 +159,8 @@ def _run_check_updates(args: argparse.Namespace) -> int:
     # Forward the driver in every case: the skill defaults to webbridge, so dropping
     # --driver http would silently send an offline request through the browser.
     cmd += ["--driver", args.driver]
+    if args.keep_browser:
+        cmd.append("--keep-browser")
     exit_code, payload = _run_skill(cmd)
     envelope = project_host_return(
         tool="check_updates",
@@ -199,6 +203,11 @@ def main() -> int:
         help="Collection driver (default webbridge for visible human flow).",
     )
     screen_parser.add_argument("--no-open", action="store_true", help="Do not open ranking-overview.html.")
+    screen_parser.add_argument(
+        "--keep-browser",
+        action="store_true",
+        help="Keep the WebBridge tabs open after the run (default: close them once the report is open).",
+    )
     screen_parser.set_defaults(func=_run_screen_refno)
 
     check_parser = subparsers.add_parser("check_updates", help="Check whether a job changed since the last screen.")
@@ -208,6 +217,11 @@ def main() -> int:
         choices=("webbridge", "http"),
         default="webbridge",
         help="Collection driver (default webbridge, same as screening).",
+    )
+    check_parser.add_argument(
+        "--keep-browser",
+        action="store_true",
+        help="Keep the WebBridge tab open after the check (default: close it when the check is done).",
     )
     check_parser.set_defaults(func=_run_check_updates)
 

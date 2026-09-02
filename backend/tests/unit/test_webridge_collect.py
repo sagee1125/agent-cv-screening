@@ -474,6 +474,7 @@ def test_collect_webridge_search_not_found_keeps_page_open(tmp_path) -> None:
 # ensure_webbridge_daemon returns True immediately when the daemon is already up.
 def test_ensure_daemon_already_running(monkeypatch) -> None:
     monkeypatch.setattr(client_mod, "_daemon_reachable", lambda url, timeout=2.0: True)
+    monkeypatch.setattr(client_mod, "_extension_connected", lambda url, timeout=2.0: True)
     calls = {"start": 0}
 
     def fake_start():
@@ -494,6 +495,7 @@ def test_ensure_daemon_auto_starts(monkeypatch) -> None:
         return state["reachable"]
 
     monkeypatch.setattr(client_mod, "_daemon_reachable", fake_reachable)
+    monkeypatch.setattr(client_mod, "_extension_connected", lambda url, timeout=2.0: True)
     monkeypatch.setattr(client_mod, "_start_daemon_process", lambda: True)
     monkeypatch.setattr(client_mod.time, "sleep", lambda *a, **k: None)
     assert ensure_webbridge_daemon(wait_seconds=0.5) is True
@@ -504,6 +506,121 @@ def test_ensure_daemon_start_fails(monkeypatch) -> None:
     monkeypatch.setattr(client_mod, "_daemon_reachable", lambda url, timeout=2.0: False)
     monkeypatch.setattr(client_mod, "_start_daemon_process", lambda: False)
     assert ensure_webbridge_daemon(wait_seconds=0.5) is False
+
+
+# close_session_tabs counts the tabs the daemon reports as closed.
+def test_close_session_tabs_counts_closed(monkeypatch) -> None:
+    client = WebBridgeClient(session="test-session")
+    monkeypatch.setattr(client, "close_session", lambda timeout=None: {"success": True, "closed": 3})
+    assert client_mod.close_session_tabs(client) == {"ok": True, "closed": 3, "reason": None}
+
+
+# Cleanup is best-effort: a browser that is already gone must not fail the screening.
+def test_close_session_tabs_never_raises(monkeypatch) -> None:
+    client = WebBridgeClient(session="test-session")
+
+    def boom(timeout=None):
+        raise WebBridgeError("extension gone", reason="extension-disconnected")
+
+    monkeypatch.setattr(client, "close_session", boom)
+    result = client_mod.close_session_tabs(client)
+    assert result["ok"] is False
+    assert result["closed"] == 0
+    assert "extension gone" in result["reason"]
+
+
+# The HTTP driver opens no tabs, so there is nothing to close.
+def test_close_session_tabs_without_browser() -> None:
+    result = client_mod.close_session_tabs(None)
+    assert result["closed"] == 0
+    assert result["ok"] is False
+
+
+class _FakeBrowser:
+    # Stands in for WebBridgeClient: records close_session calls only.
+    def __init__(self, *, daemon_url=None, session=None, timeout=None):
+        self.closed = 0
+
+    def close_session(self, *, timeout=None):
+        self.closed += 1
+        return {"success": True, "closed": 2}
+
+
+def _run_cli(module, monkeypatch, tmp_path, extra_args, pipeline_exit=0, pipeline_status="success"):
+    """Run the CLI with fakes and return (exit_code, payload, browsers created)."""
+    browsers: list[_FakeBrowser] = []
+
+    def factory(**kwargs):
+        browser = _FakeBrowser(**kwargs)
+        browsers.append(browser)
+        return browser
+
+    monkeypatch.setattr(module, "WebBridgeClient", factory)
+    monkeypatch.setattr(module, "ensure_webbridge_daemon", lambda daemon_url: True)
+    monkeypatch.setattr(
+        module,
+        "collect_job",
+        lambda **kwargs: {
+            "refno": "2600827001",
+            "post_title": "Senior Software Engineer",
+            "candidates": [{"appno": "2600827004", "status": "TBC"}],
+            "cv_downloaded": ["2600827004"],
+            "candidates_without_cv": [],
+            "download_failures": [],
+        },
+    )
+
+    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports):
+        return pipeline_exit, {"status": pipeline_status, "hr_files": "Desktop/workbuddy-cv-screen/2600827001"}
+
+    monkeypatch.setattr(module, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [module.__file__, "2600827001", "--driver", "webbridge", "--collect-dir", str(tmp_path), *extra_args],
+    )
+    return module.main(), browsers
+
+
+# Once the ranking report is on screen, the WebBridge tabs are closed and counted.
+def test_cli_closes_browser_tabs_after_success(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_cli()
+    exit_code, browsers = _run_cli(module, monkeypatch, tmp_path, [])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["browser_tabs_closed"] == 2
+    assert payload["browser_closed"] is True
+    assert browsers[0].closed == 1
+
+
+# --no-open keeps the ranking report closed, so the WebBridge tabs stay open for HR.
+def test_cli_no_open_keeps_tabs_open(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_cli()
+    exit_code, browsers = _run_cli(module, monkeypatch, tmp_path, ["--no-open"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "browser_tabs_closed" not in payload
+    assert browsers[0].closed == 0
+
+
+# --keep-browser leaves the tabs open for HR to inspect.
+def test_cli_keep_browser_leaves_tabs_open(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_cli()
+    exit_code, browsers = _run_cli(module, monkeypatch, tmp_path, ["--keep-browser"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert "browser_tabs_closed" not in payload
+    assert browsers[0].closed == 0
+
+
+# A failed pipeline keeps the page open so HR can see what went wrong.
+def test_cli_pipeline_error_keeps_tabs_open(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_cli()
+    exit_code, browsers = _run_cli(module, monkeypatch, tmp_path, [], pipeline_exit=1, pipeline_status="error")
+    payload = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert "browser_tabs_closed" not in payload
+    assert browsers[0].closed == 0
 
 
 # CLI with a daemon that cannot start returns need_input(jas_session) instead of HTTP fallback.
