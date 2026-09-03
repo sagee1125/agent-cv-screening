@@ -232,3 +232,74 @@ async def test_degree_line_still_extracts_tools_on_same_line() -> None:
     must = {item["canonical_skill"] for item in result["structured_data"]["must_skills"]}
     assert "python" in must
     assert "sql" in must
+
+
+# --- JD-parser regressions: discourse words, majors, headings, footer boilerplate ---
+
+
+@pytest.mark.asyncio
+async def test_discourse_word_not_swallowed_into_skill_name() -> None:
+    """'including' must never become part of a preferred-skill canonical name."""
+    service = JDParserService()
+    result = await service.parse_jd(
+        "Qualifications: experience with Python;\n"
+        "Preferred: experience with research governance, including ethics submissions and data-sharing agreements, would be a definite advantage;"
+    )
+    preferred = {item["canonical_skill"] for item in result["structured_data"]["preferred_skills"]}
+    assert "including_ethics_submissions" not in preferred
+    assert "ethics_submissions" in preferred
+    assert "research_governance" in preferred
+    assert "data-sharing_agreements" in preferred
+
+
+@pytest.mark.asyncio
+async def test_field_of_study_keeps_explicit_non_taxonomy_majors() -> None:
+    """Degree majors without a taxonomy node (finance/economics) must be kept."""
+    service = JDParserService()
+    result = await service.parse_jd(
+        "Qualifications: a recognised degree in a business-related discipline "
+        "(for example finance, economics, accounting, actuarial studies, business analytics or a related quantitative field);"
+    )
+    field = (result["structured_data"]["education_requirement"].get("field_of_study") or "").lower()
+    assert "finance" in field
+    assert "economics" in field
+    assert "accounting" in field
+    assert "actuarial" in field
+    assert "business analytics" in field
+    assert "related quantitative field" not in field
+    assert "related discipline" not in field
+
+
+@pytest.mark.asyncio
+async def test_preferred_qualifications_heading_keeps_preferred_bucket() -> None:
+    """A 'Preferred qualifications' heading must not demote its items to must."""
+    service = JDParserService()
+    result = await service.parse_jd(
+        "Qualifications: experience with Python;\n"
+        "Preferred qualifications: experience with Tableau;"
+    )
+    data = result["structured_data"]
+    must = {item["canonical_skill"] for item in data["must_skills"]}
+    preferred = {item["canonical_skill"] for item in data["preferred_skills"]}
+    assert "python" in must
+    assert "tableau" in preferred
+    assert "tableau" not in must
+
+
+@pytest.mark.asyncio
+async def test_footer_boilerplate_never_becomes_must_skills() -> None:
+    """Posting/conditions/contact footer lines must not promote tool names."""
+    service = JDParserService()
+    result = await service.parse_jd(
+        "Reference number: 999\n"
+        "Job group: Research / Project Posts\n"
+        "Post title: Analyst\n"
+        "Qualifications: experience with Python;\n"
+        "Conditions of service (display to external ads only): remuneration package, Excel support;\n"
+        "List in external/internal: External Advertisement\n"
+        "Posting date: 2026-08-25\n"
+        "For further information, please contact Dr Sample at sample@example.test;"
+    )
+    must = {item["canonical_skill"] for item in result["structured_data"]["must_skills"]}
+    assert "excel" not in must
+    assert must == {"python"}

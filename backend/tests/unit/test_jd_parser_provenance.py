@@ -36,3 +36,16 @@ def test_find_cue_excerpt_for_requirement_line() -> None:
     assert find_cue_excerpt(SAMPLE, ["bachelor"]).startswith("Bachelor")
     assert find_cue_excerpt(SAMPLE, ["visa"]).startswith("Visa")
     assert find_cue_excerpt(SAMPLE, ["french"]) == ""
+
+
+def test_find_source_excerpt_skips_metadata_lines() -> None:
+    """Excerpt lookup must ignore job-board header/footer lines."""
+    text = (
+        "Job group: Research / Project Posts\n"
+        "Post title: Research Assistant\n"
+        "Requirements:\n"
+        "- experience with research and data analysis\n"
+    )
+    result = find_source_excerpt(text, ["research"])
+    assert result["source_sentence"].startswith("experience with research")
+    assert "Job group" not in result["source_sentence"]

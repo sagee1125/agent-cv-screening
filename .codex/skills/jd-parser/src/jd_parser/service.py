@@ -26,7 +26,9 @@ from jd_parser.providers.base import JDEnrichmentProvider
 # Taxonomy category whose nodes are languages, not job skills.
 _LANGUAGE_CATEGORY = "languages"
 # Maximum skills kept in each must/preferred bucket after extraction or LLM refine.
-MAX_SKILLS_PER_BUCKET = 10
+# Sized so a dense PolyU qualifications list (Stata/R/Python plus the engineering
+# toolchain) is not truncated; overflow skills are dropped entirely, not demoted.
+MAX_SKILLS_PER_BUCKET = 15
 # Rank used to keep the strongest stated language level.
 _LANGUAGE_LEVEL_RANK = {"basic": 0, "business": 1, "fluent": 2, "native": 3}
 # CJK and common aliases not always present on taxonomy language nodes.
@@ -160,6 +162,15 @@ class JDParserService:
     # Matches ASCII digits or short Chinese numerals used in year requirements.
     _NUMBER_PATTERN = r"(?:\d{1,2}|[一二三四五六七八九十兩两]{1,3})"
     RESPONSIBILITY_SECTION_MARKERS = ("responsibilit", "what you will do", "you will")
+    # Recognizes section headings (e.g. "Preferred qualifications:") so the heading
+    # word wins over a "qualification" substring inside the must marker set.
+    HEADING_SECTION_RE = re.compile(
+        r"^\s*(?P<kw>preferred|nice to have|plus|bonus|essential|required|must have|"
+        r"qualifications?|requirements?|what you need)\b"
+        r"(?:\s+(?:qualifications?|requirements?|skills?|attributes?|criteria|experience|knowledge))?"
+        r"\s*[:.\-]?\s*(?P<rem>.*)$",
+        re.IGNORECASE,
+    )
 
     MUST_CUES = ("must", "required", "mandatory", "need to", "at least")
     PREFERRED_CUES = (
@@ -170,7 +181,14 @@ class JDParserService:
         "good to have",
         "familiarity with",
         "familiar with",
+        "would be an advantage",
+        "definite advantage",
+        "desirable",
     )
+    # Lines up to this length are kept as-is; longer ones are treated as merged prose.
+    MAX_INTACT_LINE_CHARS = 220
+    # Sentence boundaries: ASCII . / ; before whitespace, or CJK terminators anywhere.
+    SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.;])\s+|(?<=[。；])")
     IGNORE_LINE_CUES = (
         "equal opportunity",
         "about us",
@@ -183,7 +201,13 @@ class JDParserService:
     METADATA_LINE_RE = re.compile(
         r"^(?:job\s*group|unit|department|faculty|ref(?:erence)?\s*no\.?|"
         r"post\s*title|job\s*title|posting\s*date|closing\s*date|off-?shelf|"
-        r"list\s*type|number of applications|email notification)\b",
+        r"list\s*type|list\s*in\s*(?:external|internal)|"
+        r"display(?:ed)?\s*to\s*external|conditions?\s*of\s*service|"
+        r"consideration\s*of\s*applications|"
+        r"(?:for\s+further\s+)?(?:please\s+)?further\s+information|"
+        r"number of applications|email notification|"
+        r"application\s*(?:deadline|closing\s*date)|"
+        r"enquir(?:y|ies)|contact\s*(?:person|dr\.?|mr\.?|ms\.?|mrs\.?|prof\.?|miss))",
         re.IGNORECASE,
     )
     # Degree / discipline lines: extract acceptable majors (not a whole-line skill skip).
@@ -235,6 +259,16 @@ class JDParserService:
             "business-related",
             "recognised",
             "recognized",
+        }
+    )
+    # Words that mark boilerplate rather than an actual field of study.
+    FIELD_DISCARD_WORDS = frozenset(
+        {
+            "a", "an", "or", "and", "in", "of", "for", "with", "including", "such",
+            "related", "discipline", "disciplines", "field", "fields", "area", "areas",
+            "subject", "subjects", "degree", "qualification", "qualifications",
+            "equivalent", "recognised", "recognized", "honours", "honors",
+            "business-related", "relevant", "other",
         }
     )
 
@@ -295,36 +329,68 @@ class JDParserService:
             line = raw_line.strip(" -*\t")
             if not line:
                 continue
-            matched_section, remainder = self._match_section_line(line)
-            if matched_section:
-                current_section = matched_section
-                if remainder:
-                    sections[current_section].append(remainder)
-                continue
-            sections[current_section].append(line)
+            for sentence in self._sentences_from_line(line):
+                matched_section, remainder = self._match_section_line(sentence)
+                if matched_section:
+                    current_section = matched_section
+                    if remainder:
+                        sections[current_section].append(remainder)
+                    continue
+                sections[current_section].append(sentence)
         return sections
 
+    def _sentences_from_line(self, line: str) -> list[str]:
+        """Split a merged JD block into sentences so section/skill cues apply per requirement."""
+        if len(line) <= self.MAX_INTACT_LINE_CHARS:
+            return [line]
+        parts = (part.strip(" -*\t") for part in self.SENTENCE_BOUNDARY_RE.split(line))
+        return [part for part in parts if part]
+
+    def _match_section_heading(self, line: str) -> tuple[str | None, str]:
+        """Return the section opened by a heading-style line start, else None."""
+        matched = self.HEADING_SECTION_RE.match(line)
+        if not matched:
+            return None, ""
+        keyword = matched.group("kw").casefold()
+        section = (
+            "preferred"
+            if keyword in {"preferred", "nice to have", "plus", "bonus"}
+            else "must"
+        )
+        return section, matched.group("rem").strip(" :.-	").strip()
+
     def _match_section_line(self, line: str) -> tuple[str | None, str]:
+        heading_section, heading_remainder = self._match_section_heading(line)
+        if heading_section:
+            return heading_section, heading_remainder
         marker_groups: tuple[tuple[str, tuple[str, ...]], ...] = (
             ("must", self.MUST_SECTION_MARKERS),
             ("preferred", self.PREFERRED_SECTION_MARKERS),
             ("responsibility", self.RESPONSIBILITY_SECTION_MARKERS),
         )
+        # Pick the earliest marker so a "Preferred qualifications" heading beats
+        # the "qualification" substring of the must marker set.
+        best: tuple[int, str, str] | None = None
         for section_name, markers in marker_groups:
             for marker in markers:
                 position = line.find(marker)
                 if position == -1:
                     continue
-                remainder = line[position + len(marker) :].lstrip(" :.-\t").strip()
-                other_markers = tuple(
-                    m
-                    for target_name, target_markers in marker_groups
-                    if target_name != section_name
-                    for m in target_markers
-                )
-                remainder = self._truncate_on_markers(remainder, other_markers)
-                return section_name, remainder
-        return None, ""
+                if best is None or position < best[0]:
+                    best = (position, section_name, marker)
+        if best is None:
+            return None, ""
+        position, section_name, marker = best
+        remainder = line[position + len(marker) :].lstrip(" :.-	").strip()
+        other_markers = tuple(
+            m
+            for target_name, target_markers in marker_groups
+            if target_name != section_name
+            for m in target_markers
+        )
+        remainder = self._truncate_on_markers(remainder, other_markers)
+        return section_name, remainder
+
 
     @staticmethod
     def _truncate_on_markers(text: str, markers: tuple[str, ...]) -> str:
@@ -380,23 +446,36 @@ class JDParserService:
             cleaned = self.TOKEN_CLEAN_RE.sub(" ", text.lower()).strip()
             cleaned = re.sub(r"\s+", " ", cleaned)
             canonical = self._token_to_canonical.get(cleaned)
-            if not canonical:
+            key = canonical if canonical else cleaned
+            if any(word in self.FIELD_DISCARD_WORDS for word in key.split()):
                 return
-            if canonical.casefold() in seen:
+            folded = key.casefold()
+            if folded in seen:
                 return
-            seen.add(canonical.casefold())
-            fields.append(canonical)
+            seen.add(folded)
+            fields.append(key)
 
         example = self.FIELD_EXAMPLE_RE.search(line)
         fragment = example.group(1) if example else ""
         if not fragment:
             degree_in = self.DEGREE_IN_RE.search(line)
             fragment = degree_in.group(1) if degree_in else ""
-        if "(" in fragment:
-            fragment = fragment.split("(", 1)[-1]
+        paren = self._first_parenthetical(fragment)
+        if paren:
+            # Majors live inside the parentheses; re-apply the example cue to their content.
+            inner_example = self.FIELD_EXAMPLE_RE.search(paren)
+            fragment = inner_example.group(1) if inner_example else paren
         for part in re.split(r"[,/;]|(?:\bor\b)|(?:\band\b)", fragment):
             add(part)
         return fields
+
+    @staticmethod
+    def _first_parenthetical(text: str) -> str | None:
+        """Return the text inside the first parentheses, or None when there is none."""
+        if "(" not in text:
+            return None
+        inner = text.split("(", 1)[1]
+        return inner.split(")", 1)[0] if ")" in inner else inner
 
     def _line_target_and_weight(self, section_name: str, line: str) -> tuple[str, int]:
         has_must_cue = any(cue in line for cue in self.MUST_CUES)
@@ -436,6 +515,11 @@ class JDParserService:
         cleaned = self.TOKEN_CLEAN_RE.sub(" ", raw.lower()).strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
         cleaned = re.sub(r"^(with|in|on|of)\s+", "", cleaned)
+        cleaned = re.sub(
+            r"^(?:including|such\s+as|e\.?g\.?|eg|particularly|especially|namely|i\.?e\.?)\s+",
+            "",
+            cleaned,
+        )
         cleaned = cleaned.strip(" .,:;")
         if not cleaned:
             return None
@@ -450,11 +534,13 @@ class JDParserService:
     def _rank_skills(self, scores: Counter[str], excluded: set[str] | None = None, limit: int | None = None) -> list[str]:
         excluded = excluded or set()
         bucket_limit = limit if limit is not None else MAX_SKILLS_PER_BUCKET
+        # Ties break on first mention in the JD, not alphabetically, so that a capped
+        # bucket keeps the requirements the advert leads with.
         ranked = sorted(
-            ((skill, score) for skill, score in scores.items() if skill not in excluded),
-            key=lambda item: (-item[1], item[0]),
+            ((order, skill, score) for order, (skill, score) in enumerate(scores.items()) if skill not in excluded),
+            key=lambda item: (-item[2], item[0]),
         )
-        return [skill for skill, _ in ranked[:bucket_limit]]
+        return [skill for _, skill, _ in ranked[:bucket_limit]]
 
     def _is_language_value(self, value: str) -> bool:
         """Return True when a token or skill name is a spoken/written language."""
