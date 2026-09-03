@@ -34,6 +34,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
+from screening_core.board_tooltip import public_radar_dimensions
 from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
@@ -554,7 +555,7 @@ def _load_resume_links(out_dir: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in payload.items() if value}
 
 
-# Public ranking fields plus radar/interview numbers from matching detail (no identity, no reasoning).
+# Public ranking fields plus radar tooltip/interview numbers from matching detail (allow-listed reasoning only, no raw CV text).
 def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
     public = {key: value for key, value in row.items() if not str(key).startswith("_")}
     if resume_links and row.get("appno"):
@@ -571,19 +572,10 @@ def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
         detail = _load_json(path)
     except (OSError, json.JSONDecodeError, TypeError):
         return public
-    axes = []
-    for item in detail.get("radar_dimensions") or []:
-        if not isinstance(item, dict):
-            continue
-        axes.append(
-            {
-                "id": item.get("dimension_id") or item.get("id"),
-                "label": item.get("label"),
-                "score": item.get("score"),
-            }
-        )
+    axes = public_radar_dimensions(detail)
     if axes:
         public["radar_dimensions"] = axes
+
     questions = []
     for item in detail.get("interview_questions") or []:
         if not isinstance(item, dict) or not item.get("question"):

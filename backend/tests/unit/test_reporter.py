@@ -230,3 +230,346 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
     # The board is English-only.
     for ch in "評等候選請以":
         assert ch not in text
+
+
+# ---------------------------------------------------------------------------
+# Option A (PRD-REPORT-GEN-001): radar tooltip payload allow-list and HTML hover trace-back.
+# ---------------------------------------------------------------------------
+
+
+# public_radar_dimensions must keep id/label/score and add allow-listed fields only.
+def test_board_tooltip_payload_allowlist() -> None:
+    from screening_core.board_tooltip import public_radar_dimensions
+
+    detail = {
+        "radar_dimensions": [
+            {
+                "dimension_id": "evidence_impact",
+                "label": "Evidence and Impact",
+                "score": 72.5,
+                "status": "partial",
+                "confidence": 90.0,
+                "reasoning": {
+                    "template_id": "DR-EVIDENCE-001",
+                    "summary": "Evidence and Impact: 72.5/100. Coverage 67%; ownership 100%; impact 50%.",
+                    "facts": {"coverage_pct": 67, "ownership_pct": 100, "impact_pct": 50},
+                },
+                "requirements": [{"requirement_id": "evidence_quality", "text": "Structured evidence quality"}],
+                "evidence": [
+                    {"section": "experience", "text": "SECRET_RAW_CV_SNIPPET_9981"},
+                    {"section": "projects", "text": "SECRET_RAW_CV_SNIPPET_9981"},
+                ],
+                "gaps": [{"reason_code": "QUANTIFIED_IMPACT_MISSING", "text": "No quantified impact was found in relevant experience."}],
+            }
+        ]
+    }
+    axes = public_radar_dimensions(detail)
+    assert axes == [
+        {
+            "id": "evidence_impact",
+            "label": "Evidence and Impact",
+            "score": 72.5,
+            "status": "partial",
+            "confidence": 90.0,
+            "summary": "Evidence and Impact: 72.5/100. Coverage 67%; ownership 100%; impact 50%.",
+            "requirements": ["Structured evidence quality"],
+            "gaps": ["No quantified impact was found in relevant experience."],
+            "evidence_sections": {"experience": 1, "projects": 1},
+            "evidence_metrics": {"coverage_pct": 67.0, "ownership_pct": 100.0, "impact_pct": 50.0},
+        }
+    ]
+    rendered = str(axes)
+    assert "SECRET_RAW_CV_SNIPPET_9981" not in rendered
+    assert "reasoning" not in rendered
+    assert "facts" not in rendered
+    assert "template_id" not in rendered
+
+
+# Missing or malformed detail must yield no axes and never raise.
+def test_board_tooltip_payload_degrades_gracefully() -> None:
+    from screening_core.board_tooltip import public_radar_dimensions
+
+    assert public_radar_dimensions({}) == []
+    degraded = public_radar_dimensions({"radar_dimensions": [None, "bad", {"score": None}]})
+    assert len(degraded) == 1
+    assert degraded[0]["score"] is None
+
+
+# Long summaries and many gaps must be clipped with an overflow marker.
+def test_board_tooltip_payload_truncates_long_text() -> None:
+    from screening_core.board_tooltip import public_radar_dimensions
+
+    summary = "x" * 500
+    gaps = [{"text": f"gap {i}"} for i in range(5)]
+    axes = public_radar_dimensions(
+        {
+            "radar_dimensions": [
+                {
+                    "dimension_id": "core_skill_match",
+                    "label": "Core Skill Match",
+                    "score": 50.0,
+                    "status": "partial",
+                    "reasoning": {"summary": summary},
+                    "gaps": gaps,
+                }
+            ]
+        }
+    )
+    axis = axes[0]
+    assert len(axis["summary"]) <= 240
+    assert axis["summary"].endswith("…")
+    assert axis["gaps"] == ["gap 0", "gap 1", "gap 2"]
+    assert axis["gaps_overflow"] == 2
+
+
+# The board HTML must carry per-axis tooltips and never raw CV text or live markup.
+def test_html_board_radar_tooltips_present_escaped_no_raw_text(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-tooltips.html"
+    raw = "SECRET_RAW_CV_SNIPPET_9981"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Project Associate",
+        report_date=datetime(2026, 1, 1),
+        refno="260818001",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260818001",
+                "appno": "123456",
+                "total_score": 88.5,
+                "tier": "high",
+                "radar_dimensions": [
+                    {
+                        "id": "core_skill_match",
+                        "label": "Core Skill Match",
+                        "score": 90.0,
+                        "status": "met",
+                        "summary": "Core Skill Match: 90/100. Weighted must-skill coverage is high.",
+                        "evidence_sections": {"experience": 1, "skills": 2},
+                    },
+                    {
+                        "id": "evidence_impact",
+                        "label": "Evidence and Impact",
+                        "score": 72.5,
+                        "status": "partial",
+                        "summary": 'Evidence and Impact: 72.5/100. <script>alert("x")</script> Coverage 67%.',
+                        "gaps": [
+                            "No quantified impact was found in relevant experience.",
+                            "Some skill claims are not tied to structured evidence.",
+                        ],
+                        "evidence_sections": {"experience": 2},
+                        "raw_leak": raw,
+                    },
+                    {
+                        "id": "relevant_experience",
+                        "label": "Relevant Experience",
+                        "score": 85.0,
+                        "status": "met",
+                        "summary": "Relevant Experience: 85/100. Dated coverage is high.",
+                        "gaps": ["gap-alpha", "gap-beta", "gap-gamma", "gap-delta"],
+                        "gaps_overflow": 1,
+                    },
+                ],
+            }
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert text.count("<title>") == 1  # page title only; tooltips are styled panels
+    assert '<div class="radar-tip" data-tip="evidence_impact"' in text
+    assert '<div class="radar-tip" data-tip="core_skill_match"' in text
+    assert '<div class="radar-tip" data-tip="relevant_experience"' in text
+    assert ">Evidence and Impact</span>" in text
+    assert "72.5/100" in text
+    assert "st-partial" in text
+    assert "Option B preview" not in text  # no evidence_metrics supplied here
+    assert "No quantified impact was found in relevant experience." in text
+    assert "Evidence by CV section: experience 2" in text
+    assert "+1 more" in text
+    assert raw not in text
+    assert "raw_leak" not in text
+    assert "<script>alert" not in text
+    assert "<script" not in text
+    assert "&lt;script&gt;" in text
+    assert "href='http" not in text
+    assert "src='http" not in text
+
+
+# Tooltip enrichment must not change radar geometry, scores, bands, or ranks.
+def test_html_board_radar_geometry_and_scores_unchanged_by_tooltips(tmp_path: Path) -> None:
+    import re
+
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+
+    def render(path, enriched):
+        dims = [
+            {"id": "core_skill_match", "label": "Core Skill Match", "score": 90.0},
+            {"id": "relevant_experience", "label": "Relevant Experience", "score": 85.0},
+            {"id": "role_seniority_fit", "label": "Role and Seniority Fit", "score": 100.0},
+            {"id": "evidence_impact", "label": "Evidence and Impact", "score": 72.5},
+            {"id": "education_certification", "label": "Education and Certification", "score": 60.0},
+            {"id": "job_specific_match", "label": "Job-Specific Match", "score": 80.0},
+        ]
+        if enriched:
+            for dim in dims:
+                dim["status"] = "met" if dim["score"] >= 80 else "partial"
+                dim["summary"] = f"{dim['label']}: {dim['score']}/100."
+                dim["gaps"] = []
+                dim["evidence_sections"] = {"experience": 1}
+        row = {
+            "rank": 1,
+            "refno": "260818001",
+            "appno": "123456",
+            "total_score": 88.5,
+            "tier": "high",
+            "radar_dimensions": dims,
+        }
+        out = tmp_path / path
+        service.generate_screening_board_html(
+            str(out),
+            position_name="Project Associate",
+            report_date=datetime(2026, 1, 1),
+            refno="260818001",
+            rows=[row],
+        )
+        return out.read_text(encoding="utf-8")
+
+    legacy_text = render("board-legacy.html", enriched=False)
+    enriched_text = render("board-enriched.html", enriched=True)
+
+    def polygons(text):
+        return re.findall(r'<polygon points="([^"]+)"', text)
+
+    assert polygons(legacy_text) == polygons(enriched_text)
+    assert "88.5" in legacy_text and "88.5" in enriched_text
+    assert "refno 260818001 · appno 123456" in legacy_text
+    assert legacy_text.count("<title>") == 1
+    assert enriched_text.count("<title>") == 1
+    assert '<div class="radar-tip" data-tip=' not in legacy_text
+    assert '<div class="radar-tip" data-tip=' in enriched_text
+
+
+# Candidate match pages (<appno>.html) expose the same per-axis tooltips.
+def test_html_candidate_match_page_radar_tooltips(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "123456.html"
+    service.generate_candidate_match_html(
+        str(out),
+        row={
+            "rank": 1,
+            "refno": "260818001",
+            "appno": "123456",
+            "total_score": 88.5,
+            "tier": "high",
+            "radar_dimensions": [
+                {
+                    "id": "core_skill_match",
+                    "label": "Core Skill Match",
+                    "score": 90.0,
+                    "status": "met",
+                    "summary": "Core Skill Match: 90/100.",
+                },
+                {
+                    "id": "relevant_experience",
+                    "label": "Relevant Experience",
+                    "score": 85.0,
+                    "status": "met",
+                    "summary": "Relevant Experience: 85/100.",
+                },
+                {
+                    "id": "evidence_impact",
+                    "label": "Evidence and Impact",
+                    "score": 72.5,
+                    "status": "partial",
+                    "summary": "Evidence and Impact: 72.5/100. Coverage 67%.",
+                    "gaps": ["No quantified impact was found in relevant experience."],
+                    "evidence_sections": {"experience": 2},
+                }
+            ],
+        },
+        position_name="Project Associate",
+        report_date=datetime(2026, 1, 1),
+    )
+    text = out.read_text(encoding="utf-8")
+    assert text.count("<title>") == 1
+    assert '<div class="radar-tip" data-tip="evidence_impact"' in text
+    assert ">Evidence and Impact</span>" in text
+    assert "st-partial" in text
+
+
+# Fingerprint version must be bumped so existing worktrees regenerate HTML.
+def test_report_fingerprint_version_bumped_for_tooltips() -> None:
+    from screening_core.report_fingerprint import REPORT_FINGERPRINT_VERSION
+
+    assert REPORT_FINGERPRINT_VERSION == "hr-report-v3"
+
+
+# F1.2: Core/Experience tooltip cards preview Evidence-axis sub-metrics (Option B aid).
+def test_html_board_option_b_preview_in_core_and_experience_tips(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-preview.html"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Project Associate",
+        report_date=datetime(2026, 1, 1),
+        refno="260818001",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260818001",
+                "appno": "123456",
+                "total_score": 88.5,
+                "tier": "high",
+                "radar_dimensions": [
+                    {
+                        "id": "core_skill_match",
+                        "label": "Core Skill Match",
+                        "score": 90.0,
+                        "status": "met",
+                        "summary": "Core Skill Match: 90/100.",
+                    },
+                    {
+                        "id": "relevant_experience",
+                        "label": "Relevant Experience",
+                        "score": 85.0,
+                        "status": "met",
+                        "summary": "Relevant Experience: 85/100.",
+                    },
+                    {
+                        "id": "evidence_impact",
+                        "label": "Evidence and Impact",
+                        "score": 72.5,
+                        "status": "partial",
+                        "summary": "Evidence and Impact: 72.5/100.",
+                        "evidence_metrics": {"coverage_pct": 67.0, "ownership_pct": 100.0, "impact_pct": 50.0},
+                    },
+                    {
+                        "id": "job_specific_match",
+                        "label": "Job-Specific Match",
+                        "score": 80.0,
+                        "status": "met",
+                        "summary": "Job-Specific Match: 80/100.",
+                    },
+                ],
+            }
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "Option B preview" in text
+    assert "coverage 67% · ownership 100% · impact 50%" in text
+    panels = text.split('<div class="radar-tips">', 1)[1]
+    core_panel = panels.split('<div class="radar-tip" data-tip="core_skill_match"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
+    assert "Option B preview" in core_panel
+    assert "coverage 67%" in core_panel
+    experience_panel = panels.split('<div class="radar-tip" data-tip="relevant_experience"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
+    assert "Option B preview" in experience_panel
+    evidence_panel = panels.split('<div class="radar-tip" data-tip="evidence_impact"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
+    assert "Option B preview" not in evidence_panel

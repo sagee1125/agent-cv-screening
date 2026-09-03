@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-# v2: board shows explicit refno/appno labels, resume links, and a padded radar canvas.
-REPORT_FINGERPRINT_VERSION = "hr-report-v2"
+# v3: board radar axes carry native-tooltip reasoning payload (Option A, PRD-REPORT-GEN-001).
+REPORT_FINGERPRINT_VERSION = "hr-report-v3"
 INPUT_FINGERPRINT_VERSION = "hr-input-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"
 
