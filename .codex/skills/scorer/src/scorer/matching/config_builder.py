@@ -185,12 +185,10 @@ def _activation_map(config: dict[str, Any], jd_data: dict[str, Any]) -> dict[str
     has_role = bool(config.get("target_seniority")) or bool(
         isinstance(overview, dict) and (overview.get("job_title") or overview.get("job_titles"))
     )
-    has_evaluable = bool(must or specific or experience)
     return {
         "core_skill_match": bool(must),
         "relevant_experience": bool(must or specific or has_role or experience),
         "role_seniority_fit": bool(config.get("target_seniority")),
-        "evidence_impact": has_evaluable,
         "education_certification": _has_education_requirement(
             {"education_requirement": config.get("education_requirement")}, specific
         ),

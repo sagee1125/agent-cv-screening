@@ -64,6 +64,12 @@ _PROTECTED_TEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# v2 blending weights for the folded evidence sub-scores (presence vs linkage, time vs quality).
+CORE_PRESENCE_WEIGHT = 0.8
+CORE_LINKAGE_WEIGHT = 0.2
+EXPERIENCE_TIME_WEIGHT = 0.7
+EXPERIENCE_QUALITY_WEIGHT = 0.3
+
 
 # Rounds a numeric value with the PRD half-up rule.
 def _round(value: float, places: int = 2) -> float:
@@ -243,6 +249,31 @@ def _match_skill(
 
 
 # Converts parser provenance into the public requirement source shape.
+# Returns strength, best source, and structured linkage for one required skill.
+def _skill_evidence(
+    required: str,
+    sources: dict[str, list[dict[str, Any]]],
+    relation_resolver: SkillRelationResolver | None,
+) -> tuple[float, dict[str, Any] | None, bool]:
+    def linked_best(records: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
+        best = records[0]
+        structured = any(record.get("structured") for record in records)
+        if structured:
+            best = next(record for record in records if record.get("structured"))
+        return best, structured
+
+    if required in sources:
+        best, structured = linked_best(sources[required])
+        return 1.0, best, structured
+    if relation_resolver:
+        for candidate in sorted(sources):
+            if relation_resolver(candidate, required):
+                best, structured = linked_best(sources[candidate])
+                return 0.7, best, structured
+    return 0.0, None, False
+
+
+
 def _requirement_record(item: dict[str, Any], requirement_id: str, text: str) -> dict[str, Any]:
     provenance = item.get("provenance")
     if isinstance(provenance, dict):
@@ -333,6 +364,7 @@ def _dimension(
 
 
 # Scores weighted must-skill coverage and records exact evidence or gaps.
+# Scores weighted must-skill presence plus evidence linkage (any structured source counts).
 def _score_core(
     config: dict[str, Any],
     cv: dict[str, Any],
@@ -347,16 +379,21 @@ def _score_core(
     gaps: list[dict[str, Any]] = []
     matches: dict[str, tuple[float, dict[str, Any] | None]] = {}
     earned = total = confidence_points = 0.0
+    matched_count = linked_count = 0
     for item in config["must_skills"]:
         requirement_id = str(item["skill_id"])
         skill = normalize_token(item["canonical_skill"])
         display = str(item.get("display_name") or skill.replace("_", " ").title())
         weight = float(item.get("weight", 1.0))
-        strength, _, source = _match_skill(skill, sources, relation_resolver)
+        strength, source, linked = _skill_evidence(skill, sources, relation_resolver)
         requirements.append(_requirement_record(item, requirement_id, display))
         matches[requirement_id] = (strength, source)
         total += weight
         earned += weight * strength
+        if strength > 0:
+            matched_count += 1
+            if linked:
+                linked_count += 1
         if source:
             match_type = "exact" if strength == 1.0 else "related"
             evidence.append(_evidence_record(source, [requirement_id], match_type))
@@ -370,16 +407,17 @@ def _score_core(
                 }
             )
             confidence_points += weight * 55.0
-    score = 100.0 * earned / total
+    presence = 100.0 * earned / total
+    linkage = 100.0 * (linked_count / matched_count) if matched_count else 0.0
+    score = _round(CORE_PRESENCE_WEIGHT * presence + CORE_LINKAGE_WEIGHT * linkage)
     met_count = sum(1 for strength, _ in matches.values() if strength > 0)
     gap_list = ", ".join(gap["text"] for gap in gaps) or "none"
     summary = (
-        f"Core Skill Match: {_round(score)}/100. The CV supports {met_count} of {len(requirements)} "
+        f"Core Skill Match: {_round(score)}/100 (presence {_round(presence)}%, "
+        f"linkage {_round(linkage)}%). The CV supports {met_count} of {len(requirements)} "
         f"weighted must skills. Key gaps: {gap_list}."
     )
-    status = "met" if not gaps and all(value[0] == 1.0 for value in matches.values()) else "partial"
-    if not evidence:
-        status = "not_met"
+    status = "met" if score >= 80 else "partial" if evidence else "not_met"
     return (
         _dimension(
             "core_skill_match",
@@ -391,14 +429,16 @@ def _score_core(
             gaps,
             "DR-CORE-001",
             summary,
-            {"weighted_requirements_met": _round(earned), "weighted_requirements_total": _round(total)},
+            {
+                "presence_pct": _round(presence),
+                "linkage_pct": _round(linkage),
+                "weighted_requirements_met": _round(earned),
+                "weighted_requirements_total": _round(total),
+            },
             confidence_points / total,
         ),
         matches,
     )
-
-
-# Selects dated experience items explicitly associated with job requirements.
 def _relevant_experiences(config: dict[str, Any], cv: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
     tokens = {item["canonical_skill"] for item in config["must_skills"]}
     for item in config["job_specific_requirements"]:
@@ -443,6 +483,7 @@ def _union_experience_months(
 
 
 # Scores relevant duration and recency using unioned dated intervals.
+# Scores dated time/recency plus ownership/impact quality over all relevant experience.
 def _score_experience(
     config: dict[str, Any],
     cv: dict[str, Any],
@@ -468,16 +509,21 @@ def _score_experience(
     recency = 100.0 if age_months is not None and age_months <= 24 else 70.0 if age_months is not None and age_months <= 48 else 40.0
     if not dated:
         recency = 0.0
-        score = 0.0
+        time_score = 0.0
     elif minimum is not None:
-        score = 0.8 * min(relevant_years / minimum, 1.0) * 100.0 + 0.2 * recency
+        time_score = 0.8 * min(relevant_years / minimum, 1.0) * 100.0 + 0.2 * recency
     else:
         all_dated = sum(
             1
             for item in cv.get("experience") or []
             if isinstance(item, dict) and _parse_month(item.get("start_date"), reference_date)
         )
-        score = 0.7 * (len(dated) / all_dated if all_dated else 0.0) * 100.0 + 0.3 * recency
+        time_score = 0.7 * (len(dated) / all_dated if all_dated else 0.0) * 100.0 + 0.3 * recency
+    texts = [str(item.get("description") or "") for _, item in relevant]
+    ownership = sum(any(signal in text.casefold() for signal in _OWNERSHIP_SIGNALS) for text in texts) / len(texts) if texts else 0.0
+    impact = sum(bool(_METRIC_PATTERN.search(text)) for text in texts) / len(texts) if texts else 0.0
+    quality = 0.5 * ownership + 0.5 * impact
+    score = _round(EXPERIENCE_TIME_WEIGHT * time_score + EXPERIENCE_QUALITY_WEIGHT * quality * 100.0)
     requirements = [
         {
             "requirement_id": "relevant_experience",
@@ -495,17 +541,22 @@ def _score_experience(
             },
             ["relevant_experience"],
         )
-        for index, item in dated
+        for index, item in relevant
     ]
-    gaps = [] if dated else [{"requirement_id": "relevant_experience", "reason_code": "CV_DATED_EVIDENCE_MISSING", "text": "No dated relevant experience evidence was found."}]
+    gaps: list[dict[str, Any]] = []
+    if not dated:
+        gaps.append({"requirement_id": "relevant_experience", "reason_code": "CV_DATED_EVIDENCE_MISSING", "text": "No dated relevant experience evidence was found."})
+    if not impact:
+        gaps.append({"requirement_id": "quantified_impact", "reason_code": "QUANTIFIED_IMPACT_MISSING", "text": "No quantified impact was found in relevant experience."})
     required_text = f"{minimum:g}" if minimum is not None else "no minimum"
     summary = (
-        f"Relevant Experience: {_round(score)}/100. The JD requests {required_text} years; "
-        f"the CV provides {relevant_years} years of dated relevant evidence. "
-        f"Recency: {age_months if age_months is not None else 'unknown'} months."
+        f"Relevant Experience: {_round(score)}/100 (time {_round(time_score)}, "
+        f"quality {_round(quality * 100)}). The JD requests {required_text} years; the CV "
+        f"provides {relevant_years} years of dated relevant evidence. Ownership {_round(ownership * 100)}%; "
+        f"quantified impact {_round(impact * 100)}%."
     )
-    status = "not_met" if not dated else "met" if minimum is None or relevant_years >= minimum else "partial"
-    confidence = 90.0 if dated else 20.0
+    status = "met" if score >= 80 else "partial" if evidence else "not_met"
+    confidence = 90.0 if evidence else 20.0
     return (
         _dimension(
             "relevant_experience",
@@ -517,14 +568,19 @@ def _score_experience(
             gaps,
             "DR-EXP-001",
             summary,
-            {"required_years": minimum, "relevant_years": relevant_years, "latest_age_months": age_months},
+            {
+                "required_years": minimum,
+                "relevant_years": relevant_years,
+                "latest_age_months": age_months,
+                "time_pct": _round(time_score),
+                "quality_pct": _round(quality * 100),
+                "ownership_pct": _round(ownership * 100),
+                "impact_pct": _round(impact * 100),
+            },
             confidence,
         ),
         relevant_years,
     )
-
-
-# Resolves the highest explicit seniority from relevant CV roles.
 def _candidate_seniority(relevant: list[tuple[int, dict[str, Any]]]) -> tuple[str | None, int | None]:
     found: list[tuple[int, int]] = []
     for index, item in relevant:
@@ -575,57 +631,6 @@ def _score_role(config: dict[str, Any], cv: dict[str, Any]) -> dict[str, Any]:
         {"target_level": target, "candidate_level": candidate},
         confidence,
     )
-
-
-# Scores evidence linkage, ownership language, and quantified impact.
-def _score_evidence(
-    config: dict[str, Any],
-    cv: dict[str, Any],
-    matches: dict[str, tuple[float, dict[str, Any] | None]],
-) -> dict[str, Any]:
-    settings = config["dimensions"]["evidence_impact"]
-    if not settings["active"]:
-        return _inactive_dimension("evidence_impact", settings)
-    hits = [(requirement_id, source) for requirement_id, (strength, source) in matches.items() if strength > 0]
-    linked = [(requirement_id, source) for requirement_id, source in hits if source and source.get("structured")]
-    relevant = _relevant_experiences(config, cv)
-    texts = [str(item.get("description") or "") for _, item in relevant]
-    coverage = len(linked) / len(hits) if hits else 0.0
-    ownership = sum(any(signal in text.casefold() for signal in _OWNERSHIP_SIGNALS) for text in texts) / len(texts) if texts else 0.0
-    impact = sum(bool(_METRIC_PATTERN.search(text)) for text in texts) / len(texts) if texts else 0.0
-    score = 50.0 * coverage + 25.0 * ownership + 25.0 * impact
-    evidence = [
-        _evidence_record(
-            {"section": "experience", "index": index, "text": str(item.get("description") or ""), "structured": True},
-            ["evidence_quality"],
-        )
-        for index, item in relevant
-    ]
-    gaps = []
-    if coverage < 1:
-        gaps.append({"requirement_id": "evidence_linkage", "reason_code": "SKILL_EVIDENCE_NOT_LINKED", "text": "Some skill claims are not tied to structured experience, project, or certification evidence."})
-    if not impact:
-        gaps.append({"requirement_id": "quantified_impact", "reason_code": "QUANTIFIED_IMPACT_MISSING", "text": "No quantified impact was found in relevant experience."})
-    summary = (
-        f"Evidence and Impact: {_round(score)}/100. Evidence-linked skill coverage is {_round(coverage * 100)}%; "
-        f"ownership evidence is {_round(ownership * 100)}%; quantified impact evidence is {_round(impact * 100)}%."
-    )
-    return _dimension(
-        "evidence_impact",
-        settings,
-        score,
-        "met" if score >= 80 else "partial" if evidence else "not_met",
-        [{"requirement_id": "evidence_quality", "text": "Structured evidence quality", "source": {"document": "jd", "section": "evaluable_requirements"}}],
-        evidence,
-        gaps,
-        "DR-EVIDENCE-001",
-        summary,
-        {"coverage_pct": _round(coverage * 100), "ownership_pct": _round(ownership * 100), "impact_pct": _round(impact * 100)},
-        90.0 if evidence else 20.0,
-    )
-
-
-# Normalizes an education degree label into its ordinal level.
 def _degree_level(value: Any) -> int | None:
     token = normalize_token(value)
     aliases = {"bs": "bachelor", "bsc": "bachelor", "ba": "bachelor", "msc": "master", "ma": "master", "mba": "master", "doctor": "doctorate"}
@@ -953,6 +958,7 @@ def _question(
 
 
 # Selects up to six actionable prompts in the PRD trigger order.
+# Selects up to six actionable prompts, sourcing evidence prompts from their owning dimensions.
 def _build_questions(
     config: dict[str, Any],
     dimensions: list[dict[str, Any]],
@@ -960,48 +966,57 @@ def _build_questions(
     relevant_years: float,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
+    by_id = {
+        item["dimension_id"]: item
+        for item in dimensions
+        if isinstance(item.get("dimension_id"), str)
+    }
     unknown = next((item for item in eligibility["results"] if item["status"] == "unknown"), None)
     if unknown:
         requirement = unknown["requirement"]
         _question(candidates, "IQ-ELIGIBILITY-001", "high", "eligibility", unknown["reason_code"], [unknown["rule_id"]], f"The application does not clearly confirm {requirement}. Could you confirm your current status for this requirement?", {"requirement": requirement})
-    core = dimensions[0]
+    core = by_id.get("core_skill_match") or dimensions[0]
     skill_lookup = {item["requirement_id"]: item["text"] for item in core["requirements"]}
     skill_weights = {str(item["skill_id"]): float(item.get("weight", 1.0)) for item in config["must_skills"]}
     for gap in sorted(core["gaps"], key=lambda item: (-skill_weights.get(item["requirement_id"], 0), item["requirement_id"])):
         requirement = skill_lookup.get(gap["requirement_id"], gap["requirement_id"])
         _question(candidates, "IQ-MISSING-001", "high", "core_skill_match", gap["reason_code"], [gap["requirement_id"]], f"We could not find clear evidence of {requirement} in your CV. Do you have relevant experience? If so, please describe a specific example.", {"requirement": requirement})
     active = [item for item in dimensions if item["active"]]
-    lowest = min(active, key=lambda item: (item["score"], DIMENSION_IDS.index(item["dimension_id"])))
-    if lowest["evidence"] and lowest["dimension_id"] == "core_skill_match":
-        evidence = lowest["evidence"][0]
-        skill = skill_lookup.get(evidence["matched_requirement_ids"][0], "this skill")
-        context = evidence["section"]
-        _question(candidates, "IQ-SKILL-DEPTH-001", "medium", lowest["dimension_id"], "LOWEST_ACTIVE_DIMENSION", evidence["matched_requirement_ids"], f"Your CV mentions using {skill} in {context}. Please describe your responsibility, the main challenge, the approach you took, and the outcome.", {"skill": skill, "context": context})
-    evidence_dimension = dimensions[3]
-    achievement_evidence = next(
-        (
-            item
-            for item in evidence_dimension["evidence"]
-            if _METRIC_PATTERN.search(item["text"]) and not _PROTECTED_TEXT_PATTERN.search(item["text"])
-        ),
-        None,
-    )
-    if achievement_evidence:
-        achievement = achievement_evidence["text"]
-        _question(candidates, "IQ-IMPACT-001", "medium", "evidence_impact", "QUANTIFIED_ACHIEVEMENT_VERIFY", ["quantified_impact"], f"Your CV mentions {achievement}. What metric was used, what was your personal contribution, and what was the final business or technical impact?", {"achievement": achievement})
+    if active:
+        lowest = min(active, key=lambda item: (item["score"], DIMENSION_IDS.index(item["dimension_id"])))
+        if lowest["dimension_id"] == "core_skill_match" and lowest["evidence"]:
+            evidence = lowest["evidence"][0]
+            skill = skill_lookup.get(evidence["matched_requirement_ids"][0], "this skill")
+            context = evidence["section"]
+            _question(candidates, "IQ-SKILL-DEPTH-001", "medium", lowest["dimension_id"], "LOWEST_ACTIVE_DIMENSION", evidence["matched_requirement_ids"], f"Your CV mentions using {skill} in {context}. Please describe your responsibility, the main challenge, the approach you took, and the outcome.", {"skill": skill, "context": context})
+    experience_dim = by_id.get("relevant_experience")
+    if isinstance(experience_dim, dict):
+        achievement_evidence = next(
+            (
+                item
+                for item in experience_dim.get("evidence") or []
+                if _METRIC_PATTERN.search(item.get("text") or "") and not _PROTECTED_TEXT_PATTERN.search(item.get("text") or "")
+            ),
+            None,
+        )
+        if achievement_evidence:
+            achievement = achievement_evidence["text"]
+            _question(candidates, "IQ-IMPACT-001", "medium", "relevant_experience", "QUANTIFIED_ACHIEVEMENT_VERIFY", ["quantified_impact"], f"Your CV mentions {achievement}. What metric was used, what was your personal contribution, and what was the final business or technical impact?", {"achievement": achievement})
     experience_rule = next((rule for rule in config["eligibility_rules"] if rule.get("rule_id") == "minimum_relevant_experience"), None)
     if experience_rule:
         required = float(experience_rule["parameters"]["minimum_years"])
         if relevant_years < required:
             domain = "relevant"
             _question(candidates, "IQ-DURATION-001", "high", "relevant_experience", "MINIMUM_EXPERIENCE_GAP", ["minimum_relevant_experience"], f"This role requests at least {required:g} years of {domain} experience. Please walk us through your most relevant responsibilities and their duration.", {"required_years": required, "domain": domain})
-    role = dimensions[2]
-    if role["active"] and role["score"] < 100:
+    role = by_id.get("role_seniority_fit")
+    if isinstance(role, dict) and role["active"] and role["score"] < 100:
         responsibility = str(config.get("target_seniority") or "the target role")
         _question(candidates, "IQ-SENIORITY-001", "medium", "role_seniority_fit", "SENIORITY_GAP", ["target_seniority"], f"This role requires responsibility for {responsibility}. Please describe a situation where you owned a similar responsibility, including your decisions, collaborators, and outcome.", {"responsibility": responsibility})
-    for gap in dimensions[5]["gaps"]:
-        requirement = next((item["text"] for item in dimensions[5]["requirements"] if item["requirement_id"] == gap["requirement_id"]), gap["requirement_id"])
-        _question(candidates, "IQ-JD-REQUIREMENT-001", "medium", "job_specific_match", gap["reason_code"], [gap["requirement_id"]], f"This role requires {requirement}. Please describe a specific example where you demonstrated this capability.", {"requirement": requirement})
+    job_dim = by_id.get("job_specific_match")
+    if isinstance(job_dim, dict):
+        for gap in job_dim.get("gaps") or []:
+            requirement = next((item["text"] for item in job_dim["requirements"] if item["requirement_id"] == gap["requirement_id"]), gap["requirement_id"])
+            _question(candidates, "IQ-JD-REQUIREMENT-001", "medium", "job_specific_match", gap["reason_code"], [gap["requirement_id"]], f"This role requires {requirement}. Please describe a specific example where you demonstrated this capability.", {"requirement": requirement})
     deduplicated: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for item in candidates:
@@ -1011,9 +1026,6 @@ def _build_questions(
             deduplicated.append(item)
     maximum = min(6, int(config.get("interview_question_policy", {}).get("max_questions", 6)))
     return deduplicated[:maximum]
-
-
-# Derives concise display strengths and gaps from deterministic radar facts.
 def _summaries(dimensions: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     strengths = [
         f"{item['label']}: {item['score']:.2f}/100"
@@ -1047,7 +1059,6 @@ def match_candidate(
         core,
         experience,
         _score_role(config, cv_structured_data),
-        _score_evidence(config, cv_structured_data, core_matches),
         _score_education(config, cv_structured_data),
         _score_specific(config, cv_structured_data, relation_resolver),
     ]

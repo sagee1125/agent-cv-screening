@@ -56,7 +56,7 @@ def radar_tooltip_payload(item: dict[str, Any]) -> dict[str, Any]:
             payload["summary"] = summary
         facts = reasoning.get("facts")
         if isinstance(facts, dict):
-            metric_keys = ("coverage_pct", "ownership_pct", "impact_pct")
+            metric_keys = ("presence_pct", "linkage_pct", "ownership_pct", "impact_pct")
             metrics = {
                 key: float(facts[key])
                 for key in metric_keys

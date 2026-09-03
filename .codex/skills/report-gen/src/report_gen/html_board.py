@@ -21,7 +21,6 @@ _DIMENSION_LABELS = {
     "core_skill_match": "Core Skill Match",
     "relevant_experience": "Relevant Experience",
     "role_seniority_fit": "Role and Seniority Fit",
-    "evidence_impact": "Evidence and Impact",
     "education_certification": "Education and Certification",
     "job_specific_match": "Job-Specific Match",
 }
@@ -42,9 +41,6 @@ _RADAR_TOOLTIP_IDS = (
     "education_certification",
     "job_specific_match",
 )
-# Axes that preview Evidence-axis sub-metrics under Option B (non-scoring aid).
-_PREVIEW_AXES = {"core_skill_match", "relevant_experience"}
-
 _PAGE_CSS_BASE = """
     :root { font-family: "Segoe UI", system-ui, sans-serif; color: #0f172a; background: #f1f5f9; }
     body { max-width: 1100px; margin: 0 auto; padding: 28px 20px 64px; }
@@ -88,6 +84,7 @@ _PAGE_CSS_BASE = """
     .tip-summary { margin: 6px 0 0; color: #cbd5e1; font-size: .9rem; line-height: 1.4; }
     .tip-gaps { margin: 6px 0 0; padding-left: 1.1rem; color: #fda4af; font-size: .85rem; line-height: 1.35; }
     .tip-sections { margin-top: 6px; font-size: .82rem; color: #94a3b8; }
+    .tip-subscores { margin-top: 6px; font-size: .82rem; color: #a5b4fc; }
     .tip-preview { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, .3); color: #a5b4fc; font-size: .85rem; line-height: 1.4; }
     .st-met { color: #34d399; }
     .st-partial { color: #fbbf24; }
@@ -116,7 +113,6 @@ _LOW_BAND_NOTE_EN = (
 _RADAR_SHORT_LABELS = {
     "Education and Certification": "Education",
     "Role and Seniority Fit": "Seniority",
-    "Evidence and Impact": "Evidence",
     "Relevant Experience": "Experience",
     "Core Skill Match": "Core skills",
     "Job-Specific Match": "Job-specific",
@@ -259,19 +255,8 @@ def _radar_svg(axes: list[dict[str, Any]], size: int = 280, pad: int = 80) -> st
     )
 
 
-# Reads the Evidence axis sub-metrics so Core/Experience panels can preview Option B.
-def _evidence_metrics(axes: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for axis in axes:
-        if axis.get("id") != "evidence_impact":
-            continue
-        parts = axis.get("parts")
-        if isinstance(parts, dict) and parts.get("evidence_metrics"):
-            return parts["evidence_metrics"]
-    return None
-
-
 # Renders one hidden styled tooltip card for a radar axis (revealed on hover via CSS).
-def _axis_tip_panel(axis: dict[str, Any], preview: dict[str, Any] | None) -> str:
+def _axis_tip_panel(axis: dict[str, Any]) -> str:
     aid = str(axis.get("id") or "")
     parts = axis.get("parts")
     if not isinstance(parts, dict) or not aid:
@@ -286,6 +271,21 @@ def _axis_tip_panel(axis: dict[str, Any], preview: dict[str, Any] | None) -> str
     summary = str(parts.get("summary") or "").strip()
     if summary:
         blocks.append(f'<p class="tip-summary">{_esc(summary)}</p>')
+    metrics = parts.get("evidence_metrics")
+    if isinstance(metrics, dict) and metrics:
+        labels = {
+            "presence_pct": "presence",
+            "linkage_pct": "linkage",
+            "ownership_pct": "ownership",
+            "impact_pct": "impact",
+        }
+        rendered = " \u00b7 ".join(
+            f"{labels.get(key, key)} {value:g}%"
+            for key, value in metrics.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        )
+        if rendered:
+            blocks.append(f'<div class="tip-subscores">Sub-scores: {_esc(rendered)}</div>')
     gaps = parts.get("gaps") or []
     if gaps:
         items = "".join(f"<li>{_esc(gap)}</li>" for gap in gaps)
@@ -295,26 +295,15 @@ def _axis_tip_panel(axis: dict[str, Any], preview: dict[str, Any] | None) -> str
         blocks.append(f'<div class="tip-muted">Key gaps</div><ul class="tip-gaps">{items}</ul>')
     sections = parts.get("evidence_sections")
     if isinstance(sections, dict) and sections:
-        provenance = " · ".join(f"{_esc(str(section))} {count}" for section, count in sections.items())
+        provenance = " \u00b7 ".join(f"{_esc(str(section))} {count}" for section, count in sections.items())
         blocks.append(f'<div class="tip-sections">Evidence by CV section: {provenance}</div>')
-    if preview and aid in _PREVIEW_AXES:
-        labels = {"coverage_pct": "coverage", "ownership_pct": "ownership", "impact_pct": "impact"}
-        metrics = " · ".join(
-            f"{labels.get(key, key)} {value:g}%"
-            for key, value in preview.items()
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-        )
-        if metrics:
-            blocks.append(
-                '<div class="tip-preview">Option B preview - evidence sub-metrics: '
-                f"{_esc(metrics)}. These are currently scored on the Evidence axis.</div>"
-            )
     return f'<div class="radar-tip" data-tip="{_esc(aid)}" role="tooltip">{"".join(blocks)}</div>'
+
 
 
 # Wraps all hidden tooltip cards for one candidate radar in one overlay container.
 def _axis_tips(axes: list[dict[str, Any]]) -> str:
-    panels = [_axis_tip_panel(axis, _evidence_metrics(axes)) for axis in axes]
+    panels = [_axis_tip_panel(axis) for axis in axes]
     panels = [panel for panel in panels if panel]
     if not panels:
         return ""

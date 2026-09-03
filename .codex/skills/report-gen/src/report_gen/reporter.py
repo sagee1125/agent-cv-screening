@@ -362,35 +362,34 @@ class ReporterService:
 
         sheet.append([f"Position: {position_name}", f"Report Date: {report_date.strftime('%Y-%m-%d')}"])
         sheet.append([])
-        sheet.append(
-            [
-                "Rank",
-                "Ref no",
-                "Application no",
-                "Total Score",
-                "Skill Match",
-                "Experience Match",
-                "Education Match",
-                "Research Quality",
-                "Tier",
-                "Interview Suggestion Summary",
-            ]
-        )
+        has_research_quality = any("research_quality" in (row or {}) for row in rows)
+        headers = [
+            "Rank",
+            "Ref no",
+            "Application no",
+            "Total Score",
+            "Skill Match",
+            "Experience Match",
+            "Education Match",
+        ]
+        if has_research_quality:
+            headers.append("Research Quality")
+        headers.extend(["Tier", "Interview Suggestion Summary"])
+        sheet.append(headers)
         for item in rows:
-            sheet.append(
-                [
-                    item.get("rank"),
-                    item.get("refno") or "",
-                    item.get("appno") or item.get("display_label") or "",
-                    item.get("total_score"),
-                    item.get("skill_match"),
-                    item.get("experience_match"),
-                    item.get("education_match"),
-                    item.get("research_quality"),
-                    item.get("tier"),
-                    item.get("suggestion_summary"),
-                ]
-            )
+            cells = [
+                item.get("rank"),
+                item.get("refno") or "",
+                item.get("appno") or item.get("display_label") or "",
+                item.get("total_score"),
+                item.get("skill_match"),
+                item.get("experience_match"),
+                item.get("education_match"),
+            ]
+            if has_research_quality:
+                cells.append(item.get("research_quality"))
+            cells.extend([item.get("tier"), item.get("suggestion_summary")])
+            sheet.append(cells)
         workbook.save(str(file_path))
 
     # Writes a browser HTML board with ranking and SVG radar charts (no personal names).

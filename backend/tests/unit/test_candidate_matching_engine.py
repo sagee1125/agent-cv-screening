@@ -112,7 +112,7 @@ def test_no_education_requirement_returns_inactive_null_dimension() -> None:
     }
     effective = build_matching_config(jd)
     result = match_candidate(_cv(), effective, "2026-01-31")
-    education = result["radar_dimensions"][4]
+    education = result["radar_dimensions"][3]
 
     assert effective.config["dimensions"]["education_certification"]["active"] is False
     assert education["score"] is None
@@ -216,7 +216,8 @@ def test_related_skill_strength_is_seventy_percent() -> None:
     )
 
     core = result["radar_dimensions"][0]
-    assert core["score"] == 70.0
+    # v2: presence 70 (related) plus full linkage (sql is in experience skills_used) -> 0.8*70 + 0.2*100.
+    assert core["score"] == 76.0
     assert core["evidence"][0]["match_type"] == "related"
 
 
@@ -398,7 +399,8 @@ def test_compound_skill_token_expands_to_canonical_skill() -> None:
     }
     cv = {"skills": [{"canonical_skill": "aws_s3_ec2"}], "experience": [], "education": []}
     result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
-    assert result["radar_dimensions"][0]["score"] == 100.0
+    # v2: skill listed only in the free-text skills section counts presence but not linkage.
+    assert result["radar_dimensions"][0]["score"] == 80.0
 
 
 # Verifies job titles and majors can supply taxonomy skill evidence.
@@ -430,7 +432,7 @@ def test_education_field_accepts_any_listed_major() -> None:
     cv = _cv()
     cv["education"] = [{"degree": "BSc", "degree_level": "bachelor", "major": "Actuarial Studies"}]
     result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
-    education = result["radar_dimensions"][4]
+    education = result["radar_dimensions"][3]
     assert education["reasoning"]["facts"]["components"]["field"] == 100.0
 
 

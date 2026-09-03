@@ -511,7 +511,6 @@ def _match_candidate(
         "skill_match": _radar_dim_score(dims, "core_skill_match"),
         "experience_match": _radar_dim_score(dims, "relevant_experience"),
         "education_match": _radar_dim_score(dims, "education_certification"),
-        "research_quality": _radar_dim_score(dims, "evidence_impact"),
         "suggestion_summary": suggestion_summary,
         "_extracted": cand["extracted"],
         "_detail": detail_out,
