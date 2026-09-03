@@ -484,3 +484,38 @@ def test_cv_prose_does_not_match_computer_vision_must_skill() -> None:
     }
     result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
     assert result["radar_dimensions"][0]["score"] == 0.0
+
+
+# Verifies mandatory education is split into labelled degree and field rules with evidence.
+def test_eligibility_splits_degree_and_field_rules_with_evidence() -> None:
+    config = build_matching_config(_jd())
+    rule_ids = [rule["rule_id"] for rule in config.config["eligibility_rules"]]
+    assert "mandatory_education" not in rule_ids
+    assert "mandatory_degree" in rule_ids
+    assert "mandatory_field_of_study" in rule_ids
+
+    result = match_candidate(_cv(), config, "2026-01-31")
+    rules = {rule["rule_id"]: rule for rule in result["eligibility"]["results"]}
+    assert rules["mandatory_degree"]["status"] == "met"
+    assert rules["mandatory_field_of_study"]["status"] == "met"
+    assert rules["mandatory_degree"]["evidence"]
+    assert rules["mandatory_field_of_study"]["evidence"]
+    language = next(rule for rule in result["eligibility"]["results"] if rule["rule_id"].startswith("mandatory_language"))
+    assert language["evidence"]
+
+
+# Verifies the "related quantitative" JD clause lets quantitative majors pass the field rule.
+def test_field_rule_accepts_quantitative_fallback_marker() -> None:
+    jd = _jd()
+    jd["education_requirement"]["field_of_study"] = "finance, economics, related quantitative"
+
+    cs_result = match_candidate(_cv(), build_matching_config(jd), "2026-01-31")  # Computer Science major
+    assert cs_result["eligibility"]["status"] == "passed"
+
+    cv = _cv()
+    cv["education"] = [{"degree": "BA", "degree_level": "bachelor", "major": "Translation and Linguistics"}]
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    field = next(rule for rule in result["eligibility"]["results"] if rule["rule_id"] == "mandatory_field_of_study")
+    assert field["status"] == "not_met"
+    assert field["reason_code"] == "FIELD_OF_STUDY_NOT_MET"
+    assert field["requirement"].startswith("Mandatory field of study")

@@ -129,17 +129,32 @@ def _build_eligibility_rules(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
             )
     education = jd_data.get("education_requirement") or {}
     if isinstance(education, dict) and education.get("is_mandatory"):
-        rules.append(
-            {
-                "rule_id": "mandatory_education",
-                "mandatory": True,
-                "parameters": {
-                    "minimum_degree": education.get("minimum_degree"),
-                    "field_of_study": education.get("field_of_study"),
-                    "certifications": education.get("certifications") or [],
-                },
-            }
-        )
+        minimum_degree = education.get("minimum_degree")
+        if minimum_degree and normalize_token(minimum_degree) not in {"", "none"}:
+            rules.append(
+                {
+                    "rule_id": "mandatory_degree",
+                    "mandatory": True,
+                    "parameters": {"minimum_degree": minimum_degree},
+                }
+            )
+        field_of_study = education.get("field_of_study")
+        if isinstance(field_of_study, str) and field_of_study.strip() and field_of_study.casefold() not in {"none", "any"}:
+            rules.append(
+                {
+                    "rule_id": "mandatory_field_of_study",
+                    "mandatory": True,
+                    "parameters": {"field_of_study": field_of_study},
+                }
+            )
+        for certification in education.get("certifications") or []:
+            rules.append(
+                {
+                    "rule_id": "mandatory_certification",
+                    "mandatory": True,
+                    "parameters": {"certification": certification},
+                }
+            )
     visa = jd_data.get("visa_requirement") or {}
     if isinstance(visa, dict) and visa.get("requirement_type") == "required":
         rules.append(

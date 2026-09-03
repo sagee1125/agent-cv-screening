@@ -70,6 +70,13 @@ CORE_LINKAGE_WEIGHT = 0.2
 EXPERIENCE_TIME_WEIGHT = 0.7
 EXPERIENCE_QUALITY_WEIGHT = 0.3
 
+# Major keywords that satisfy a JD "business-related or related quantitative" clause.
+_QUANT_BUSINESS_TERMS = (
+    "business", "finance", "economics", "accounting", "actuarial", "analytics",
+    "management", "marketing", "computer", "computing", "software", "data",
+    "statistic", "mathematical", "quantitative", "engineering", "information",
+)
+
 
 # Rounds a numeric value with the PRD half-up rule.
 def _round(value: float, places: int = 2) -> float:
@@ -145,6 +152,13 @@ def _field_token_set(value: Any) -> set[str]:
 
 
 # True when any CV major overlaps any acceptable JD field of study.
+# True when a CV major reads as business-related or quantitative for the JD fallback clause.
+def _major_matches_quantitative_fallback(major: str) -> bool:
+    text = str(major or "").casefold()
+    return any(term in text for term in _QUANT_BUSINESS_TERMS)
+
+
+# True when any CV major overlaps an acceptable JD field or its quantitative fallback.
 def _fields_satisfied(required: Any, candidate_majors: list[str]) -> bool:
     need = _field_token_set(required)
     if not need:
@@ -155,10 +169,14 @@ def _fields_satisfied(required: Any, candidate_majors: list[str]) -> bool:
         if token:
             have.add(token)
         have.update(_taxonomy_tokens(major))
-    return bool(need & have)
+    if need & have:
+        return True
+    if "related_quantitative" in need:
+        return any(_major_matches_quantitative_fallback(major) for major in candidate_majors)
+    return False
 
 
-# Returns canonical skills derived from a single certification record.
+
 def _certification_skill_tokens(item: dict[str, Any]) -> list[str]:
     tokens = _taxonomy_tokens(item.get("name"))
     try:
@@ -821,6 +839,16 @@ def _score_specific(
 
 
 # Evaluates one mandatory rule without contributing to capability score.
+# Builds one CV-sourced evidence record for an eligibility rule decision.
+def _cv_evidence(section: str, text: str, rule_id: str, index: int = 0) -> dict[str, Any]:
+    return _evidence_record(
+        {"section": section, "index": index, "text": text, "structured": True},
+        [rule_id],
+    )
+
+
+
+# Evaluates one mandatory rule without contributing to capability score.
 def _evaluate_eligibility_rule(
     rule: dict[str, Any],
     config: dict[str, Any],
@@ -835,6 +863,8 @@ def _evaluate_eligibility_rule(
     if rule_id == "work_authorization":
         authorization = cv.get("work_authorization")
         value = str(authorization.get("status") or "") if isinstance(authorization, dict) else ""
+        if value:
+            evidence = [_cv_evidence("work_authorization", value, rule_id)]
         if value in {"citizen", "permanent_resident", "has_work_permit"}:
             status, reason = "met", "REQUIREMENT_MET"
         elif value == "requires_sponsorship":
@@ -845,21 +875,50 @@ def _evaluate_eligibility_rule(
         candidate = next((item for item in cv.get("languages") or [] if isinstance(item, dict) and str(item.get("language") or "").casefold() == language.casefold()), None)
         requirement = f"{language} {parameters.get('level') or ''}".strip()
         if candidate:
-            candidate_level, required_level = candidate.get("level"), parameters.get("level")
+            candidate_level = candidate.get("level")
+            evidence = [_cv_evidence("languages", f"{language}: {candidate_level or 'level unknown'}", rule_id)]
+            required_level = parameters.get("level")
             if not candidate_level or not required_level:
                 status, reason = "unknown", "LANGUAGE_LEVEL_UNKNOWN"
             elif _LANGUAGES.get(str(candidate_level), -1) >= _LANGUAGES.get(str(required_level), 0):
                 status, reason = "met", "REQUIREMENT_MET"
             else:
                 status, reason = "not_met", "LANGUAGE_LEVEL_NOT_MET"
+    elif rule_id == "mandatory_degree":
+        required = _degree_level(parameters.get("minimum_degree"))
+        records = [item for item in cv.get("education") or [] if isinstance(item, dict)]
+        levels = [_degree_level(item.get("degree_level") or item.get("degree")) for item in records]
+        requirement = f"Mandatory degree: {parameters.get('minimum_degree') or 'degree'}"
+        evidence = [_cv_evidence("education", str(item.get("degree") or ""), rule_id, idx) for idx, item in enumerate(records[:3]) if item.get("degree")]
+        if not records:
+            status, reason = "unknown", "CV_EVIDENCE_MISSING"
+        elif required is None or max((value for value in levels if value is not None), default=-1) >= required:
+            status, reason = "met", "REQUIREMENT_MET"
+        else:
+            status, reason = "not_met", "DEGREE_NOT_MET"
+    elif rule_id == "mandatory_field_of_study":
+        records = [item for item in cv.get("education") or [] if isinstance(item, dict)]
+        majors = [str(item.get("major")) for item in records if item.get("major")]
+        requirement = f"Mandatory field of study: {parameters.get('field_of_study') or 'any listed major'}"
+        evidence = [
+            _cv_evidence("education", f"{item.get('degree') or 'Degree'} - {item.get('major')}", rule_id, idx)
+            for idx, item in enumerate(records[:3])
+            if item.get("major")
+        ]
+        if not records:
+            status, reason = "unknown", "CV_EVIDENCE_MISSING"
+        elif not majors:
+            status, reason = "unknown", "CV_MAJOR_MISSING"
+        elif _fields_satisfied(parameters.get("field_of_study"), majors):
+            status, reason = "met", "REQUIREMENT_MET"
+        else:
+            status, reason = "not_met", "FIELD_OF_STUDY_NOT_MET"
     elif rule_id == "mandatory_education":
         required = _degree_level(parameters.get("minimum_degree"))
-        levels = [_degree_level(item.get("degree_level") or item.get("degree")) for item in cv.get("education") or [] if isinstance(item, dict)]
-        majors = [
-            str(item.get("major"))
-            for item in cv.get("education") or []
-            if isinstance(item, dict) and item.get("major")
-        ]
+        records = [item for item in cv.get("education") or [] if isinstance(item, dict)]
+        levels = [_degree_level(item.get("degree_level") or item.get("degree")) for item in records]
+        majors = [str(item.get("major")) for item in records if item.get("major")]
+        evidence = [_cv_evidence("education", str(item.get("degree") or item.get("major") or ""), rule_id, idx) for idx, item in enumerate(records[:3]) if item.get("degree") or item.get("major")]
         required_certs = {normalize_token(value) for value in parameters.get("certifications") or []}
         candidate_certs = {
             normalize_token(item.get("name"))
@@ -867,7 +926,7 @@ def _evaluate_eligibility_rule(
             if isinstance(item, dict)
         }
         requirement = f"Mandatory {parameters.get('minimum_degree') or 'education'}"
-        if not levels:
+        if not records:
             status, reason = "unknown", "CV_EVIDENCE_MISSING"
         elif (
             (required is None or max((value for value in levels if value is not None), default=-1) >= required)
@@ -879,12 +938,13 @@ def _evaluate_eligibility_rule(
             status, reason = "not_met", "EDUCATION_REQUIREMENT_NOT_MET"
     elif rule_id in {"mandatory_license", "mandatory_certification"}:
         required_name = normalize_token(parameters.get("license") or parameters.get("certification"))
-        candidate_certs = {
+        candidate_certs = [
             normalize_token(item.get("name"))
             for item in cv.get("certifications") or []
-            if isinstance(item, dict)
-        }
+            if isinstance(item, dict) and item.get("name")
+        ]
         requirement = f"Mandatory {required_name.replace('_', ' ')}"
+        evidence = [_cv_evidence("certifications", name, rule_id, idx) for idx, name in enumerate(candidate_certs[:3])]
         if not candidate_certs:
             status, reason = "unknown", "CV_EVIDENCE_MISSING"
         elif any(required_name in value for value in candidate_certs):
@@ -894,6 +954,8 @@ def _evaluate_eligibility_rule(
     elif rule_id == "minimum_relevant_experience":
         minimum = float(parameters.get("minimum_years", 0))
         requirement = f"At least {minimum:g} years relevant experience"
+        if relevant_years > 0:
+            evidence = [_cv_evidence("experience", f"{relevant_years:g} dated relevant years", rule_id)]
         if relevant_years <= 0:
             status, reason = "unknown", "DATED_EXPERIENCE_MISSING"
         elif relevant_years >= minimum:
@@ -902,6 +964,12 @@ def _evaluate_eligibility_rule(
             status, reason = "not_met", "MINIMUM_EXPERIENCE_NOT_MET"
     elif rule_id in {"minimum_must_skill_count", "minimum_must_skill_coverage"}:
         strengths = [strength for strength, _ in core_matches.values()]
+        evidence = []
+        for idx, (requirement_id, (strength, source)) in enumerate(core_matches.items()):
+            if strength > 0 and source and source.get("text"):
+                evidence.append(_cv_evidence(str(source.get("section") or "cv"), str(source.get("text")), rule_id, idx))
+                if len(evidence) >= 3:
+                    break
         if not strengths:
             status, reason = "unknown", "SKILL_EVIDENCE_MISSING"
         elif rule_id.endswith("count"):
@@ -914,7 +982,7 @@ def _evaluate_eligibility_rule(
     return {"rule_id": rule_id, "status": status, "reason_code": reason, "requirement": requirement, "evidence": evidence}
 
 
-# Aggregates mandatory rule outcomes into passed, needs_review, or failed.
+
 def _evaluate_eligibility(
     config: dict[str, Any],
     cv: dict[str, Any],
