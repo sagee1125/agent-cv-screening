@@ -445,6 +445,12 @@ class JDParserService:
                 return
             cleaned = self.TOKEN_CLEAN_RE.sub(" ", text.lower()).strip()
             cleaned = re.sub(r"\s+", " ", cleaned)
+            if "quantitative" in cleaned and any(word in cleaned for word in ("related", "field", "discipline", "area")):
+                marker = "related quantitative"
+                if marker.casefold() not in seen:
+                    seen.add(marker.casefold())
+                    fields.append(marker)
+                return
             canonical = self._token_to_canonical.get(cleaned)
             key = canonical if canonical else cleaned
             if any(word in self.FIELD_DISCARD_WORDS for word in key.split()):

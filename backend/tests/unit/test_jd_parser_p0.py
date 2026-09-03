@@ -266,6 +266,7 @@ async def test_field_of_study_keeps_explicit_non_taxonomy_majors() -> None:
     assert "accounting" in field
     assert "actuarial" in field
     assert "business analytics" in field
+    assert "related quantitative" in field
     assert "related quantitative field" not in field
     assert "related discipline" not in field
 
