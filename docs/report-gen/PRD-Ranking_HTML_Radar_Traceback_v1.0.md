@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-REPORT-GEN-001
 feature_name: Ranking HTML Radar Axis Trace-back (Option A)
-version: 1.0.0
+version: 1.2.0
 status: Draft
 owner: HR Product Team
 api_version: v1 (local board-row contract)
@@ -20,7 +20,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Ranking HTML Radar Axis Trace-back (Option A)
-**Version:** 1.0.0 (MVP)
+**Version:** 1.2.0 (MVP)
 **Status:** Draft
 **Product Manager:** HR Product Team
 **Target Users:** HR Recruiters, Hiring Managers, Recruiting Operations Leads
@@ -33,6 +33,7 @@ affected_modules:
 
 | Version | Date       | Author          | Change Summary |
 | ------- | ---------- | --------------- | -------------- |
+| 1.2.0   | 2026-09-03 | HR Product Team | Documentation status sync: P0 F0.1-F0.7 and P1 F1.1-F1.2 marked Done; F1.3/F1.4 and the release-gating DoD items (manual board smoke, HR acceptance, Approved flip) recorded as not planned this cycle. |
 | 1.1.0   | 2026-09-03 | HR Product Team | P1 implemented: styled pure-CSS tooltip cards (F1.1) and Option B evidence sub-metrics preview on Core/Experience tooltips (F1.2); per-axis native `<title>` replaced by CSS-revealed overlay panels; tests updated. |
 | 1.0.0   | 2026-09-03 | HR Product Team | Initial draft: Option A (presentation-only radar trace-back). Option B (removing the `evidence_impact` scored dimension) is deferred and explicitly out of scope. |
 
@@ -96,13 +97,13 @@ Option A is successful when, for any candidate scored by the `matching` engine, 
 
 | ID   | Feature | Description | Status |
 | ---- | ------- | ----------- | ------ |
-| F0.1 | Additive tooltip payload in board rows | Pipeline `_board_row()` attaches allow-listed per-dimension fields (`status`, `confidence`, `summary`, `gaps`, `requirements`, `evidence_sections`) to each existing `radar_dimensions` item, keeping `id`/`label`/`score` and all other row fields byte-compatible. | Not Started |
-| F0.2 | Hover/focus tooltip on ranking board radar | `ranking-overview.html` renders, for every active radar axis, a native tooltip (title) containing: full label, `Score: X/100`, `Status`, reasoning summary (<=240 chars), up to 3 gap texts (+N overflow), and evidence-section counts. | Not Started |
-| F0.3 | Tooltip on candidate match pages | `<appno>.html` match pages (shared card renderer) expose the same per-axis tooltip. | Not Started |
-| F0.4 | Zero-JS / offline-safe rendering | The board remains a standalone HTML file with no inline JavaScript and no external `http(s)` assets; it must work from `file://`. | Not Started |
-| F0.5 | Privacy allow-list and escaping | Tooltip text is restricted to templated fields; `evidence[].text` (raw CV text) is never rendered; all rendered text is HTML-escaped. | Not Started |
-| F0.6 | Scoring-invariance guard | Regression test proves `total_score`, `tier`, rank order, and radar geometry (score list) are unchanged by this feature for the same inputs. | Not Started |
-| F0.7 | Fingerprint regeneration | `REPORT_FINGERPRINT_VERSION` is bumped so existing worktrees regenerate HTML instead of reusing stale boards. | Not Started |
+| F0.1 | Additive tooltip payload in board rows | Pipeline `_board_row()` attaches allow-listed per-dimension fields (`status`, `confidence`, `summary`, `gaps`, `requirements`, `evidence_sections`) to each existing `radar_dimensions` item, keeping `id`/`label`/`score` and all other row fields byte-compatible. | Done |
+| F0.2 | Hover/focus tooltip on ranking board radar | `ranking-overview.html` renders, for every active radar axis, a hover/focus styled tooltip card containing: full label, `Score: X/100`, `Status`, reasoning summary (<=240 chars), up to 3 gap texts (+N overflow), and evidence-section counts. | Done |
+| F0.3 | Tooltip on candidate match pages | `<appno>.html` match pages (shared card renderer) expose the same per-axis tooltip. | Done |
+| F0.4 | Zero-JS / offline-safe rendering | The board remains a standalone HTML file with no inline JavaScript and no external `http(s)` assets; it must work from `file://`. | Done |
+| F0.5 | Privacy allow-list and escaping | Tooltip text is restricted to templated fields; `evidence[].text` (raw CV text) is never rendered; all rendered text is HTML-escaped. | Done |
+| F0.6 | Scoring-invariance guard | Regression test proves `total_score`, `tier`, rank order, and radar geometry (score list) are unchanged by this feature for the same inputs. | Done |
+| F0.7 | Fingerprint regeneration | `REPORT_FINGERPRINT_VERSION` is bumped so existing worktrees regenerate HTML instead of reusing stale boards. | Done |
 
 ### 2.2 P1 - Important Enhancements
 
@@ -110,8 +111,10 @@ Option A is successful when, for any candidate scored by the `matching` engine, 
 | ---- | ------- | ----------- | ------ |
 | F1.1 | Styled tooltip cards | Replace native `<title>` with pure-CSS tooltip cards (status color, readable wrapping) while keeping zero-JS. | Done |
 | F1.2 | Option B preview aid | Surface `evidence_impact` sub-metrics (coverage/ownership/impact) inside Core Skill / Experience tooltips as a non-scoring preview of Option B. | Done |
-| F1.3 | On-axis score labels | Draw the numeric score next to each short axis label on the radar for at-a-glance reading. | Not Started |
-| F1.4 | zh-Hant localization | Localize templated reasoning/gap copy and board chrome to Traditional Chinese. | Not Started |
+| F1.3 | On-axis score labels | Draw the numeric score next to each short axis label on the radar for at-a-glance reading. | Deferred |
+| F1.4 | zh-Hant localization | Localize templated reasoning/gap copy and board chrome to Traditional Chinese. | Deferred |
+
+> F1.3 / F1.4 are explicitly deferred and not planned for this cycle (confirmed 2026-09-03).
 
 ### 2.3 Module Priority Summary
 
@@ -158,7 +161,7 @@ Write each AC as an assertable statement; Gherkin is used for the critical path.
 | ------ | ---- | ------------------------------ | ----- |
 | F0.1 | Pipeline row assembly | `.codex/skills/pipeline/scripts/run_pipeline.py` → `_board_row()` | Enrich `radar_dimensions` items (allow-list). |
 | F0.1 | Board-row schema source | `detail-<appno>.json` written by `.codex/skills/scorer/scripts/run_score.py match` | Read-only source of `radar_dimensions`. |
-| F0.2, F0.3, F0.4, F0.5 | HTML renderer | `.codex/skills/report-gen/src/report_gen/html_board.py` → `_axes()`, `_radar_svg()`, `_card()` | Emit per-axis `<title>`; keep zero-JS. |
+| F0.2, F0.3, F0.4, F0.5 | HTML renderer | `.codex/skills/report-gen/src/report_gen/html_board.py` → `_axes()`, `_radar_svg()`, `_card()` | Render per-axis hover/focus tooltip cards; keep zero-JS. |
 | F0.2 | Board service seam | `.codex/skills/report-gen/src/report_gen/reporter.py` → `ReporterService.generate_screening_board_html()` / `generate_candidate_match_html()` | Delegates to `html_board`; unchanged unless needed. |
 | F0.2 | Skill entry | `.codex/skills/report-gen/src/report_gen/skill.py` → `generate_screening_board_skill()`, `generate_candidate_match_html_skill()` | Unchanged. |
 | F0.7 | Fingerprint | `.codex/skills/_shared/src/screening_core/report_fingerprint.py` → `REPORT_FINGERPRINT_VERSION` | Bump to `hr-report-v3`. |
@@ -371,13 +374,13 @@ Field rules (allow-list; see `engine.py` `_dimension()` for source semantics):
 
 ### 11.1 Definition of Done (DoD)
 
-- [ ] PRD sections 1-11 complete; Section 12 present; frontmatter/header in sync.
-- [ ] F0.1-F0.7 implemented and merged.
-- [ ] All ACs (Module 1-4) pass as automated tests; legacy html-board tests unchanged.
-- [ ] T-F0.5-001 PII/raw-text scan passes; T-F0.6-001 score-parity golden passes.
-- [ ] Manual smoke: generate a real refno board and confirm hover tooltips work from `file://`.
-- [ ] PRD change log updated to mark 1.0.0 status `Approved` at release.
-- [ ] P1 F1.1 (styled pure-CSS tooltip cards) and F1.2 (Option B evidence preview) delivered and covered by tests.
+- [x] PRD sections 1-11 complete; Section 12 present; frontmatter/header in sync.
+- [x] F0.1-F0.7 implemented and merged.
+- [x] All ACs (Module 1-4) pass as automated tests; legacy html-board tests unchanged.
+- [x] T-F0.5-001 PII/raw-text scan passes; T-F0.6-001 score-parity golden passes.
+- [ ] Manual smoke: generate a real refno board and confirm hover tooltips work from `file://` — waived (not planned this cycle).
+- [ ] PRD change log updated to mark 1.0.0 status `Approved` at release — deferred; status stays Draft.
+- [x] P1 F1.1 (styled pure-CSS tooltip cards) and F1.2 (Option B evidence preview) delivered and covered by tests.
 
 ### 11.2 Sign-off Lines
 
