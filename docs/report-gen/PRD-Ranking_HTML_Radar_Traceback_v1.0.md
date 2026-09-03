@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-REPORT-GEN-001
 feature_name: Ranking HTML Radar Axis Trace-back (Option A)
-version: 1.2.0
+version: 1.3.0
 status: Draft
 owner: HR Product Team
 api_version: v1 (local board-row contract)
@@ -20,7 +20,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Ranking HTML Radar Axis Trace-back (Option A)
-**Version:** 1.2.0 (MVP)
+**Version:** 1.3.0 (MVP)
 **Status:** Draft
 **Product Manager:** HR Product Team
 **Target Users:** HR Recruiters, Hiring Managers, Recruiting Operations Leads
@@ -33,6 +33,7 @@ affected_modules:
 
 | Version | Date       | Author          | Change Summary |
 | ------- | ---------- | --------------- | -------------- |
+| 1.3.0   | 2026-09-03 | HR Product Team | Radar readability pass: F1.3 (full axis names + on-chart numeric scores) delivered, plus new F1.5 (tooltip cards auto-size, no inner scrollbar) and F1.6 (always-visible dimension breakdown beside the radar on `<appno>.html`). `REPORT_FINGERPRINT_VERSION` bumped `hr-report-v3` → `hr-report-v4`. F1.4 (zh-Hant) stays Deferred. |
 | 1.2.0   | 2026-09-03 | HR Product Team | Documentation status sync: P0 F0.1-F0.7 and P1 F1.1-F1.2 marked Done; F1.3/F1.4 and the release-gating DoD items (manual board smoke, HR acceptance, Approved flip) recorded as not planned this cycle. |
 | 1.1.0   | 2026-09-03 | HR Product Team | P1 implemented: styled pure-CSS tooltip cards (F1.1) and Option B evidence sub-metrics preview on Core/Experience tooltips (F1.2); per-axis native `<title>` replaced by CSS-revealed overlay panels; tests updated. |
 | 1.0.0   | 2026-09-03 | HR Product Team | Initial draft: Option A (presentation-only radar trace-back). Option B (removing the `evidence_impact` scored dimension) is deferred and explicitly out of scope. |
@@ -111,10 +112,12 @@ Option A is successful when, for any candidate scored by the `matching` engine, 
 | ---- | ------- | ----------- | ------ |
 | F1.1 | Styled tooltip cards | Replace native `<title>` with pure-CSS tooltip cards (status color, readable wrapping) while keeping zero-JS. | Done |
 | F1.2 | Option B preview aid | Surface `evidence_impact` sub-metrics (coverage/ownership/impact) inside Core Skill / Experience tooltips as a non-scoring preview of Option B. | Done |
-| F1.3 | On-axis score labels | Draw the numeric score next to each short axis label on the radar for at-a-glance reading. | Deferred |
+| F1.3 | Full axis names + on-chart scores | Drop abbreviated axis names: render the full dimension label, wrapped over up to three lines, and print each axis score to one decimal place on the chart for at-a-glance reading. | Done |
 | F1.4 | zh-Hant localization | Localize templated reasoning/gap copy and board chrome to Traditional Chinese. | Deferred |
+| F1.5 | Auto-height tooltip cards | Hover tooltip cards grow to fit their content instead of scrolling internally (`max-height: none; overflow: visible`). | Done |
+| F1.6 | Always-visible match-page breakdown | On `<appno>.html`, render the per-dimension explanation beside the radar in a two-column layout with no hover required; hovering an axis cross-highlights its card. | Done |
 
-> F1.3 / F1.4 are explicitly deferred and not planned for this cycle (confirmed 2026-09-03).
+> F1.4 (zh-Hant) remains explicitly deferred (confirmed 2026-09-03). F1.3 / F1.5 / F1.6 shipped 2026-09-03.
 
 ### 2.3 Module Priority Summary
 
@@ -162,6 +165,9 @@ Write each AC as an assertable statement; Gherkin is used for the critical path.
 | F0.1 | Pipeline row assembly | `.codex/skills/pipeline/scripts/run_pipeline.py` → `_board_row()` | Enrich `radar_dimensions` items (allow-list). |
 | F0.1 | Board-row schema source | `detail-<appno>.json` written by `.codex/skills/scorer/scripts/run_score.py match` | Read-only source of `radar_dimensions`. |
 | F0.2, F0.3, F0.4, F0.5 | HTML renderer | `.codex/skills/report-gen/src/report_gen/html_board.py` → `_axes()`, `_radar_svg()`, `_card()` | Render per-axis hover/focus tooltip cards; keep zero-JS. |
+| F1.3 | Radar geometry / labels | `.codex/skills/report-gen/src/report_gen/html_board.py` → `_wrap_label()`, `_radar_svg()` | Full axis names wrapped over `_LABEL_MAX_LINES` tspans; per-axis `.axis-score` text; viewBox padded on all four sides (`_RADAR_PAD_X` / `_RADAR_PAD_Y`). |
+| F1.5 | Tooltip card sizing | `.codex/skills/report-gen/src/report_gen/html_board.py` → `_PAGE_CSS_BASE` | `.radar-tip` uses `height: auto; max-height: none; overflow: visible`; `.card:hover, .card:focus-within { z-index: 5 }` keeps the card above its grid siblings. |
+| F1.6 | Match-page layout | `.codex/skills/report-gen/src/report_gen/html_board.py` → `_dimension_card()`, `_dimension_panel()`, `_card(layout="detail")`, `write_candidate_match_html()`, `_DIM_HIGHLIGHT_RULES` | Two-column `.match-layout` (radar + `.dim-list`); always-visible `.dim-card` per active axis; axis hover cross-highlights its card. |
 | F0.2 | Board service seam | `.codex/skills/report-gen/src/report_gen/reporter.py` → `ReporterService.generate_screening_board_html()` / `generate_candidate_match_html()` | Delegates to `html_board`; unchanged unless needed. |
 | F0.2 | Skill entry | `.codex/skills/report-gen/src/report_gen/skill.py` → `generate_screening_board_skill()`, `generate_candidate_match_html_skill()` | Unchanged. |
 | F0.7 | Fingerprint | `.codex/skills/_shared/src/screening_core/report_fingerprint.py` → `REPORT_FINGERPRINT_VERSION` | Bump to `hr-report-v3`. |
@@ -201,8 +207,8 @@ Write each AC as an assertable statement; Gherkin is used for the critical path.
 1. `scorer match` writes `detail-<appno>.json` per candidate with `radar_dimensions` (six dimensions; each item carries `label`, `score`, `status`, `confidence`, `reasoning.summary`, `gaps[]`, `requirements[]`, `evidence[]`).
 2. `run_pipeline.py::_match_candidate()` builds the internal row; `_board_row()` converts it to the public row and, when `_detail` exists, enriches each `radar_dimensions` item with the F0.1 allow-listed fields.
 3. Pipeline writes `rows.json` (board) and `board-row-<stem>.json` (per candidate) to the work directory.
-4. `run_report.py board` / `match-html` call `html_board.write_screening_board()` / `write_candidate_match_html()`, which render the radar and per-axis tooltips.
-5. HR opens `Desktop/workbuddy-cv-screen/<refno>/ranking-overview.html` (or `<appno>.html`) from `file://`; hovering an axis shows the native tooltip.
+4. `run_report.py board` / `match-html` call `html_board.write_screening_board()` / `write_candidate_match_html()`. The board renders the radar plus hidden per-axis tooltip cards (`layout="board"`); the match page renders the radar beside an always-visible dimension breakdown (`layout="detail"`).
+5. HR opens `Desktop/workbuddy-cv-screen/<refno>/ranking-overview.html` (or `<appno>.html`) from `file://`; on the board, hovering an axis reveals its styled tooltip card; on a match page the same explanation is already on screen next to the radar.
 
 ```mermaid
 sequenceDiagram
@@ -301,6 +307,10 @@ Field rules (allow-list; see `engine.py` `_dimension()` for source semantics):
 ### 5.3 HTML DOM Contract
 
 - Each active radar axis must be wrapped in a hoverable/focusable group (`data-axis`) wired through pure CSS (`:has`) to a hidden styled tooltip card (`data-tip`) whose content follows Section 5.2 (allow-list, escaped, truncated). Tooltip content stays in the DOM for deterministic tests; each axis group carries an `aria-label`.
+- Axis labels must be the **full** dimension name, split into `<tspan>` lines rather than abbreviated or truncated (F1.3). Abbreviations such as "Core skills" or "Job-specific" must not appear in the output.
+- Each axis renders its score to one decimal place in a `.axis-score` text node, and the viewBox must be padded on all four sides so no wrapped label clips outside the canvas (F1.3). The same one-decimal precision applies to `.tip-score` and `.dim-score`, so a dimension never shows two different numbers on one page.
+- Tooltip cards must not constrain their own height: no `max-height` clipping and no `overflow: auto` scrollbar (F1.5).
+- `<appno>.html` must render a `.match-layout` grid containing the radar and a `.dim-list` of always-visible `.dim-card[data-dim]` entries — one per active axis — instead of a `.radar-tips` hover overlay (F1.6).
 - The page must not contain `<script>` or new external `http(s)` references introduced by this feature.
 - No raw CV text (anything under `evidence[].text`) may appear anywhere in the HTML.
 
@@ -381,6 +391,9 @@ Field rules (allow-list; see `engine.py` `_dimension()` for source semantics):
 - [ ] Manual smoke: generate a real refno board and confirm hover tooltips work from `file://` — waived (not planned this cycle).
 - [ ] PRD change log updated to mark 1.0.0 status `Approved` at release — deferred; status stays Draft.
 - [x] P1 F1.1 (styled pure-CSS tooltip cards) and F1.2 (Option B evidence preview) delivered and covered by tests.
+- [x] P1 F1.3 (full axis names + on-chart scores), F1.5 (auto-height tooltip cards) and F1.6 (always-visible match-page breakdown) delivered and covered by tests.
+- [x] `REPORT_FINGERPRINT_VERSION` bumped to `hr-report-v4` so existing worktrees regenerate instead of reusing stale boards.
+- [ ] Manual smoke of the regenerated 260901004 preview board and one match page from `file://` — pending HR review.
 
 ### 11.2 Sign-off Lines
 
@@ -445,3 +458,7 @@ Field rules (allow-list; see `engine.py` `_dimension()` for source semantics):
 | trace-back | Per-score explanation: score + status + templated reason + gaps + CV-section provenance. |
 | `REPORT_FINGERPRINT_VERSION` | Version string in `report_fingerprint.py` that invalidates cached HTML/PDF reuse. |
 | Option B | Deferred design to remove the `evidence_impact` scored dimension and fold its sub-metrics into other dimensions' reasoning. |
+| full axis name | The complete dimension label (e.g. "Education and Certification"); wrapped over up to three `<tspan>` lines rather than abbreviated. |
+| `.match-layout` | Two-column grid used on `<appno>.html`: radar on the left, per-dimension breakdown on the right. |
+| `.dim-card` | One always-visible explanation card per active axis on a match page; its left border is colour-coded by status. |
+| `layout="detail"` | `_card()` rendering mode that replaces the hover tooltip overlay with the always-visible breakdown. |

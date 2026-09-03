@@ -224,9 +224,10 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
     assert ">Resume</a>" in text
     # Labels spell out which number is the refno and which is the appno.
     assert "refno 260901004 · appno 260901007" in text
-    # Radar uses short axis labels and a padded viewBox so nothing clips.
-    assert "Core skills" in text
-    assert "viewBox=\"-80 0 440 280\"" in text
+    # Radar spells out full dimension names, wraps them, and pads the viewBox so nothing clips.
+    assert "Core Skill" in text
+    assert "<tspan" in text
+    assert "viewBox=\"-110 -44 500 368\"" in text
     # The board is English-only.
     for ch in "評等候選請以":
         assert ch not in text
@@ -447,7 +448,7 @@ def test_html_board_radar_geometry_and_scores_unchanged_by_tooltips(tmp_path: Pa
     assert '<div class="radar-tip" data-tip=' not in legacy_text
     assert '<div class="radar-tip" data-tip=' in enriched_text
 
-def test_html_candidate_match_page_radar_tooltips(tmp_path: Path) -> None:
+def test_html_candidate_match_page_dimension_panel(tmp_path: Path) -> None:
     from app.services.reporter import ReporterService
 
     service = ReporterService()
@@ -491,14 +492,20 @@ def test_html_candidate_match_page_radar_tooltips(tmp_path: Path) -> None:
     )
     text = out.read_text(encoding="utf-8")
     assert text.count("<title>") == 1
-    assert '<div class="radar-tip" data-tip="job_specific_match"' in text
-    assert ">Job-Specific Match</span>" in text
+    # The match page shows the breakdown beside the radar instead of a hover overlay.
+    assert 'class="match-layout"' in text
+    assert '<div class="radar-tip" data-tip=' not in text
+    assert '<article class="dim-card st-partial" data-dim="job_specific_match"' in text
+    assert '<h3 class="dim-label">Job-Specific Match</h3>' in text
     assert "st-partial" in text
+    assert "Evidence by CV section: experience 2" in text
+    # Dimension scores keep one decimal on the page too.
+    assert '<p class="dim-score">72.5<span class="dim-total">/100</span></p>' in text
 
 def test_report_fingerprint_version_bumped_for_tooltips() -> None:
     from screening_core.report_fingerprint import REPORT_FINGERPRINT_VERSION
 
-    assert REPORT_FINGERPRINT_VERSION == "hr-report-v3"
+    assert REPORT_FINGERPRINT_VERSION == "hr-report-v4"
 
 
 # F1.2: Core/Experience tooltip cards preview Evidence-axis sub-metrics (Option B aid).
@@ -558,3 +565,82 @@ def test_html_board_sub_scores_on_core_and_experience_tips(tmp_path: Path) -> No
     assert "Sub-scores: ownership 100% · impact 50%" in experience_panel
     job_panel = panels.split('<div class="radar-tip" data-tip="job_specific_match"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
     assert "Sub-scores:" not in job_panel
+
+
+# ---------------------------------------------------------------------------
+# F1.3 / F1.5: full axis names, on-chart scores, and auto-height tooltip cards.
+# ---------------------------------------------------------------------------
+
+
+# Board radar spells out full dimension names and prints every score on the chart.
+def test_html_board_full_axis_names_and_on_chart_scores(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-labels.html"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+        refno="260901004",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260901004",
+                "appno": "260901008",
+                "total_score": 78.7,
+                "tier": "medium",
+                "radar_dimensions": [
+                    {"id": "core_skill_match", "label": "Core Skill Match", "score": 65.14},
+                    {"id": "relevant_experience", "label": "Relevant Experience", "score": 100.0},
+                    {"id": "education_certification", "label": "Education and Certification", "score": 77.78},
+                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 62.5},
+                ],
+            },
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    # Full names are used verbatim, never the old abbreviations.
+    for full in ("Core Skill Match", "Relevant Experience", "Education and Certification", "Job-Specific Match"):
+        assert full in text
+    for short in ("Core skills", "Job-specific", "Work auth"):
+        assert short not in text
+    # Long names are wrapped onto tspan lines instead of being truncated.
+    assert "<tspan" in text
+    # Every axis prints its own score on the chart, to one decimal (F1.3).
+    assert 'class="axis-score">65.1</text>' in text
+    assert 'class="axis-score">100.0</text>' in text
+    assert 'class="axis-score">77.8</text>' in text
+    assert 'class="axis-score">62.5</text>' in text
+
+
+# Hover tooltip cards grow to fit their content instead of scrolling internally (F1.5).
+def test_html_board_tooltip_card_has_no_inner_scroll(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-tip-height.html"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+        refno="260901004",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260901004",
+                "appno": "260901008",
+                "total_score": 78.7,
+                "tier": "medium",
+                "radar_dimensions": [
+                    {"id": "core_skill_match", "label": "Core Skill Match", "score": 65.14},
+                    {"id": "relevant_experience", "label": "Relevant Experience", "score": 100.0},
+                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 62.5},
+                ],
+            },
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "max-height: none" in text
+    assert "overflow: visible" in text
+    assert "max-height: 94%" not in text
