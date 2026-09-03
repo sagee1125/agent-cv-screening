@@ -844,6 +844,9 @@ def _merge_languages(
             continue
         seen.add(key)
         merged.append(item)
+    for item in merged:
+        if not item.get("degree_level") and item.get("degree"):
+            item["degree_level"] = degree_to_level(item.get("degree"))
     return merged
 
 
