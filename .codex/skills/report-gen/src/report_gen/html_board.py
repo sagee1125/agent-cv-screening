@@ -60,7 +60,6 @@ _PAGE_CSS_BASE = """
     .axis-label { font-size: 9.5px; fill: #334155; }
     .axis-score { font-size: 10.5px; font-weight: 700; fill: #2563eb; }
     .questions { padding-left: 1.1rem; }
-    .prio { color: #2563eb; font-size: .8rem; text-transform: uppercase; }
     a { color: #1d4ed8; }
     .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 14px 16px; margin: 20px 0 0; }
     .note h2 { margin: 0 0 6px; font-size: 1rem; }
