@@ -508,7 +508,9 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
     q_html = ""
     if questions:
         items = "".join(
-            f"<li><span class='prio'>{_esc(q.get('priority') or '')}</span> {_esc(q.get('question'))}</li>"
+            # Interview prompts render as plain questions; the priority label
+            # (high/medium) is intentionally not shown on HR-facing HTML.
+            f"<li>{_esc(q.get('question'))}</li>"
             for q in questions[:8]
         )
         q_html = f"<h3>Interview prompts</h3><ol class='questions'>{items}</ol>"
