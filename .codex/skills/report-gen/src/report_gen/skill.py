@@ -78,6 +78,7 @@ def generate_candidate_report_skill(
     service.generate_candidate_one_pager_pdf(
         output_path,
         display_label=label,
+        refno=refno,
         position_name=position_name,
         report_date=datetime.utcnow(),
         total_score=float(total_score),

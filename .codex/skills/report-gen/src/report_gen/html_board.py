@@ -46,6 +46,10 @@ _PAGE_CSS_BASE = """
     body { max-width: 1100px; margin: 0 auto; padding: 28px 20px 64px; }
     h1 { margin: 0 0 6px; font-size: 1.6rem; }
     .lede { color: #475569; margin: 0 0 24px; }
+    /* Job reference stands out so a forwarded match page still identifies the job. */
+    .refno { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #dbeafe;
+             color: #1d4ed8; font-size: 1.15rem; font-weight: 700; letter-spacing: .02em;
+             vertical-align: baseline; }
     table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
     th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
     th { background: #0f172a; color: #fff; font-weight: 600; }
@@ -463,7 +467,7 @@ def _label(row: dict[str, Any]) -> str:
         return f"Application No.: {appno}"
     refno = str(row.get("refno") or "").strip()
     if refno:
-        return f"refno {refno}"
+        return f"Ref. No.: {refno}"
     return str(row.get("display_label") or "unknown")
 
 
@@ -623,7 +627,7 @@ def write_candidate_match_html(
     label = _label(row)
     # A match page can be forwarded on its own, so restate the job refno in the lede.
     refno = str(row.get("refno") or "").strip()
-    refno_html = f" · refno {_esc(refno)}" if refno else ""
+    refno_html = f" · <span class='refno'>Ref. No.: {_esc(refno)}</span>" if refno else ""
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>

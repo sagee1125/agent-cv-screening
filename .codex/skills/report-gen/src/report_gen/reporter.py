@@ -106,6 +106,7 @@ class ReporterService:
         *,
         display_label: str | None = None,
         candidate_name: str | None = None,
+        refno: str | None = None,
         position_name: str,
         report_date: datetime,
         total_score: float,
@@ -153,6 +154,9 @@ class ReporterService:
         y = self._draw_wrapped(
             c, margin, y, f"Applied Position: {position_name}", _CJK, 9, content_w, 12
         )
+        # A one-pager can be forwarded on its own, so it carries the job reference too.
+        if refno:
+            y = self._draw_wrapped(c, margin, y, f"Ref. No.: {refno}", _CJK, 9, content_w, 12)
         c.setFont(_CJK, 9)
         c.drawString(margin, y, f"Report Date: {report_date.strftime('%Y-%m-%d')}")
         y -= 22
