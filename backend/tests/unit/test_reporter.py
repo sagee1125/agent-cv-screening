@@ -125,8 +125,8 @@ def test_reporter_generates_html_board_without_names(tmp_path: Path) -> None:
         ],
     )
     text = out.read_text(encoding="utf-8")
-    assert "refno 260818001" in text
-    assert "appno 123456" in text
+    assert "Ref. No.: 260818001" in text
+    assert "Application No.: 123456" in text
     assert "Alice Chen" not in text
     assert "<svg" in text
     assert "Ranking overview" in text
@@ -189,7 +189,7 @@ def test_html_board_all_low_narrow_spread_warning(tmp_path: Path) -> None:
     assert "treated as tied" in text
 
 
-# The board renders resume hyperlinks and explicit refno/appno labels in English only.
+# The board renders resume hyperlinks and explicit application-no. labels in English only.
 def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
     service = ReporterService()
     out = tmp_path / "board-links.html"
@@ -222,8 +222,8 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
     assert "<th>Resume</th>" in text
     assert "href='https://example.test/cvs/260901007.pdf'" in text
     assert ">Resume</a>" in text
-    # Labels spell out which number is the refno and which is the appno.
-    assert "refno 260901004 · appno 260901007" in text
+    # Labels show the application No. only; the refno lives in the page title.
+    assert "Application No.: 260901007" in text
     # Radar spells out full dimension names, wraps them, and pads the viewBox so nothing clips.
     assert "Core Skill" in text
     assert "<tspan" in text
@@ -442,7 +442,7 @@ def test_html_board_radar_geometry_and_scores_unchanged_by_tooltips(tmp_path: Pa
 
     assert polygons(legacy_text) == polygons(enriched_text)
     assert "88.5" in legacy_text and "88.5" in enriched_text
-    assert "refno 260818001 · appno 123456" in legacy_text
+    assert "Application No.: 123456" in legacy_text
     assert legacy_text.count("<title>") == 1
     assert enriched_text.count("<title>") == 1
     assert '<div class="radar-tip" data-tip=' not in legacy_text

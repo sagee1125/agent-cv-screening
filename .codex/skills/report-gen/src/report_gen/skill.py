@@ -70,7 +70,10 @@ def generate_candidate_report_skill(
     total_score = detail.get("match_score") if "match_score" in detail else score_result.get("total_score", 0)
     tier = detail.get("fit_band") if "fit_band" in detail else score_result.get("tier", "")
     _ = candidate_name  # names are never shown on reports
-    label = format_candidate_label(refno, appno)
+    # HR-facing PDF uses the same wording as the HTML board. format_candidate_label() is left
+    # alone on purpose: it also builds the stable `display_label` identity persisted in the
+    # pipeline JSON (and a filename fallback), which must keep the refno/appno form.
+    label = f"Application No.: {appno}" if appno else format_candidate_label(refno, appno)
     service = ReporterService()
     service.generate_candidate_one_pager_pdf(
         output_path,

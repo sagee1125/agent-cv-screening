@@ -455,17 +455,24 @@ def _dimension_panel(axes: list[dict[str, Any]]) -> str:
     return f'<div class="dim-list">{"".join(cards)}</div>'
 
 
-# Candidate header states which part is the refno and which is the appno (never a name).
+# Candidate label used in HTML reports: application no. only, never a name.
+# The refno is already shown in the page title/lede, so repeating it here is redundant.
 def _label(row: dict[str, Any]) -> str:
-    refno = str(row.get("refno") or "").strip()
     appno = str(row.get("appno") or "").strip()
-    if refno and appno:
-        return f"refno {refno} · appno {appno}"
     if appno:
-        return f"appno {appno}"
+        return f"Application No.: {appno}"
+    refno = str(row.get("refno") or "").strip()
     if refno:
         return f"refno {refno}"
     return str(row.get("display_label") or "unknown")
+
+
+# Renders the tier/band with an initial capital; empty when the row has none.
+def _tier_label(row: dict[str, Any]) -> str:
+    value = str(row.get("tier") or row.get("fit_band") or "").strip()
+    if not value:
+        return ""
+    return value[:1].upper() + value[1:]
 
 
 # Build an advisory block when every scored candidate sits in the low band.
@@ -530,7 +537,7 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
         <p class="rank">#{_esc(row.get('rank') or '—')}</p>
         <div>
           <h2>{_esc(_label(row))}</h2>
-          <p class="meta">Tier {_esc(row.get('tier') or row.get('fit_band') or '—')} · score {_esc(score_txt)}</p>
+          <p class="meta">Tier {_esc(_tier_label(row) or '—')} · score {_esc(score_txt)}</p>
         </div>
       </header>
       {body}
@@ -566,9 +573,9 @@ def write_screening_board(
         table_rows.append(
             "<tr>"
             f"<td>{_esc(row.get('rank'))}</td>"
-            f"<td><a href='{_esc(appno)}.html'>{_esc(_label(row))}</a></td>"
+            f"<td><a href='{_esc(appno)}.html'>{_esc(appno)}</a></td>"
             f"<td>{_esc(row.get('total_score'))}</td>"
-            f"<td>{_esc(row.get('tier') or row.get('fit_band') or '')}</td>"
+            f"<td>{_esc(_tier_label(row))}</td>"
             f"<td>{_resume_cell(row)}</td>"
             "</tr>"
         )
@@ -576,6 +583,8 @@ def write_screening_board(
     advisory = _low_band_advisory(ranked)
     heading = _esc(position_name)
     sub = _esc(refno) if refno else ""
+    # The job reference belongs in the page title, so the lede repeats only position and date.
+    title_suffix = f" - Ref. No.: {sub}" if sub else ""
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -585,10 +594,10 @@ def write_screening_board(
   <style>{_PAGE_CSS}</style>
 </head>
 <body>
-  <h1>Ranking overview</h1>
-  <p class="lede">{heading}{' · refno ' + sub if sub else ''} · {stamped} · labels are refno/appno only</p>
+  <h1>Ranking overview{title_suffix}</h1>
+  <p class="lede">{heading} · {stamped} · labels are application No. only</p>
   <table>
-    <thead><tr><th>Rank</th><th>Application</th><th>Score</th><th>Tier</th><th>Resume</th></tr></thead>
+    <thead><tr><th>Rank</th><th>Application No.</th><th>Score</th><th>Tier</th><th>Resume</th></tr></thead>
     <tbody>{''.join(table_rows)}</tbody>
   </table>
   {advisory}
@@ -612,6 +621,9 @@ def write_candidate_match_html(
     path.parent.mkdir(parents=True, exist_ok=True)
     stamped = (report_date or datetime.utcnow()).strftime("%Y-%m-%d")
     label = _label(row)
+    # A match page can be forwarded on its own, so restate the job refno in the lede.
+    refno = str(row.get("refno") or "").strip()
+    refno_html = f" · refno {_esc(refno)}" if refno else ""
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -621,7 +633,7 @@ def write_candidate_match_html(
   <style>{_PAGE_CSS}</style>
 </head>
 <body>
-  <p class="lede"><a href="ranking-overview.html">Back to ranking overview</a> · {_esc(position_name)} · {stamped}</p>
+  <p class="lede"><a href="ranking-overview.html">Back to ranking overview</a> · {_esc(position_name)}{refno_html} · {stamped}</p>
   {_card(row, layout="detail")}
 </body>
 </html>
