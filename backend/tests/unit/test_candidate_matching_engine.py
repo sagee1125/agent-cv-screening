@@ -679,3 +679,24 @@ def test_preferred_weight_is_normalized_to_unit_before_tier() -> None:
     core = match_candidate(cv, config, "2026-01-31")["radar_dimensions"][0]
     # 3:1 tier -> presence = (1/3)/(1 + 1/3) * 100 = 25 -> 0.8 * 25 = 20 (not 13.33).
     assert core["score"] == 20.0
+
+# Verifies a preferred skill that duplicates a must skill is dropped so Core never double counts.
+def test_preferred_duplicate_of_must_is_dropped() -> None:
+    jd = _jd()
+    jd["must_skills"] = [
+        {"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0},
+        {"skill_id": "docker_1", "canonical_skill": "docker", "weight": 1.0},
+    ]
+    jd["preferred_skills"] = [{"skill_id": "python_dup", "canonical_skill": "python", "weight": 0.6}]
+    jd["language_requirements"] = []
+    jd["visa_requirement"] = {"requirement_type": "unknown"}
+    jd["experience_requirement"] = {}
+    cv = {"skills": [{"canonical_skill": "python"}], "experience": [], "education": []}
+
+    config = build_matching_config(jd)
+    assert config.config["preferred_skills"] == []
+
+    core = match_candidate(cv, config, "2026-01-31")["radar_dimensions"][0]
+    # Only the must entry counts: python 1/2 -> presence 50 -> 0.8 * 50 = 40 (no preferred double count).
+    assert core["score"] == 40.0
+    assert len(core["requirements"]) == 2

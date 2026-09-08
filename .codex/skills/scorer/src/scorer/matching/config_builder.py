@@ -317,6 +317,13 @@ def build_matching_config(
     base["preferred_skills"] = _normalize_preferred_weights(
         _merge_skill_requirements(_records(base["preferred_skills"]))
     )
+    # Drop preferred skills that duplicate a must skill so Core never double counts them.
+    must_tokens = {normalize_token(item.get('canonical_skill')) for item in base['must_skills']}
+    base['preferred_skills'] = [
+        item
+        for item in base['preferred_skills']
+        if normalize_token(item.get('canonical_skill')) not in must_tokens
+    ]
     _validate_and_normalize(base, jd_structured_data)
     canonical_json = json.dumps(base, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return EffectiveConfig(
