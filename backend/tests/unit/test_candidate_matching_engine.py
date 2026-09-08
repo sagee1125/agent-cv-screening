@@ -1,4 +1,4 @@
-# Tests deterministic configuration and six-dimension candidate matching behavior.
+# Tests deterministic configuration and five-dimension candidate matching behavior.
 from __future__ import annotations
 
 import copy
@@ -161,8 +161,8 @@ def test_protected_attribute_requirement_is_rejected() -> None:
         build_matching_config(_jd(), explicit_config=explicit)
 
 
-# Verifies every score returns six complete radar objects in canonical order.
-def test_match_returns_complete_six_dimension_contract() -> None:
+# Verifies every score returns five complete radar objects in canonical order.
+def test_match_returns_complete_five_dimension_contract() -> None:
     result = match_candidate(_cv(), build_matching_config(_jd()), "2026-01-31")
 
     assert [item["dimension_id"] for item in result["radar_dimensions"]] == list(DIMENSION_IDS)

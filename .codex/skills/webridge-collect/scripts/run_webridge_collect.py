@@ -199,6 +199,8 @@ def main() -> int:
         "candidates_without_cv": manifest.get("candidates_without_cv", []),
         "folder": str(folder),
     }
+    if manifest.get("human_flow"):
+        result["human_flow"] = manifest["human_flow"]
     if manifest.get("download_failures"):
         result["download_failures"] = manifest["download_failures"]
         if not result["cv_downloaded"]:

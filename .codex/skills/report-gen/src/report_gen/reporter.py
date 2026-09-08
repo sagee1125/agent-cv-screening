@@ -79,7 +79,6 @@ _DIMENSION_LABELS = {
     "core_skill_match": "Core Skill Match",
     "relevant_experience": "Relevant Experience",
     "role_seniority_fit": "Role and Seniority Fit",
-    "evidence_impact": "Evidence and Impact",
     "education_certification": "Education and Certification",
     "job_specific_match": "Job-Specific Match",
 }
@@ -88,7 +87,6 @@ _DIMENSION_LABELS = {
 _RADAR_SHORT = {
     "Education and Certification": "Education",
     "Role and Seniority Fit": "Seniority",
-    "Evidence and Impact": "Evidence",
     "Relevant Experience": "Experience",
     "Core Skill Match": "Core skills",
     "Job-Specific Match": "Job-specific",
@@ -652,7 +650,6 @@ class ReporterService:
             "role_seniority_fit",
             "education_certification",
             "education_match",
-            "evidence_impact",
             "research_quality",
             "experience_quality",
             "job_specific_match",

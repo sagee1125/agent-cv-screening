@@ -1,4 +1,4 @@
-# Implements the pure deterministic six-dimension candidate matching engine.
+# Implements the pure deterministic five-dimension candidate matching engine.
 from __future__ import annotations
 
 import hashlib

@@ -90,8 +90,10 @@ def _focus_current_tab(browser: WebBridgeClient) -> None:
         pass
 
 
-# Search the list page like a human: return the row's View link when found, None when no row matches (page stays open).
-def navigate_like_human(browser: WebBridgeClient, *, refno: str, base_url: str, records_url: str) -> str | None:
+# Search the list page like a human: return (target URL, flow label) or (None, not_found).
+def navigate_like_human(
+    browser: WebBridgeClient, *, refno: str, base_url: str, records_url: str
+) -> tuple[str | None, str]:
     list_url = f"{base_url.rstrip('/')}/"
     browser.navigate(list_url, new_tab=True, group_title="JES demo screening")
     _focus_current_tab(browser)
@@ -100,12 +102,13 @@ def navigate_like_human(browser: WebBridgeClient, *, refno: str, base_url: str, 
     except Exception:
         found = None
     if isinstance(found, dict) and found.get("clicked") and found.get("href"):
-        return str(found["href"])
+        return str(found["href"]), "view_link"
     # The refno was typed into the filter but no matching row appeared: report not found
     # without navigating away, so HR sees the empty search result and the tab stays open.
     if isinstance(found, dict) and found.get("typed") and not found.get("clicked"):
-        return None
-    return records_url
+        return None, "not_found"
+    # Could not drive the list filter (DOM changed); fall back to the direct records URL.
+    return records_url, "fallback_direct_url"
 
 
 # Collect one job: write records.html + cvs/<appno>.pdf + a PII-free manifest.
@@ -129,9 +132,12 @@ def collect_job(
         html = asyncio.run(_jas_fetch.fetch_html(records_url, cookie_file=cookie_file, allowed_hosts=allowed_hosts))
     else:
         browser = client or WebBridgeClient()
+        human_flow: str | None = None
         if base_url and refno:
             # Human-like flow: find the job on the list page, then open its View link.
-            target = navigate_like_human(browser, refno=refno, base_url=base_url, records_url=records_url)
+            target, human_flow = navigate_like_human(
+                browser, refno=refno, base_url=base_url, records_url=records_url
+            )
             if target is None:
                 # The list-page search found no matching row; keep the page open and report not found.
                 raise JobNotFoundError(f"no JAS job found for refno {refno} (no matching row in the records list)")
@@ -182,6 +188,8 @@ def collect_job(
         "candidates_without_cv": sorted(known - set(cvs)),
         "download_failures": failures,
     }
+    if driver == "webbridge" and human_flow is not None:
+        manifest["human_flow"] = human_flow
     (folder / MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 

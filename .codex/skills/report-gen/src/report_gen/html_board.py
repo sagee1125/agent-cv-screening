@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from screening_core.candidate_id import format_candidate_label  # noqa: F401  (kept for API compatibility)
+from screening_core.hr_output import candidate_match_stem, safe_http_url
 
 _DIMENSION_LABELS = {
     "skill_match": "Skill Match",
@@ -37,7 +38,6 @@ _RADAR_TOOLTIP_IDS = (
     "core_skill_match",
     "relevant_experience",
     "role_seniority_fit",
-    "evidence_impact",
     "education_certification",
     "job_specific_match",
 )
@@ -229,8 +229,6 @@ def _axis_parts(item: dict[str, Any]) -> dict[str, Any] | None:
     metrics = item.get("evidence_metrics")
     if isinstance(metrics, dict) and metrics:
         parts["evidence_metrics"] = {str(key): value for key, value in metrics.items()}
-    if not any(key in parts for key in ("status", "summary", "gaps", "evidence_sections")):
-        return None
     return parts
 
 
@@ -259,7 +257,15 @@ def _axes(row: dict[str, Any]) -> list[dict[str, Any]]:
         score = _score(row.get(key))
         if score is None:
             continue
-        axes.append({"id": key, "label": _DIMENSION_LABELS.get(key, key), "score": score, "parts": None})
+        label = _DIMENSION_LABELS.get(key, key)
+        axes.append(
+            {
+                "id": key,
+                "label": label,
+                "score": score,
+                "parts": {"label": label, "score": score},
+            }
+        )
     return axes[:8]
 
 
@@ -349,6 +355,10 @@ def _axis_tip_panel(axis: dict[str, Any]) -> str:
     parts = axis.get("parts")
     if not isinstance(parts, dict) or not aid:
         return ""
+    if not any(
+        key in parts for key in ("status", "summary", "gaps", "evidence_sections", "evidence_metrics")
+    ):
+        return ""
     score = float(parts["score"])
     blocks = []
     head = f'<span class="tip-label">{_esc(parts["label"])}</span><span class="tip-score">{score:.1f}</span><span class="tip-muted">/100</span>'
@@ -401,23 +411,25 @@ def _axis_tips(axes: list[dict[str, Any]]) -> str:
 # Renders one always-visible explanation card for a single radar dimension.
 def _dimension_card(axis: dict[str, Any]) -> str:
     aid = str(axis.get("id") or "")
-    parts = axis.get("parts")
-    if not isinstance(parts, dict) or not aid:
+    if not aid:
         return ""
-    label = str(parts.get("label") or axis.get("label") or "")
-    score = float(parts.get("score") or 0.0)
-    status = str(parts.get("status") or "unknown").strip() or "unknown"
+    parts = axis.get("parts") if isinstance(axis.get("parts"), dict) else None
+    label = str((parts or {}).get("label") or axis.get("label") or "")
+    score_value = (parts or {}).get("score", axis.get("score"))
+    score = float(score_value) if _score(score_value) is not None else 0.0
+    status = str((parts or {}).get("status") or "").strip()
     blocks = [
         f'<div class="dim-head">'
         f'<h3 class="dim-label">{_esc(label)}</h3>'
         f'<p class="dim-score">{score:.1f}<span class="dim-total">/100</span></p>'
         f"</div>",
-        f'<p class="dim-status st-{_esc(status)}">{_esc(status.replace("_", " "))}</p>',
     ]
-    summary = str(parts.get("summary") or "").strip()
+    if status:
+        blocks.append(f'<p class="dim-status st-{_esc(status)}">{_esc(status.replace("_", " "))}</p>')
+    summary = str((parts or {}).get("summary") or "").strip()
     if summary:
         blocks.append(f'<p class="dim-summary">{_esc(summary)}</p>')
-    metrics = parts.get("evidence_metrics")
+    metrics = (parts or {}).get("evidence_metrics")
     if isinstance(metrics, dict) and metrics:
         names = {
             "presence_pct": "presence",
@@ -432,21 +444,22 @@ def _dimension_card(axis: dict[str, Any]) -> str:
         )
         if rendered:
             blocks.append(f'<p class="dim-subscores">Sub-scores: {_esc(rendered)}</p>')
-    gaps = [str(gap) for gap in (parts.get("gaps") or []) if str(gap).strip()]
+    gaps = [str(gap) for gap in ((parts or {}).get("gaps") or []) if str(gap).strip()]
     if gaps:
-        overflow = int(parts.get("gaps_overflow") or 0)
+        overflow = int((parts or {}).get("gaps_overflow") or 0)
         items = "".join(f"<li>{_esc(gap)}</li>" for gap in gaps[:3])
         if overflow > 0:
             items += f"<li>+{overflow} more</li>"
         blocks.append(f'<p class="dim-gaps-label">Key gaps</p><ul class="dim-gaps">{items}</ul>')
-    sections = parts.get("evidence_sections")
+    sections = (parts or {}).get("evidence_sections")
     if isinstance(sections, dict) and sections:
         provenance = " \u00b7 ".join(
             f"{_esc(str(section))} {count}" for section, count in sections.items()
         )
         blocks.append(f'<p class="dim-evidence">Evidence by CV section: {provenance}</p>')
+    status_class = status or "unknown"
     return (
-        f'<article class="dim-card st-{_esc(status)}" data-dim="{_esc(aid)}">'
+        f'<article class="dim-card st-{_esc(status_class)}" data-dim="{_esc(aid)}">'
         f'{"".join(blocks)}</article>'
     )
 
@@ -552,7 +565,7 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
 
 # Render the online resume link cell; em dash when no URL is known.
 def _resume_cell(row: dict[str, Any]) -> str:
-    resume_url = str(row.get("resume_url") or "").strip()
+    resume_url = safe_http_url(row.get("resume_url"))
     if not resume_url:
         return "<span class='muted'>—</span>"
     return f"<a href='{_esc(resume_url)}' target='_blank' rel='noopener'>Resume</a>"
@@ -574,10 +587,11 @@ def write_screening_board(
     table_rows = []
     for row in ranked:
         appno = str(row.get("appno") or row.get("rank") or "unknown")
+        match_stem = candidate_match_stem(appno)
         table_rows.append(
             "<tr>"
             f"<td>{_esc(row.get('rank'))}</td>"
-            f"<td><a href='{_esc(appno)}.html'>{_esc(appno)}</a></td>"
+            f"<td><a href='{_esc(match_stem)}.html'>{_esc(appno)}</a></td>"
             f"<td>{_esc(row.get('total_score'))}</td>"
             f"<td>{_esc(_tier_label(row))}</td>"
             f"<td>{_resume_cell(row)}</td>"

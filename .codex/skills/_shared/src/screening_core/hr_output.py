@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 HR_PACK_FOLDER = "workbuddy-cv-screen"
 PIPELINE_SUBDIR = "_pipeline"
@@ -123,6 +124,17 @@ def candidate_match_stem(appno: object) -> str:
     return safe_pack_id(appno, fallback="unknown")
 
 
+# Allow only http(s) resume links on HR-facing HTML; reject javascript: and other schemes.
+def safe_http_url(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return text
+
+
 # Open an HR file with the OS default app (browser for HTML).
 def open_hr_file(path: Path | str) -> None:
     target = Path(path)
@@ -150,6 +162,7 @@ __all__ = [
     "open_hr_file",
     "pipeline_work_dir",
     "resolve_hr_job_dir",
+    "safe_http_url",
     "safe_pack_id",
     "user_desktop",
 ]

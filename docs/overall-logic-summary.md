@@ -139,7 +139,7 @@ Modules are listed in **product priority** (embeddable execution first, web comp
 | 2   | **CV Parser**                      | PDF → structured candidate data (multimodal, privacy-first)                  | PyMuPDF, pypdf, pdfplumber, RapidOCR (ONNX), OpenCV, GLiNER, zai-sdk (`glm-4v-flash` / `glm-4-flash`), tenacity |
 | 3   | **JD Parser**                      | JD → must/preferred skills, languages, education, visa, experience (3 modes) | PyYAML, regex, zai-sdk; optional torch/transformers (Qwen3-0.6B)                                                |
 | 4   | **Skill Taxonomy + Matcher**       | Canonicalize skills, synonym & parent/child matching                         | PyYAML (`data/taxonomy/skill_taxonomy.yaml`), SQLAlchemy sync                                                   |
-| 5   | **Scorer / Ranker**                | Two engines: **legacy** 8-dimension score, or **matching** 6-dimension radar | Pure Python + `Decimal` (no LLM)                                                                                |
+| 5   | **Scorer / Ranker**                | Two engines: **legacy** 8-dimension score, or **matching** 5-dimension radar | Pure Python + `Decimal` (no LLM)                                                                                |
 | 6   | **Reports & Integrations**         | PDF one-pager, Excel comparison, PolyU job import                            | reportlab, openpyxl, httpx/requests, regex                                                                      |
 | 7   | **API / Web layer**                | **Compatibility** — REST, DB, frontend stepwise UI                           | FastAPI, uvicorn, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic, Docker Compose                          |
 
@@ -148,7 +148,7 @@ Modules are listed in **product priority** (embeddable execution first, web comp
 | Engine     | Dimensions                                                                                   | Typical output                                              |
 | ---------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `legacy`   | 8: skill, experience, education, research, experience quality, language, work auth, location | `dimension_scores`, `total_score`, `tier`, interview hints  |
-| `matching` | 6: core skill, relevant experience, seniority, evidence impact, education/cert, job-specific | `match_score`, `fit_band`, radar, eligibility, interview Qs |
+| `matching` | 5: core skill, relevant experience, seniority, education/cert, job-specific | `match_score`, `fit_band`, radar, eligibility, interview Qs |
 
 ---
 

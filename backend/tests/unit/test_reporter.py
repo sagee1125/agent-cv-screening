@@ -211,7 +211,6 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
                     {"id": "role_seniority_fit", "label": "Role and Seniority Fit", "score": 30},
                     {"id": "education_certification", "label": "Education and Certification", "score": 60},
-                    {"id": "evidence_impact", "label": "Evidence and Impact", "score": 20},
                     {"id": "job_specific_match", "label": "Job-Specific Match", "score": 45},
                 ],
             },
@@ -644,3 +643,97 @@ def test_html_board_tooltip_card_has_no_inner_scroll(tmp_path: Path) -> None:
     assert "max-height: none" in text
     assert "overflow: visible" in text
     assert "max-height: 94%" not in text
+
+
+# Table links use the same sanitized stem as on-disk match pages, not the raw appno.
+def test_html_board_table_link_uses_sanitized_stem(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-stem.html"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+        refno="260901004",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260901004",
+                "appno": "260901/007",
+                "total_score": 57.4,
+                "tier": "low",
+                "radar_dimensions": [
+                    {"id": "core_skill_match", "label": "Core Skill Match", "score": 50},
+                    {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
+                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 45},
+                ],
+            },
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "href='260901_007.html'" in text
+    assert "href='260901/007.html'" not in text
+    assert "Application No.: 260901/007" in text
+
+
+# Unsafe resume URLs are dropped instead of rendered as clickable links.
+def test_html_board_rejects_unsafe_resume_url(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-resume-safe.html"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+        refno="260901004",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260901004",
+                "appno": "260901007",
+                "total_score": 57.4,
+                "tier": "low",
+                "resume_url": "javascript:alert(1)",
+                "radar_dimensions": [
+                    {"id": "core_skill_match", "label": "Core Skill Match", "score": 50},
+                    {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
+                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 45},
+                ],
+            },
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "javascript:" not in text
+    assert ">Resume</a>" not in text
+
+
+# Match pages still show dimension cards when rows carry score-only radar axes.
+def test_html_candidate_match_page_score_only_dimensions(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "123456.html"
+    service.generate_candidate_match_html(
+        str(out),
+        row={
+            "rank": 1,
+            "refno": "260818001",
+            "appno": "123456",
+            "total_score": 88.5,
+            "tier": "high",
+            "radar_dimensions": [
+                {"id": "core_skill_match", "label": "Core Skill Match", "score": 90.0},
+                {"id": "relevant_experience", "label": "Relevant Experience", "score": 85.0},
+                {"id": "job_specific_match", "label": "Job-Specific Match", "score": 72.5},
+            ],
+        },
+        position_name="Project Associate",
+        report_date=datetime(2026, 1, 1),
+    )
+    text = out.read_text(encoding="utf-8")
+    assert '<article class="dim-card st-unknown" data-dim="core_skill_match"' in text
+    assert '<h3 class="dim-label">Core Skill Match</h3>' in text
+    assert '<p class="dim-score">90.0<span class="dim-total">/100</span></p>' in text
+    assert '<div class="radar-tip" data-tip=' not in text

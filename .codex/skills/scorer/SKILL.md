@@ -68,7 +68,7 @@ Output JSON:
 
 ### `match` - run the deterministic matching engine (radar + interview questions)
 
-Runs the same pure six-dimension engine the frontend candidate-match modal uses. The output detail payload (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions`, `top_strengths`, `key_gaps`, `interview_questions`) feeds `report-gen candidate --detail` to render the modal-style PDF.
+Runs the same pure five-dimension engine the frontend candidate-match modal uses. The output detail payload (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions`, `top_strengths`, `key_gaps`, `interview_questions`) feeds `report-gen candidate --detail` to render the modal-style PDF.
 
 ```bash
 venv/Scripts/python.exe .codex/skills/scorer/scripts/run_score.py match --jd-structured <jd_structured.json> --cv-extracted <extracted.json> [--reference-date YYYY-MM-DD] [--output detail.json]

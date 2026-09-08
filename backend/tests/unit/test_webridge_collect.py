@@ -157,7 +157,7 @@ def test_collect_webridge_driver_writes_folder(tmp_path) -> None:
     assert manifest["cv_downloaded"] == ["2600827004"]
 
 
-# When the job row is not found on the list page, the WebBridge flow falls back to the records URL directly.
+# When the list filter cannot be driven, collection falls back to the direct records URL and records it.
 def test_collect_webridge_human_flow_falls_back_to_records_url(tmp_path) -> None:
     class FakeBrowser:
         # Record navigations + CDP calls and return the demo page HTML.
@@ -194,6 +194,41 @@ def test_collect_webridge_human_flow_falls_back_to_records_url(tmp_path) -> None
 
     assert browser.urls == [DEMO_BASE_URL + "/", RECORDS_URL]
     assert manifest["refno"] == "2600827001"
+    assert manifest["human_flow"] == "fallback_direct_url"
+
+
+# A successful View-link click is recorded as view_link on the manifest.
+def test_collect_webridge_human_flow_view_link(tmp_path) -> None:
+    class FakeBrowser:
+        def __init__(self):
+            self.urls = []
+
+        def navigate(self, url, *, new_tab=True, group_title=None):
+            self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            pass
+
+        def evaluate(self, code):
+            return {"typed": True, "clicked": True, "href": RECORDS_URL, "text": "View"}
+
+        def page_html(self):
+            return DEMO_HTML
+
+        def fetch_bytes(self, url):
+            return b"%PDF"
+
+    browser = FakeBrowser()
+    folder = tmp_path / "job"
+    manifest = collect.collect_job(
+        records_url=RECORDS_URL,
+        folder=folder,
+        driver="webbridge",
+        base_url=DEMO_BASE_URL,
+        refno="2600827001",
+        client=browser,  # type: ignore[arg-type]
+    )
+    assert manifest["human_flow"] == "view_link"
 
 
 # A records page that returns the wrong job is refused (never collects a wrong report).
@@ -506,6 +541,14 @@ def test_ensure_daemon_start_fails(monkeypatch) -> None:
     monkeypatch.setattr(client_mod, "_daemon_reachable", lambda url, timeout=2.0: False)
     monkeypatch.setattr(client_mod, "_start_daemon_process", lambda: False)
     assert ensure_webbridge_daemon(wait_seconds=0.5) is False
+
+
+# ensure_webbridge_daemon returns False when the daemon is up but the extension never connects.
+def test_ensure_daemon_extension_never_connects(monkeypatch) -> None:
+    monkeypatch.setattr(client_mod, "_daemon_reachable", lambda url, timeout=2.0: True)
+    monkeypatch.setattr(client_mod, "_extension_connected", lambda url, timeout=2.0: False)
+    monkeypatch.setattr(client_mod.time, "sleep", lambda *a, **k: None)
+    assert ensure_webbridge_daemon(wait_seconds=0.5, extension_wait=0.5) is False
 
 
 # close_session_tabs counts the tabs the daemon reports as closed.

@@ -215,7 +215,7 @@ def _activation_map(config: dict[str, Any], jd_data: dict[str, Any]) -> dict[str
 def _validate_and_normalize(config: dict[str, Any], jd_data: dict[str, Any]) -> None:
     dimensions = config.get("dimensions")
     if not isinstance(dimensions, dict) or set(dimensions) != set(DIMENSION_IDS):
-        raise MatchingConfigError("dimensions must contain exactly the six fixed dimension IDs")
+        raise MatchingConfigError("dimensions must contain exactly the five fixed dimension IDs")
     activation = _activation_map(config, jd_data)
     active_weight = 0.0
     for dimension_id in DIMENSION_IDS:

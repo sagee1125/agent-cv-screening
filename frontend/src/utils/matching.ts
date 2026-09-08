@@ -13,22 +13,20 @@ import type {
   RadarSummary,
 } from "../types";
 
-/** Canonical order of the six candidate matching radar dimensions. */
+/** Canonical order of the five candidate matching radar dimensions. */
 export const MATCHING_DIMENSION_ORDER = [
   "core_skill_match",
   "relevant_experience",
   "role_seniority_fit",
-  "evidence_impact",
   "education_certification",
   "job_specific_match",
 ] as const;
 
-/** Human-readable labels for the six candidate matching radar dimensions. */
+/** Human-readable labels for the five candidate matching radar dimensions. */
 export const MATCHING_DIMENSION_LABELS: Record<string, string> = {
   core_skill_match: "Core Skill Match",
   relevant_experience: "Relevant Experience",
   role_seniority_fit: "Role & Seniority Fit",
-  evidence_impact: "Evidence & Impact",
   education_certification: "Education & Certification",
   job_specific_match: "Job-Specific Match",
 };

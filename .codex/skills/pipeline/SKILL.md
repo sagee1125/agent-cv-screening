@@ -41,7 +41,7 @@ venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
 | **Reports**                       |                                                                                                                                         |
 | `--position <title>`              | Job title shown on reports (required unless `--skip-reports`)                                                                           |
 | `--refno <id>`                    | Job reference number. Together with each CV's application no. (from the filename) this is the only candidate label; names are never shown |
-| `--engine <legacy\|matching>`     | Scoring engine: `legacy` (default, ScorerService) or `matching` (six-dimension engine that renders the modal-style radar/interview PDF) |
+| `--engine <legacy\|matching>`     | Scoring engine: `legacy` (default, ScorerService) or `matching` (five-dimension engine that renders the modal-style radar/interview PDF) |
 | `--reference-date <YYYY-MM-DD>`   | Reference date for the matching engine (default: today)                                                                                 |
 | `--skip-reports`                  | Score + rank only; skip PDF/Excel generation                                                                                            |
 | `--output-dir <dir>`              | Output directory for intermediate JSONs and reports (default `data/pipeline_out`)                                                       |
@@ -62,7 +62,7 @@ venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
 ## Engine modes
 
 - **`legacy` (default)**: `scorer build-config` + `scorer score` -> `dimension_scores` + `interview_suggestions`. PDF radar is drawn from `dimension_scores`.
-- **`matching`**: `scorer match` per candidate -> the same radar/interview-question detail payload the frontend candidate-match modal shows (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions` with per-dimension reasoning/gaps, `interview_questions`). PDFs render the modal content: radar chart, dimension details, and suggested interview questions. The Excel rows map `core_skill_match` / `relevant_experience` / `education_certification` / `evidence_impact` to the standard comparison columns.
+- **`matching`**: `scorer match` per candidate -> the same radar/interview-question detail payload the frontend candidate-match modal shows (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions` with per-dimension reasoning/gaps, `interview_questions`). PDFs render the modal content: radar chart, dimension details, and suggested interview questions. The Excel rows map `core_skill_match` / `relevant_experience` / `education_certification` to the standard Skill / Experience / Education comparison columns.
 
 ## Output manifest
 

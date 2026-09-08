@@ -11,7 +11,6 @@ DimensionId = Literal[
     "core_skill_match",
     "relevant_experience",
     "role_seniority_fit",
-    "evidence_impact",
     "education_certification",
     "job_specific_match",
 ]
@@ -97,8 +96,8 @@ class MatchingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "1.0.0"
-    algorithm_version: str = "candidate-matching-v1"
+    schema_version: str = "2.0.0"
+    algorithm_version: str = "candidate-matching-v2"
     dimensions: dict[DimensionId, MatchingDimensionConfig]
     must_skills: list[MatchingSkillRequirement] = Field(default_factory=list)
     eligibility_rules: list[MatchingEligibilityRule] = Field(default_factory=list)
@@ -108,19 +107,18 @@ class MatchingConfig(BaseModel):
         default_factory=InterviewQuestionPolicy
     )
 
-    # Require all and only the fixed six matching dimensions.
+    # Require all and only the fixed five matching dimensions.
     @model_validator(mode="after")
     def validate_dimension_contract(self) -> MatchingConfig:
         required = {
             "core_skill_match",
             "relevant_experience",
             "role_seniority_fit",
-            "evidence_impact",
             "education_certification",
             "job_specific_match",
         }
         if set(self.dimensions) != required:
-            raise ValueError("dimensions must contain exactly the six fixed dimension IDs")
+            raise ValueError("dimensions must contain exactly the five fixed dimension IDs")
         return self
 
 

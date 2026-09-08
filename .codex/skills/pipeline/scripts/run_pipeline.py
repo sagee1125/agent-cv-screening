@@ -9,7 +9,7 @@ need_input envelope when JD/CVs/position are missing.
 
 Two scoring engines are supported:
 - legacy (default): the deterministic ScorerService (dimension_scores + interview_suggestions).
-- matching: the six-dimension candidate_matching engine, which emits the same
+- matching: the five-dimension candidate_matching engine, which emits the same
   radar/interview-question detail payload the frontend modal shows, and renders
   that content in the PDF reports.
 
@@ -35,7 +35,7 @@ from pathlib import Path
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
 from screening_core.board_tooltip import public_radar_dimensions
-from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem
+from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem, safe_http_url
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
     extra_allowed_hosts_from_env,
@@ -558,9 +558,9 @@ def _load_resume_links(out_dir: Path) -> dict[str, str]:
 def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
     public = {key: value for key, value in row.items() if not str(key).startswith("_")}
     if resume_links and row.get("appno"):
-        resume_url = resume_links.get(str(row.get("appno")))
+        resume_url = safe_http_url(resume_links.get(str(row.get("appno"))))
         if resume_url:
-            public["resume_url"] = str(resume_url)
+            public["resume_url"] = resume_url
     detail_path = row.get("_detail")
     if not detail_path:
         return public
