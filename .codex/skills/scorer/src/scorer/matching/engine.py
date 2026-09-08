@@ -70,6 +70,11 @@ CORE_LINKAGE_WEIGHT = 0.2
 EXPERIENCE_TIME_WEIGHT = 0.7
 EXPERIENCE_QUALITY_WEIGHT = 0.3
 
+# Preferred skills form a lower second tier inside Core: must:preferred = 3:1 by item weight.
+PREFERRED_TIER_WEIGHT = 1.0 / 3.0
+# Must-only coverage below this floor caps the Core score so preferred skills cannot mask missing musts.
+MUST_COVERAGE_FLOOR = 60.0
+
 # Major keywords that satisfy a JD "business-related or related quantitative" clause.
 _QUANT_BUSINESS_TERMS = (
     "business", "finance", "economics", "accounting", "actuarial", "analytics",
@@ -292,12 +297,14 @@ def _skill_evidence(
 
 
 
-def _requirement_record(item: dict[str, Any], requirement_id: str, text: str) -> dict[str, Any]:
+def _requirement_record(
+    item: dict[str, Any], requirement_id: str, text: str, section: str = "must_skills"
+) -> dict[str, Any]:
     provenance = item.get("provenance")
     if isinstance(provenance, dict):
         source = {
             "document": "jd",
-            "section": "must_skills",
+            "section": section,
             "source_sentence": provenance.get("source_sentence"),
             "char_start": provenance.get("source_char_start"),
             "char_end": provenance.get("source_char_end"),
@@ -381,8 +388,7 @@ def _dimension(
     }
 
 
-# Scores weighted must-skill coverage and records exact evidence or gaps.
-# Scores weighted must-skill presence plus evidence linkage (any structured source counts).
+# Scores must-have and preferred skills as two tiers of one Core axis with evidence linkage.
 def _score_core(
     config: dict[str, Any],
     cv: dict[str, Any],
@@ -396,19 +402,24 @@ def _score_core(
     evidence: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
     matches: dict[str, tuple[float, dict[str, Any] | None]] = {}
-    earned = total = confidence_points = 0.0
-    matched_count = linked_count = 0
-    for item in config["must_skills"]:
+    must_records = config.get("must_skills") or []
+    preferred_records = config.get("preferred_skills") or []
+    earned = total = must_earned = must_total = confidence_points = 0.0
+    matched_count = linked_count = must_met_count = preferred_met_count = 0
+    for item in must_records:
         requirement_id = str(item["skill_id"])
         skill = normalize_token(item["canonical_skill"])
         display = str(item.get("display_name") or skill.replace("_", " ").title())
         weight = float(item.get("weight", 1.0))
         strength, source, linked = _skill_evidence(skill, sources, relation_resolver)
-        requirements.append(_requirement_record(item, requirement_id, display))
+        requirements.append(_requirement_record(item, requirement_id, display, section="must_skills"))
         matches[requirement_id] = (strength, source)
-        total += weight
+        must_earned += weight * strength
+        must_total += weight
         earned += weight * strength
+        total += weight
         if strength > 0:
+            must_met_count += 1
             matched_count += 1
             if linked:
                 linked_count += 1
@@ -425,15 +436,57 @@ def _score_core(
                 }
             )
             confidence_points += weight * 55.0
-    presence = 100.0 * earned / total
+    for item in preferred_records:
+        requirement_id = str(item["skill_id"])
+        skill = normalize_token(item["canonical_skill"])
+        display = str(item.get("display_name") or skill.replace("_", " ").title())
+        tier_weight = float(item.get("weight", 1.0)) * PREFERRED_TIER_WEIGHT
+        strength, source, _ = _skill_evidence(skill, sources, relation_resolver)
+        requirements.append(_requirement_record(item, requirement_id, display, section="preferred_skills"))
+        earned += tier_weight * strength
+        total += tier_weight
+        if strength > 0:
+            preferred_met_count += 1
+        if source:
+            match_type = "exact" if strength == 1.0 else "related"
+            evidence.append(_evidence_record(source, [requirement_id], match_type))
+            confidence_points += tier_weight * (92.0 if source["structured"] and strength == 1.0 else 72.0)
+        else:
+            gaps.append(
+                {
+                    "requirement_id": requirement_id,
+                    "reason_code": "PREFERRED_SKILL_MISSING",
+                    "text": f"No explicit {display} evidence was found (preferred skill).",
+                }
+            )
+            confidence_points += tier_weight * 55.0
+    must_presence = 100.0 * must_earned / must_total if must_total else 0.0
+    presence = 100.0 * earned / total if total else 0.0
     linkage = 100.0 * (linked_count / matched_count) if matched_count else 0.0
     score = _round(CORE_PRESENCE_WEIGHT * presence + CORE_LINKAGE_WEIGHT * linkage)
-    met_count = sum(1 for strength, _ in matches.values() if strength > 0)
+    floor_applied = False
+    if must_presence < MUST_COVERAGE_FLOOR:
+        if score > MUST_COVERAGE_FLOOR:
+            score = _round(MUST_COVERAGE_FLOOR)
+            floor_applied = True
+        floor_text = (
+            f"Must-have skill coverage is {_round(must_presence)}%, below the "
+            f"{MUST_COVERAGE_FLOOR:g} floor"
+        )
+        floor_text += f"; the Core score is capped at {MUST_COVERAGE_FLOOR:g}." if floor_applied else "."
+        gaps.append(
+            {
+                "requirement_id": "must_coverage_floor",
+                "reason_code": "MUST_COVERAGE_FLOOR",
+                "text": floor_text,
+            }
+        )
     gap_list = ", ".join(gap["text"] for gap in gaps) or "none"
     summary = (
         f"Core Skill Match: {_round(score)}/100 (presence {_round(presence)}%, "
-        f"linkage {_round(linkage)}%). The CV supports {met_count} of {len(requirements)} "
-        f"weighted must skills. Key gaps: {gap_list}."
+        f"linkage {_round(linkage)}%). The CV supports {must_met_count} of {len(must_records)} "
+        f"weighted must skills and {preferred_met_count} of {len(preferred_records)} preferred "
+        f"skills. Key gaps: {gap_list}."
     )
     status = "met" if score >= 80 else "partial" if evidence else "not_met"
     return (
@@ -450,15 +503,19 @@ def _score_core(
             {
                 "presence_pct": _round(presence),
                 "linkage_pct": _round(linkage),
+                "must_coverage_pct": _round(must_presence),
+                "score_capped_by_must_floor": floor_applied,
                 "weighted_requirements_met": _round(earned),
                 "weighted_requirements_total": _round(total),
             },
-            confidence_points / total,
+            confidence_points / total if total else 0.0,
         ),
         matches,
     )
+
 def _relevant_experiences(config: dict[str, Any], cv: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
-    tokens = {item["canonical_skill"] for item in config["must_skills"]}
+    tokens = {item["canonical_skill"] for item in config.get("must_skills") or []}
+    tokens.update(item["canonical_skill"] for item in config.get("preferred_skills") or [])
     for item in config["job_specific_requirements"]:
         parameters = item.get("parameters") or {}
         tokens.add(normalize_token(parameters.get("canonical_skill") or parameters.get("domain")))
@@ -1047,8 +1104,11 @@ def _build_questions(
     skill_lookup = {item["requirement_id"]: item["text"] for item in core["requirements"]}
     skill_weights = {str(item["skill_id"]): float(item.get("weight", 1.0)) for item in config["must_skills"]}
     for gap in sorted(core["gaps"], key=lambda item: (-skill_weights.get(item["requirement_id"], 0), item["requirement_id"])):
+        if gap["reason_code"] == "MUST_COVERAGE_FLOOR":
+            continue
         requirement = skill_lookup.get(gap["requirement_id"], gap["requirement_id"])
-        _question(candidates, "IQ-MISSING-001", "high", "core_skill_match", gap["reason_code"], [gap["requirement_id"]], f"We could not find clear evidence of {requirement} in your CV. Do you have relevant experience? If so, please describe a specific example.", {"requirement": requirement})
+        priority = "high" if gap["reason_code"] != "PREFERRED_SKILL_MISSING" else "medium"
+        _question(candidates, "IQ-MISSING-001", priority, "core_skill_match", gap["reason_code"], [gap["requirement_id"]], f"We could not find clear evidence of {requirement} in your CV. Do you have relevant experience? If so, please describe a specific example.", {"requirement": requirement})
     active = [item for item in dimensions if item["active"]]
     if active:
         lowest = min(active, key=lambda item: (item["score"], DIMENSION_IDS.index(item["dimension_id"])))

@@ -204,6 +204,7 @@ def test_related_skill_strength_is_seventy_percent() -> None:
     jd["must_skills"] = [
         {"skill_id": "postgresql_1", "canonical_skill": "postgresql", "weight": 1.0}
     ]
+    jd["preferred_skills"] = []
     cv = _cv()
     cv["skills"] = [{"canonical_skill": "sql"}]
     cv["experience"][0]["skills_used"] = ["sql"]
@@ -519,3 +520,135 @@ def test_field_rule_accepts_quantitative_fallback_marker() -> None:
     assert field["status"] == "not_met"
     assert field["reason_code"] == "FIELD_OF_STUDY_NOT_MET"
     assert field["requirement"].startswith("Mandatory field of study")
+
+# Verifies preferred skills score as a lower tier and the must floor caps zero-must candidates.
+def test_preferred_tier_scores_below_musts_and_must_floor_caps() -> None:
+    cv = _cv()
+    must_jd = _jd()
+    must_jd["must_skills"] = [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}]
+    must_jd["preferred_skills"] = []
+    preferred_jd = copy.deepcopy(must_jd)
+    preferred_jd["must_skills"] = []
+    preferred_jd["preferred_skills"] = [
+        {"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}
+    ]
+
+    must_core = match_candidate(cv, build_matching_config(must_jd), "2026-01-31")["radar_dimensions"][0]
+    preferred_core = match_candidate(cv, build_matching_config(preferred_jd), "2026-01-31")["radar_dimensions"][0]
+
+    assert must_core["score"] == 100.0
+    assert preferred_core["score"] == 60.0
+    assert preferred_core["score"] < must_core["score"]
+    assert preferred_core["reasoning"]["facts"]["score_capped_by_must_floor"] is True
+
+
+# Verifies the must-coverage floor caps Core even when preferred skills lift blended presence.
+def test_must_coverage_floor_caps_when_preferred_lift_presence() -> None:
+    cv = _cv()
+    cv["experience"][0]["skills_used"] = ["python", "aws"]
+    jd = _jd()
+    jd["must_skills"] = [
+        {"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0},
+        {"skill_id": "docker_1", "canonical_skill": "docker", "weight": 1.0},
+    ]
+    jd["preferred_skills"] = [{"skill_id": "aws_1", "canonical_skill": "aws", "weight": 3.0}]
+
+    core = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][0]
+
+    assert core["reasoning"]["facts"]["must_coverage_pct"] == 50.0
+    assert core["score"] == 60.0
+    assert core["reasoning"]["facts"]["score_capped_by_must_floor"] is True
+    assert any(gap["reason_code"] == "MUST_COVERAGE_FLOOR" for gap in core["gaps"])
+
+
+# Verifies preferred-skill gaps demote IQ-MISSING-001 to medium, never high.
+def test_preferred_gap_is_medium_priority_not_high() -> None:
+    jd = _jd()
+    jd["must_skills"] = [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}]
+    jd["preferred_skills"] = [{"skill_id": "aws_1", "canonical_skill": "aws", "weight": 1.0}]
+    jd["language_requirements"] = []
+    jd["visa_requirement"] = {"requirement_type": "unknown"}
+    jd["experience_requirement"] = {}
+    cv = {
+        "skills": [],
+        "experience": [],
+        "education": [],
+        "languages": [],
+        "projects": [],
+        "certifications": [],
+        "publications": [],
+    }
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    missing = [q for q in result["interview_questions"] if q["template_id"] == "IQ-MISSING-001"]
+
+    assert missing
+    assert all(q["priority"] in {"high", "medium"} for q in missing)
+    python_q = next(q for q in missing if "python" in q["variables"].get("requirement", "").lower())
+    aws_q = next(q for q in missing if "aws" in q["variables"].get("requirement", "").lower())
+    assert python_q["priority"] == "high"
+    assert aws_q["priority"] == "medium"
+
+
+# Verifies preferred-skill tokens still keep relevant experience relevant once they leave job-specific.
+def test_preferred_tokens_keep_relevant_experience_relevant() -> None:
+    jd = {
+        "must_skills": [],
+        "preferred_skills": [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {"minimum_years": 1},
+        "jd_overview": {"job_title": "Python Engineer"},
+    }
+    cv = {
+        "skills": [],
+        "experience": [
+            {
+                "job_title": "Backend Engineer",
+                "start_date": "2022-01",
+                "end_date": "2024-12",
+                "description": "Built Python services reducing latency by 30%.",
+                "skills_used": ["python"],
+            }
+        ],
+        "education": [],
+    }
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    experience = result["radar_dimensions"][1]
+
+    assert experience["active"] is True
+    assert experience["reasoning"]["facts"]["relevant_years"] >= 2.0
+    assert experience["score"] > 0
+
+
+# Verifies preferred skills move into the config core tier, leaving job_specific with languages only.
+def test_config_moves_preferred_skills_into_core_tier() -> None:
+    config = build_matching_config(_jd()).config
+
+    assert {item["evaluator_type"] for item in config["job_specific_requirements"]} == {"language"}
+    assert [item["canonical_skill"] for item in config["preferred_skills"]] == ["aws"]
+    assert config["preferred_skills"][0]["weight"] == 0.6
+    assert config["dimensions"]["core_skill_match"]["active"] is True
+
+
+# Verifies Core stays active when a JD lists preferred skills but no must skills.
+def test_core_stays_active_with_preferred_skills_only() -> None:
+    jd = _jd()
+    jd["must_skills"] = []
+
+    effective = build_matching_config(jd)
+
+    assert effective.config["dimensions"]["core_skill_match"]["active"] is True
+
+
+# Verifies protected attributes cannot sneak in through the preferred skill tier.
+def test_protected_preferred_skill_is_rejected() -> None:
+    jd = _jd()
+    jd["preferred_skills"].append(
+        {"skill_id": "bad_1", "canonical_skill": "nationality", "weight": 1.0}
+    )
+
+    with pytest.raises(MatchingConfigError):
+        build_matching_config(jd)

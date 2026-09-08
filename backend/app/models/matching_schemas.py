@@ -96,10 +96,11 @@ class MatchingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "2.0.0"
+    schema_version: str = "2.1.0"
     algorithm_version: str = "candidate-matching-v2"
     dimensions: dict[DimensionId, MatchingDimensionConfig]
     must_skills: list[MatchingSkillRequirement] = Field(default_factory=list)
+    preferred_skills: list[MatchingSkillRequirement] = Field(default_factory=list)
     eligibility_rules: list[MatchingEligibilityRule] = Field(default_factory=list)
     job_specific_requirements: list[JobSpecificRequirement] = Field(default_factory=list)
     fit_bands: MatchingFitBands = Field(default_factory=MatchingFitBands)

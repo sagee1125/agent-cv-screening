@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.1.0"
 ALGORITHM_VERSION = "candidate-matching-v2"
 DIMENSION_IDS = (
     "core_skill_match",

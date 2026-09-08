@@ -28,7 +28,7 @@ JOB_POST_ID = UUID("00000000-0000-0000-0000-000000000099")
 def _config_payload() -> dict:
     return {
         "config": {
-            "schema_version": "2.0.0",
+            "schema_version": "2.1.0",
             "algorithm_version": "candidate-matching-v2",
             "dimensions": {
                 "core_skill_match": {"enabled": True, "weight": 0.38},
@@ -81,7 +81,7 @@ def test_matching_database_metadata_contains_required_tables_and_columns() -> No
 # Confirm Pydantic accepts the fixed five-ID matching configuration contract.
 def test_matching_config_request_accepts_fixed_contract() -> None:
     parsed = MatchingConfigUpdateRequest.model_validate(_config_payload())
-    assert parsed.config.schema_version == "2.0.0"
+    assert parsed.config.schema_version == "2.1.0"
     assert len(parsed.config.dimensions) == 5
 
 

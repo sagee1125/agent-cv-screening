@@ -42,7 +42,7 @@ def _records(value: Any) -> list[dict[str, Any]]:
 
 
 # Merges canonical requirement records while preserving stable source identity.
-def _merge_must_skills(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _merge_skill_requirements(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(sources, start=1):
         canonical = normalize_token(
@@ -71,25 +71,17 @@ def _build_must_skills(jd_data: dict[str, Any], legacy_weight_config: dict[str, 
     sources = _records(jd_data.get("must_skills"))
     if not sources and legacy_weight_config:
         sources = _records(legacy_weight_config.get("skills"))
-    return _merge_must_skills(sources)
+    return _merge_skill_requirements(sources)
 
 
-# Converts parsed JD fields into supported job-specific evaluators.
+# Builds merged preferred skill requirements from JD structured data.
+def _build_preferred_skills(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
+    return _merge_skill_requirements(_records(jd_data.get("preferred_skills")))
+
+
+# Converts parsed JD language requirements into job-specific evaluators.
 def _build_job_specific(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
     requirements: list[dict[str, Any]] = []
-    for item in _records(jd_data.get("preferred_skills")):
-        skill = normalize_token(item.get("canonical_skill") or item.get("display_name"))
-        if skill:
-            requirements.append(
-                {
-                    "requirement_id": str(item.get("skill_id") or f"preferred_{skill}"),
-                    "evaluator_type": "preferred_skill",
-                    "weight": float(item.get("weight", 1.0)),
-                    "mandatory": False,
-                    "parameters": {"canonical_skill": skill},
-                    "provenance": copy.deepcopy(item.get("provenance")),
-                }
-            )
     for index, item in enumerate(_records(jd_data.get("language_requirements")), start=1):
         language = str(item.get("language") or "").strip()
         if language:
@@ -194,6 +186,7 @@ def _has_education_requirement(jd_data: dict[str, Any], specific: list[dict[str,
 # Calculates applicability independently from candidate evidence.
 def _activation_map(config: dict[str, Any], jd_data: dict[str, Any]) -> dict[str, bool]:
     must = config["must_skills"]
+    preferred = config.get("preferred_skills") or []
     specific = config["job_specific_requirements"]
     experience = jd_data.get("experience_requirement") or {}
     overview = jd_data.get("jd_overview") or {}
@@ -201,8 +194,8 @@ def _activation_map(config: dict[str, Any], jd_data: dict[str, Any]) -> dict[str
         isinstance(overview, dict) and (overview.get("job_title") or overview.get("job_titles"))
     )
     return {
-        "core_skill_match": bool(must),
-        "relevant_experience": bool(must or specific or has_role or experience),
+        "core_skill_match": bool(must or preferred),
+        "relevant_experience": bool(must or preferred or specific or has_role or experience),
         "role_seniority_fit": bool(config.get("target_seniority")),
         "education_certification": _has_education_requirement(
             {"education_requirement": config.get("education_requirement")}, specific
@@ -230,7 +223,7 @@ def _validate_and_normalize(config: dict[str, Any], jd_data: dict[str, Any]) -> 
         settings["active"] = settings["enabled"] and activation[dimension_id]
         if settings["active"]:
             active_weight += weight
-    for collection_name in ("must_skills", "job_specific_requirements"):
+    for collection_name in ("must_skills", "preferred_skills", "job_specific_requirements"):
         for item in _records(config.get(collection_name)):
             weight = float(item.get("weight", 1.0))
             if weight <= 0 or not math.isfinite(weight):
@@ -249,7 +242,7 @@ def _validate_and_normalize(config: dict[str, Any], jd_data: dict[str, Any]) -> 
             raise MatchingConfigError("protected attributes cannot be matching requirements")
     protected_skills = {
         normalize_token(item.get("canonical_skill"))
-        for item in _records(config.get("must_skills"))
+        for item in _records(config.get("must_skills")) + _records(config.get("preferred_skills"))
     }
     education = config.get("education_requirement") or {}
     protected_education = {
@@ -295,6 +288,7 @@ def build_matching_config(
             for dimension_id, weight in DEFAULT_WEIGHTS.items()
         },
         "must_skills": _build_must_skills(jd_structured_data, legacy_weight_config),
+        "preferred_skills": _build_preferred_skills(jd_structured_data),
         "eligibility_rules": _build_eligibility_rules(jd_structured_data),
         "job_specific_requirements": _build_job_specific(jd_structured_data),
         "education_requirement": copy.deepcopy(jd_structured_data.get("education_requirement") or {}),
@@ -308,9 +302,11 @@ def build_matching_config(
     base["schema_version"] = SCHEMA_VERSION
     base["algorithm_version"] = ALGORITHM_VERSION
     base.setdefault("must_skills", [])
+    base.setdefault("preferred_skills", [])
     base.setdefault("eligibility_rules", [])
     base.setdefault("job_specific_requirements", [])
-    base["must_skills"] = _merge_must_skills(_records(base["must_skills"]))
+    base["must_skills"] = _merge_skill_requirements(_records(base["must_skills"]))
+    base["preferred_skills"] = _merge_skill_requirements(_records(base["preferred_skills"]))
     _validate_and_normalize(base, jd_structured_data)
     canonical_json = json.dumps(base, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return EffectiveConfig(
