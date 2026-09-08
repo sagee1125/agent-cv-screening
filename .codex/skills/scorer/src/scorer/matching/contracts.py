@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 
-SCHEMA_VERSION = "2.1.0"
+SCHEMA_VERSION = "2.2.0"
 ALGORITHM_VERSION = "candidate-matching-v2"
 DIMENSION_IDS = (
     "core_skill_match",
@@ -29,6 +29,10 @@ DIMENSION_LABELS = {
     "language_match": "Language Match",
 }
 
+# NOTE: the language constants below are imported BY THE JD PARSER
+# (jd_parser/service.py), i.e. an upstream skill depends on this module. That inversion is
+# deliberate: parser and scorer must agree on one proficiency ladder and one CJK alias table.
+# Keep this block dependency-free (stdlib only) so the parser can import it cheaply.
 # Canonical spoken-language proficiency ranking shared by parser and matching engine.
 LANGUAGE_LEVEL_RANK = {"basic": 0, "business": 1, "fluent": 2, "native": 3}
 # Demand multiplier per required proficiency level used to weight language requirements.
