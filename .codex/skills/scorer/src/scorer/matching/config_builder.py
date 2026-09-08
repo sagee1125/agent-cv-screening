@@ -42,6 +42,13 @@ def _records(value: Any) -> list[dict[str, Any]]:
 
 
 # Merges canonical requirement records while preserving stable source identity.
+# Forces each preferred skill to a unit weight before the tier factor applies.
+def _normalize_preferred_weights(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for record in records:
+        record["weight"] = 1.0
+    return records
+
+
 def _merge_skill_requirements(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(sources, start=1):
@@ -74,9 +81,10 @@ def _build_must_skills(jd_data: dict[str, Any], legacy_weight_config: dict[str, 
     return _merge_skill_requirements(sources)
 
 
-# Builds merged preferred skill requirements from JD structured data.
+# Builds merged preferred skill requirements from JD structured data, normalized to unit weight.
 def _build_preferred_skills(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
-    return _merge_skill_requirements(_records(jd_data.get("preferred_skills")))
+    records = _merge_skill_requirements(_records(jd_data.get("preferred_skills")))
+    return _normalize_preferred_weights(records)
 
 
 # Converts parsed JD language requirements into job-specific evaluators.
@@ -306,7 +314,9 @@ def build_matching_config(
     base.setdefault("eligibility_rules", [])
     base.setdefault("job_specific_requirements", [])
     base["must_skills"] = _merge_skill_requirements(_records(base["must_skills"]))
-    base["preferred_skills"] = _merge_skill_requirements(_records(base["preferred_skills"]))
+    base["preferred_skills"] = _normalize_preferred_weights(
+        _merge_skill_requirements(_records(base["preferred_skills"]))
+    )
     _validate_and_normalize(base, jd_structured_data)
     canonical_json = json.dumps(base, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return EffectiveConfig(

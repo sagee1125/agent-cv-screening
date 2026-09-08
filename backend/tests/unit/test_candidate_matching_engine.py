@@ -560,6 +560,7 @@ def test_must_coverage_floor_caps_when_preferred_lift_presence() -> None:
         {"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0},
         {"skill_id": "docker_1", "canonical_skill": "docker", "weight": 1.0},
     ]
+    # Stored preferred weight is normalized to 1.0, so it always counts 1/3 of a must here.
     jd["preferred_skills"] = [{"skill_id": "aws_1", "canonical_skill": "aws", "weight": 3.0}]
 
     core = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][0]
@@ -638,7 +639,7 @@ def test_config_moves_preferred_skills_into_core_tier() -> None:
 
     assert {item["evaluator_type"] for item in config["job_specific_requirements"]} == {"language"}
     assert [item["canonical_skill"] for item in config["preferred_skills"]] == ["aws"]
-    assert config["preferred_skills"][0]["weight"] == 0.6
+    assert config["preferred_skills"][0]["weight"] == 1.0  # JD parser 0.6 is normalized to unit
     assert config["dimensions"]["core_skill_match"]["active"] is True
 
 
@@ -661,3 +662,20 @@ def test_protected_preferred_skill_is_rejected() -> None:
 
     with pytest.raises(MatchingConfigError):
         build_matching_config(jd)
+
+# Verifies preferred parser weights (0.6) are normalized to 1.0 before the tier factor.
+def test_preferred_weight_is_normalized_to_unit_before_tier() -> None:
+    jd = _jd()
+    jd["must_skills"] = [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}]
+    jd["preferred_skills"] = [{"skill_id": "aws_1", "canonical_skill": "aws", "weight": 0.6}]
+    jd["language_requirements"] = []
+    jd["visa_requirement"] = {"requirement_type": "unknown"}
+    jd["experience_requirement"] = {}
+    cv = {"skills": [{"canonical_skill": "aws"}], "experience": [], "education": []}
+
+    config = build_matching_config(jd)
+    assert config.config["preferred_skills"][0]["weight"] == 1.0
+
+    core = match_candidate(cv, config, "2026-01-31")["radar_dimensions"][0]
+    # 3:1 tier -> presence = (1/3)/(1 + 1/3) * 100 = 25 -> 0.8 * 25 = 20 (not 13.33).
+    assert core["score"] == 20.0
