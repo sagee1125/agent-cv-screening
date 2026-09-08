@@ -434,6 +434,7 @@ def _run_legacy_engine(
     jd_source: Path,
     candidates: list[dict],
     failures: list[Failure],
+    jd_text: str | None = None,
 ) -> int:
     """Run build-config + score + rank + reports with the legacy ScorerService."""
     config_out = out_dir / "config.json"
@@ -525,6 +526,7 @@ def _run_matching_engine(
     jd_source: Path,
     candidates: list[dict],
     failures: list[Failure],
+    jd_text: str | None = None,
 ) -> int:
     """Run the matching engine per candidate and render modal-style radar/interview PDFs."""
     reference_date = args.reference_date or date.today().isoformat()
@@ -616,8 +618,38 @@ def _row_report_fingerprint(args: argparse.Namespace, row: dict) -> str:
     )
 
 
+# Resolve report-gen JD inputs and a digest that invalidates the board when JD content changes.
+def _report_jd_inputs(
+    out_dir: Path, jd_source: Path | None, jd_text: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Return (jd digest, raw JD text path arg, parsed JD JSON path arg)."""
+    text_path: Path | None = None
+    if jd_text:
+        candidate = out_dir / "jd.txt"
+        if not candidate.is_file():
+            candidate = out_dir / "jd-context.txt"
+        if not candidate.is_file():
+            candidate = out_dir / "jd.txt"
+            candidate.write_text(jd_text, encoding="utf-8")
+        text_path = candidate
+    json_path = jd_source if jd_source is not None and Path(jd_source).is_file() else None
+    digest_parts: list[str] = []
+    if text_path is not None:
+        digest_parts.append(f"text:{sha256_file(text_path)}")
+    if json_path is not None:
+        digest_parts.append(f"json:{sha256_file(json_path)}")
+    jd_digest = sha256_text("|".join(digest_parts)) if digest_parts else None
+    return jd_digest, str(text_path) if text_path else None, str(json_path) if json_path else None
+
+
 def _generate_reports(
-    args: argparse.Namespace, out_dir: Path, rows: list[dict], failures: list[Failure]
+    args: argparse.Namespace,
+    out_dir: Path,
+    rows: list[dict],
+    failures: list[Failure],
+    *,
+    jd_source: Path | None = None,
+    jd_text: str | None = None,
 ) -> dict:
     """Generate per-candidate HTML/PDF and ranking overview (unless skipped)."""
     reports: dict = {}
@@ -677,11 +709,14 @@ def _generate_reports(
     resume_links = _load_resume_links(out_dir)
     comparison_rows = [_board_row(row, resume_links) for row in rows]
     html_out = report_dir / RANKING_OVERVIEW_HTML
+    # JD content feeds the board panel, so its digest must invalidate the cached board.
+    jd_digest, jd_text_arg, jd_json_arg = _report_jd_inputs(out_dir, jd_source, jd_text)
     board_fp = board_report_fingerprint(
         position=args.position,
         refno=getattr(args, "refno", None),
         candidate_fingerprints=candidate_fps,
         resume_links_digest=sha256_text(json.dumps(resume_links, sort_keys=True, ensure_ascii=False)),
+        jd_digest=jd_digest,
     )
     reuse_board = previous.get("board") == board_fp and html_out.is_file()
     if reuse_board:
@@ -703,6 +738,10 @@ def _generate_reports(
         ]
         if getattr(args, "refno", None):
             html_cmd += ["--refno", str(args.refno)]
+        if jd_text_arg:
+            html_cmd += ["--jd-file", jd_text_arg]
+        if jd_json_arg:
+            html_cmd += ["--jd-json", jd_json_arg]
         attempts, error = _run_with_retries(html_cmd, args.max_retries)
         if error:
             _record_failure(
@@ -731,6 +770,8 @@ def _generate_reports(
             "--output",
             str(match_html),
         ]
+        if jd_json_arg:
+            match_cmd += ["--jd-json", jd_json_arg]
         attempts, error = _run_with_retries(match_cmd, args.max_retries)
         if error:
             _record_failure(
@@ -893,8 +934,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         jd_source, jd_text = _resolve_jd_source(args, out_dir)
         candidates = _parse_candidates(args, out_dir, jd_text, failures)
         if args.engine == "matching":
-            return _run_matching_engine(args, out_dir, jd_source, candidates, failures)
-        return _run_legacy_engine(args, out_dir, jd_source, candidates, failures)
+            return _run_matching_engine(args, out_dir, jd_source, candidates, failures, jd_text=jd_text)
+        return _run_legacy_engine(args, out_dir, jd_source, candidates, failures, jd_text=jd_text)
     finally:
         if getattr(args, "cleanup_cvs", False):
             for path in downloaded_cvs:

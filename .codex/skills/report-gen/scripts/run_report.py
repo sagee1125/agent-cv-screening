@@ -32,6 +32,17 @@ def _read_json(path: str) -> object:
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
 
+# Load a parsed JD JSON path, unwrapping the structured_data envelope when present.
+def _read_jd_parsed(path: str | None) -> dict | None:
+    if not path:
+        return None
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return None
+    inner = payload.get("structured_data")
+    return inner if isinstance(inner, dict) else payload
+
+
 # Generate a one-page PDF report for one scored candidate (optionally with matching detail).
 def _run_candidate(args: argparse.Namespace) -> int:
     try:
@@ -82,11 +93,15 @@ def _run_board(args: argparse.Namespace) -> int:
         rows = _read_json(args.rows)
         if not isinstance(rows, list):
             raise ValueError("--rows must contain a JSON array of candidate rows")
+        jd_text = Path(args.jd_file).read_text(encoding="utf-8-sig") if args.jd_file else None
+        jd_parsed = _read_jd_parsed(args.jd_json)
         result = generate_screening_board_skill(
             position_name=args.position,
             rows=rows,
             output_path=args.output,
             refno=args.refno,
+            jd_text=jd_text,
+            jd_parsed=jd_parsed,
         )
     except Exception as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -107,10 +122,12 @@ def _run_match_html(args: argparse.Namespace) -> int:
             row = payload
         else:
             raise ValueError("--row must contain a JSON object")
+        jd_parsed = _read_jd_parsed(args.jd_json)
         result = generate_candidate_match_html_skill(
             position_name=args.position,
             row=row,
             output_path=args.output,
+            jd_parsed=jd_parsed,
         )
     except Exception as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -146,6 +163,8 @@ def _build_parser() -> argparse.ArgumentParser:
     board_parser.add_argument("--position", required=True, help="Job position name shown on the board.")
     board_parser.add_argument("--rows", required=True, help="Path to JSON file with a list of candidate rows.")
     board_parser.add_argument("--refno", default=None, help="Optional job reference number shown in the heading.")
+    board_parser.add_argument("--jd-file", default=None, help="Optional raw JD text file shown in the board panel.")
+    board_parser.add_argument("--jd-json", default=None, help="Optional parsed JD JSON (jd-parser output); structured_data is unwrapped.")
     board_parser.add_argument("--output", required=True, help="Path to write the HTML file.")
     board_parser.set_defaults(func=_run_board)
 
@@ -153,6 +172,7 @@ def _build_parser() -> argparse.ArgumentParser:
     match_html_parser.add_argument("--position", required=True, help="Job position name shown on the page.")
     match_html_parser.add_argument("--row", required=True, help="JSON file with one candidate row object.")
     match_html_parser.add_argument("--output", required=True, help="Path to write the HTML file (use <appno>.html).")
+    match_html_parser.add_argument("--jd-json", default=None, help="Optional parsed JD JSON (jd-parser output) for the compact requirements panel.")
     match_html_parser.set_defaults(func=_run_match_html)
     return parser
 

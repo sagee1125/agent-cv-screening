@@ -9,7 +9,8 @@ from typing import Any
 # v3: board radar axes carry native-tooltip reasoning payload (Option A, PRD-REPORT-GEN-001).
 # v4: radar axes print full dimension names plus on-chart scores, tooltip cards auto-size,
 #     and the candidate match page shows an always-visible dimension breakdown (F1.3-F1.6).
-REPORT_FINGERPRINT_VERSION = "hr-report-v4"
+# v5: ranking board carries a JD description + parsed-requirements panel keyed to a JD digest.
+REPORT_FINGERPRINT_VERSION = "hr-report-v5"
 INPUT_FINGERPRINT_VERSION = "hr-input-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"
 
@@ -108,6 +109,7 @@ def board_report_fingerprint(
     refno: str | None,
     candidate_fingerprints: dict[str, str],
     resume_links_digest: str | None = None,
+    jd_digest: str | None = None,
 ) -> str:
     ordered = [candidate_fingerprints[key] for key in sorted(candidate_fingerprints)]
     return sha256_text(
@@ -118,6 +120,7 @@ def board_report_fingerprint(
                 str(refno or ""),
                 *ordered,
                 f"links:{resume_links_digest or ''}",
+                f"jd:{jd_digest or ''}",
             ]
         )
     )

@@ -401,6 +401,8 @@ class ReporterService:
         rows: list[dict[str, Any]],
         report_date: datetime,
         refno: str | None = None,
+        jd_text: str | None = None,
+        jd_parsed: dict | None = None,
     ) -> None:
         from report_gen.html_board import write_screening_board
 
@@ -410,6 +412,8 @@ class ReporterService:
             rows=rows,
             report_date=report_date,
             refno=refno,
+            jd_text=jd_text,
+            jd_parsed=jd_parsed,
         )
 
     # Writes one candidate HTML match page (application-no. filename).
@@ -420,6 +424,8 @@ class ReporterService:
         row: dict[str, Any],
         position_name: str,
         report_date: datetime,
+        jd_text: str | None = None,
+        jd_parsed: dict | None = None,
     ) -> None:
         from report_gen.html_board import write_candidate_match_html
 
@@ -428,6 +434,8 @@ class ReporterService:
             row=row,
             position_name=position_name,
             report_date=report_date,
+            jd_text=jd_text,
+            jd_parsed=jd_parsed,
         )
 
     # Wraps text to a pixel width; keeps Latin words intact and splits CJK by character.

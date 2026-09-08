@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -122,6 +123,38 @@ _PAGE_CSS_BASE = """
     .dim-evidence { margin: 7px 0 0; font-size: .8rem; color: #64748b; }
     .dim-gaps-label { margin: 8px 0 2px; font-size: .78rem; font-weight: 600; color: #475569; }
     .dim-gaps { margin: 0; padding-left: 1.1rem; font-size: .84rem; line-height: 1.5; color: #b91c1c; }
+
+    /* Job description & parsed-requirements panel above the ranking table. */
+    .jd-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px;
+                padding: 16px 18px 18px; margin: 0 0 22px; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
+    .jd-panel h2 { margin: 0 0 8px; font-size: 1.05rem; }
+    .jd-panel summary { cursor: pointer; font-weight: 600; color: #0f172a; padding: 2px 0; }
+    .jd-panel summary:hover { color: #2563eb; }
+    .jd-details { margin-top: 2px; }
+    .jd-text { white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;
+               color: #334155; font-size: .9rem; line-height: 1.55; padding: 12px 14px; margin: 10px 0 0; }
+    .jd-empty { color: #64748b; font-size: .9rem; margin: 12px 0 0; }
+    .tag-groups { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+    .tag-group { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+    .tag-label { font-weight: 700; color: #0f172a; font-size: .9rem; }
+    .tag { position: relative; display: inline-block; border-radius: 999px; padding: 3px 12px;
+           font-size: .82rem; font-weight: 600; line-height: 1.45; border: 1px solid transparent;
+           cursor: help; }
+    .tag-must { background: #d1fae5; color: #047857; border-color: #a7f3d0; }
+    .tag-preferred { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
+    .tag-language { background: #ede9fe; color: #6d28d9; border-color: #ddd6fe; }
+    .tag:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+    .tag-tip { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30;
+               width: max-content; max-width: min(440px, 78vw); background: #0f172a; color: #e2e8f0;
+               border-radius: 10px; padding: 8px 11px; font-size: .76rem; font-weight: 400;
+               line-height: 1.45; white-space: normal; opacity: 0; visibility: hidden;
+               pointer-events: none; transition: opacity .12s ease; }
+    .tag:hover .tag-tip, .tag:focus-visible .tag-tip { opacity: 1; visibility: visible; }
+    .tag-meta { display: block; font-size: .66rem; font-weight: 600; text-transform: uppercase;
+                letter-spacing: .05em; color: #94a3b8; margin-bottom: 2px; }
+    .jd-line { margin: 0; font-size: .9rem; line-height: 1.5; color: #334155; }
+    .jd-line + .jd-line { margin-top: 6px; }
+    .jd-line-label { font-weight: 700; color: #0f172a; }
 """
 
 _TOOLTIP_SHOW_RULES = "\n".join(
@@ -570,6 +603,194 @@ def _resume_cell(row: dict[str, Any]) -> str:
     return f"<a href='{_esc(resume_url)}' target='_blank' rel='noopener'>Resume</a>"
 
 
+# Remove email and phone-like patterns from free JD text before it is rendered.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PHONE_RE = re.compile(r"(?<![\d+])(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3,4}(?:[\s.-]+\d{3,4})+(?!\d)")
+
+
+# Scrub contact details (emails, phone numbers) out of raw JD text.
+def _scrub_contact(text: str) -> str:
+    without_emails = _EMAIL_RE.sub("[email removed]", text)
+    return _PHONE_RE.sub("[phone removed]", without_emails)
+
+
+# Return the parsed JD dict, unwrapping a jd-parse.json envelope when one is passed.
+def _jd_structured(jd_parsed: dict | None) -> dict | None:
+    if not isinstance(jd_parsed, dict):
+        return None
+    nested = jd_parsed.get("structured_data")
+    return nested if isinstance(nested, dict) else jd_parsed
+
+
+# Extract the auto-extracted JD source sentence from a provenance value (dict or plain string).
+def _source_sentence(provenance: Any) -> str | None:
+    sentence = provenance.get("source_sentence") if isinstance(provenance, dict) else provenance
+    text = str(sentence or "").strip()
+    return text or None
+
+
+# Render the full JD text inside a collapsed <details> block, scrubbed of contacts.
+def _jd_text_block(jd_text: str | None) -> str:
+    raw = str(jd_text or "").strip()
+    if not raw:
+        return ""
+    body = _esc(_scrub_contact(raw))
+    return (
+        "<details class='jd-details'>"
+        "<summary>Full job description</summary>"
+        f"<div class='jd-text'>{body}</div>"
+        "</details>"
+    )
+
+
+# Render one pill badge with an optional hover source tip and mandatory marker.
+def _tag(label: str, tip: str | None, variant: str, *, mandatory: bool = False) -> str:
+    title = ' title="Mandatory"' if mandatory else ""
+    marker = "<span aria-hidden='true'>*</span>" if mandatory else ""
+    tip_html = ""
+    if tip:
+        tip_html = (
+            "<span class='tag-tip'>"
+            "<span class='tag-meta'>JD source (auto-extracted)</span>"
+            f"{_esc(tip)}</span>"
+        )
+    tabindex = " tabindex='0'" if tip else ""
+    return (
+        f"<span class='tag tag-{variant}'{title}{tabindex}>"
+        f"{_esc(label)}{marker}{tip_html}</span>"
+    )
+
+
+# Render one bold label plus wrapped pill badges for a parsed requirement group.
+def _tag_group(label: str, count: int, pills: list[str]) -> str:
+    return (
+        "<div class='tag-group'>"
+        f"<span class='tag-label'>{_esc(label)} ({count})</span>"
+        f"{''.join(pills)}"
+        "</div>"
+    )
+
+
+# Build pill badges for one must/preferred skill list.
+def _skill_pills(items: Any, variant: str) -> list[str]:
+    pills: list[str] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(
+            item.get("display_name") or item.get("canonical_skill") or item.get("skill_id") or ""
+        ).strip()
+        if not label:
+            continue
+        pills.append(_tag(label, _source_sentence(item.get("provenance")), variant))
+    return pills
+
+
+# Build pill badges for language requirements, showing level and mandatory state.
+def _language_pills(items: Any) -> list[str]:
+    pills: list[str] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        language = str(item.get("language") or "").strip()
+        if not language:
+            continue
+        level = str(item.get("level") or "").strip()
+        mandatory = item.get("is_mandatory") is True
+        label = language if not level else language + " \u00b7 " + level
+        if mandatory:
+            label = label + " \u00b7 mandatory"
+        pills.append(_tag(label, _source_sentence(item.get("provenance")), "language", mandatory=mandatory))
+    return pills
+
+
+# Render the education requirement as one line when the parsed JD states one.
+def _education_line(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    degree = str(value.get("minimum_degree") or "").strip()
+    field = str(value.get("field_of_study") or "").strip()
+    if not degree and not field:
+        return ""
+    bits = [bit for bit in (degree, field) if bit]
+    if value.get("is_mandatory") is True:
+        bits.append("mandatory")
+    return (
+        "<p class='jd-line'><span class='jd-line-label'>Education:</span> "
+        + _esc(" \u00b7 ".join(bits)) + "</p>"
+    )
+
+
+# Render the work-authorisation requirement as one line when the parsed JD states one.
+def _visa_line(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    region = str(value.get("target_region") or "").strip()
+    requirement_type = str(value.get("requirement_type") or "").strip().lower()
+    if requirement_type in ("", "unknown", "none", "n/a"):
+        requirement_type = ""
+    bits: list[str] = []
+    if region:
+        bits.append(region)
+    if requirement_type:
+        bits.append(requirement_type.replace("_", " "))
+    if not bits:
+        return ""
+    return (
+        "<p class='jd-line'><span class='jd-line-label'>Work authorisation:</span> "
+        + _esc(" \u00b7 ".join(bits)) + "</p>"
+    )
+
+
+# Render every parsed-requirements group plus education/visa lines, or empty when none exist.
+def _parsed_groups(parsed: dict | None) -> str:
+    if not parsed:
+        return ""
+    chunks: list[str] = []
+    must = _skill_pills(parsed.get("must_skills"), "must")
+    if must:
+        chunks.append(_tag_group("Must Skills", len(must), must))
+    preferred = _skill_pills(parsed.get("preferred_skills"), "preferred")
+    if preferred:
+        chunks.append(_tag_group("Preferred Skills", len(preferred), preferred))
+    languages = _language_pills(parsed.get("language_requirements"))
+    if languages:
+        chunks.append(_tag_group("Language Requirements", len(languages), languages))
+    chunks.extend(
+        part
+        for part in (
+            _education_line(parsed.get("education_requirement")),
+            _visa_line(parsed.get("visa_requirement")),
+        )
+        if part
+    )
+    return "\n".join(chunks)
+
+
+# Build the JD context panel (collapsible text + parsed tags) or empty when no JD inputs are given.
+def _jd_panel(jd_text: str | None, jd_parsed: dict | None, *, compact: bool = False) -> str:
+    parsed = _jd_structured(jd_parsed)
+    if jd_text is None and parsed is None:
+        return ""
+    text_html = "" if compact else _jd_text_block(jd_text)
+    groups_html = _parsed_groups(parsed)
+    if not text_html and not groups_html:
+        return ""
+    if not groups_html:
+        groups_html = "<p class='jd-empty'>No parsed skills yet.</p>"
+    if text_html:
+        heading = "Job Description &amp; Parsed Requirements"
+    else:
+        heading = "Parsed Job Requirements"
+    body = "".join(
+        part for part in (text_html, f"<div class='tag-groups'>{groups_html}</div>") if part
+    )
+    return (
+        "<section class='jd-panel' aria-label='Job description and parsed requirements'>"
+        f"<h2>{heading}</h2>{body}</section>"
+    )
+
+
 # Write a standalone HTML file HR can open; it never includes personal names.
 def write_screening_board(
     output_path: str,
@@ -578,6 +799,8 @@ def write_screening_board(
     rows: list[dict[str, Any]],
     report_date: datetime | None = None,
     refno: str | None = None,
+    jd_text: str | None = None,
+    jd_parsed: dict | None = None,
 ) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -600,6 +823,7 @@ def write_screening_board(
     advisory = _low_band_advisory(ranked)
     heading = _esc(position_name)
     sub = _esc(refno) if refno else ""
+    jd_panel = _jd_panel(jd_text, jd_parsed)
     # The job reference belongs in the page title, so the lede repeats only position and date.
     title_suffix = f" - Ref. No.: {sub}" if sub else ""
     page = f"""<!DOCTYPE html>
@@ -613,6 +837,7 @@ def write_screening_board(
 <body>
   <h1>Ranking overview{title_suffix}</h1>
   <p class="lede">{heading} · {stamped} · labels are application No. only</p>
+  {jd_panel}
   <table>
     <thead><tr><th>Rank</th><th>Application No.</th><th>Score</th><th>Tier</th><th>Resume</th></tr></thead>
     <tbody>{''.join(table_rows)}</tbody>
@@ -633,11 +858,14 @@ def write_candidate_match_html(
     row: dict[str, Any],
     position_name: str,
     report_date: datetime | None = None,
+    jd_text: str | None = None,
+    jd_parsed: dict | None = None,
 ) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     stamped = (report_date or datetime.utcnow()).strftime("%Y-%m-%d")
     label = _label(row)
+    jd_panel = _jd_panel(jd_text, jd_parsed, compact=True)
     # A match page can be forwarded on its own, so restate the job refno in the lede.
     refno = str(row.get("refno") or "").strip()
     refno_html = f" · <span class='refno'>Ref. No.: {_esc(refno)}</span>" if refno else ""
@@ -651,6 +879,7 @@ def write_candidate_match_html(
 </head>
 <body>
   <p class="lede"><a href="ranking-overview.html">Back to ranking overview</a> · {_esc(position_name)}{refno_html} · {stamped}</p>
+  {jd_panel}
   {_card(row, layout="detail")}
 </body>
 </html>

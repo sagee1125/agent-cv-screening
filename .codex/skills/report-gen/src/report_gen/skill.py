@@ -127,6 +127,8 @@ def generate_screening_board_skill(
     rows: list[dict[str, Any]],
     output_path: str,
     refno: str | None = None,
+    jd_text: str | None = None,
+    jd_parsed: dict | None = None,
 ) -> dict[str, Any]:
     service = ReporterService()
     service.generate_screening_board_html(
@@ -135,6 +137,8 @@ def generate_screening_board_skill(
         rows=rows,
         report_date=datetime.utcnow(),
         refno=refno,
+        jd_text=jd_text,
+        jd_parsed=jd_parsed,
     )
     return {"status": "success", "format": "html", "output_path": output_path}
 
@@ -145,6 +149,8 @@ def generate_candidate_match_html_skill(
     position_name: str,
     row: dict[str, Any],
     output_path: str,
+    jd_text: str | None = None,
+    jd_parsed: dict | None = None,
 ) -> dict[str, Any]:
     service = ReporterService()
     service.generate_candidate_match_html(
@@ -152,5 +158,7 @@ def generate_candidate_match_html_skill(
         row=row,
         position_name=position_name,
         report_date=datetime.utcnow(),
+        jd_text=jd_text,
+        jd_parsed=jd_parsed,
     )
     return {"status": "success", "format": "html", "output_path": output_path}

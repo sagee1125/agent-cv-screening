@@ -93,3 +93,14 @@ def test_input_fingerprint_detects_jd_and_cv_changes(tmp_path) -> None:
     )
     assert stale_cv_slugs(second, third) == ["123456"]
     assert not jd_inputs_changed({}, first)
+
+# The JD digest changes the board fingerprint so a JD edit rebuilds the ranking board.
+def test_board_fingerprint_changes_with_jd_digest() -> None:
+    fps = {"123456": "aaa"}
+    plain = board_report_fingerprint(position="PA", refno="1", candidate_fingerprints=fps)
+    first = board_report_fingerprint(position="PA", refno="1", candidate_fingerprints=fps, jd_digest="aaa")
+    second = board_report_fingerprint(position="PA", refno="1", candidate_fingerprints=fps, jd_digest="bbb")
+    assert plain != first
+    assert first != second
+    repeat = board_report_fingerprint(position="PA", refno="1", candidate_fingerprints=fps, jd_digest="aaa")
+    assert repeat == first
