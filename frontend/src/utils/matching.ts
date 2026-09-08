@@ -19,7 +19,7 @@ export const MATCHING_DIMENSION_ORDER = [
   "relevant_experience",
   "role_seniority_fit",
   "education_certification",
-  "job_specific_match",
+  "language_match",
 ] as const;
 
 /** Human-readable labels for the five candidate matching radar dimensions. */
@@ -28,7 +28,7 @@ export const MATCHING_DIMENSION_LABELS: Record<string, string> = {
   relevant_experience: "Relevant Experience",
   role_seniority_fit: "Role & Seniority Fit",
   education_certification: "Education & Certification",
-  job_specific_match: "Job-Specific Match",
+  language_match: "Language Match",
 };
 
 /** Builds radar chart points from a compact radar_summary map. */

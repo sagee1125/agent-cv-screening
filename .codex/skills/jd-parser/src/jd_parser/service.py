@@ -9,6 +9,10 @@ from typing import Any
 
 from screening_core.paths import taxonomy_yaml_path
 from screening_core.taxonomy import SkillTaxonomyLoader
+from scorer.matching.contracts import (
+    LANGUAGE_EXTRA_ALIASES as _LANGUAGE_EXTRA_ALIASES,
+    LANGUAGE_LEVEL_RANK as _LANGUAGE_LEVEL_RANK,
+)
 from jd_parser.prompts import (
     JD_SKILL_REFINER_OUTPUT_SCHEMA,
     JD_SKILL_REFINER_SYSTEM_PROMPT,
@@ -29,39 +33,6 @@ _LANGUAGE_CATEGORY = "languages"
 # Sized so a dense PolyU qualifications list (Stata/R/Python plus the engineering
 # toolchain) is not truncated; overflow skills are dropped entirely, not demoted.
 MAX_SKILLS_PER_BUCKET = 15
-# Rank used to keep the strongest stated language level.
-_LANGUAGE_LEVEL_RANK = {"basic": 0, "business": 1, "fluent": 2, "native": 3}
-# CJK and common aliases not always present on taxonomy language nodes.
-_LANGUAGE_EXTRA_ALIASES: tuple[tuple[str, str], ...] = (
-    ("英语", "English"),
-    ("英語", "English"),
-    ("英文", "English"),
-    ("中文", "Chinese"),
-    ("汉语", "Chinese"),
-    ("漢語", "Chinese"),
-    ("华语", "Chinese"),
-    ("華語", "Chinese"),
-    ("普通话", "Mandarin"),
-    ("普通話", "Mandarin"),
-    ("国语", "Mandarin"),
-    ("國語", "Mandarin"),
-    ("粤语", "Cantonese"),
-    ("粵語", "Cantonese"),
-    ("广东话", "Cantonese"),
-    ("廣東話", "Cantonese"),
-    ("日语", "Japanese"),
-    ("日語", "Japanese"),
-    ("日文", "Japanese"),
-    ("韩语", "Korean"),
-    ("韓語", "Korean"),
-    ("韩文", "Korean"),
-    ("法語", "French"),
-    ("法语", "French"),
-    ("德語", "German"),
-    ("德语", "German"),
-    ("西班牙语", "Spanish"),
-    ("西班牙語", "Spanish"),
-)
 
 
 @lru_cache(maxsize=1)

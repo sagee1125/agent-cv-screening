@@ -8,10 +8,7 @@ from typing import Any
 from scorer.skill_matcher import SkillMatcherService
 from cv_parser.helpers import degree_to_level
 from cv_parser.certifications import certifications_to_skills
-
-
-# Rank order for language proficiency levels (higher is better).
-_LANGUAGE_LEVEL_RANK = {"basic": 0, "business": 1, "fluent": 2, "native": 3}
+from scorer.matching.contracts import LANGUAGE_LEVEL_RANK as _LANGUAGE_LEVEL_RANK
 
 
 class ScorerService:

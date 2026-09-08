@@ -16,14 +16,13 @@ _DIMENSION_LABELS = {
     "education_match": "Education Match",
     "research_quality": "Research Quality",
     "experience_quality": "Experience Quality",
-    "language_match": "Language",
+    "language_match": "Language Match",
     "work_authorization_match": "Work Authorization",
     "location_match": "Location",
     "core_skill_match": "Core Skill Match",
     "relevant_experience": "Relevant Experience",
     "role_seniority_fit": "Role and Seniority Fit",
     "education_certification": "Education and Certification",
-    "job_specific_match": "Job-Specific Match",
 }
 
 _FALLBACK_DIMS = (
@@ -39,7 +38,7 @@ _RADAR_TOOLTIP_IDS = (
     "relevant_experience",
     "role_seniority_fit",
     "education_certification",
-    "job_specific_match",
+    "language_match",
 )
 _PAGE_CSS_BASE = """
     :root { font-family: "Segoe UI", system-ui, sans-serif; color: #0f172a; background: #f1f5f9; }

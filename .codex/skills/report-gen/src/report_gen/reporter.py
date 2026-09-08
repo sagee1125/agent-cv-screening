@@ -73,14 +73,13 @@ _DIMENSION_LABELS = {
     "education_match": "Education Match",
     "research_quality": "Research Quality",
     "experience_quality": "Experience Quality",
-    "language_match": "Language",
+    "language_match": "Language Match",
     "work_authorization_match": "Work Authorization",
     "location_match": "Location",
     "core_skill_match": "Core Skill Match",
     "relevant_experience": "Relevant Experience",
     "role_seniority_fit": "Role and Seniority Fit",
     "education_certification": "Education and Certification",
-    "job_specific_match": "Job-Specific Match",
 }
 
 # Shorter radar-axis labels so they stay inside the chart box.
@@ -89,7 +88,6 @@ _RADAR_SHORT = {
     "Role and Seniority Fit": "Seniority",
     "Relevant Experience": "Experience",
     "Core Skill Match": "Core skills",
-    "Job-Specific Match": "Job-specific",
     "Work Authorization": "Work auth",
 }
 
@@ -652,7 +650,6 @@ class ReporterService:
             "education_match",
             "research_quality",
             "experience_quality",
-            "job_specific_match",
             "language_match",
             "work_authorization_match",
             "location_match",

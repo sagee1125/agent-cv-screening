@@ -12,7 +12,7 @@ DimensionId = Literal[
     "relevant_experience",
     "role_seniority_fit",
     "education_certification",
-    "job_specific_match",
+    "language_match",
 ]
 MatchingStatus = Literal["unscored", "pending", "running", "ready", "stale", "failed"]
 EligibilityStatus = Literal["passed", "needs_review", "failed"]
@@ -116,7 +116,7 @@ class MatchingConfig(BaseModel):
             "relevant_experience",
             "role_seniority_fit",
             "education_certification",
-            "job_specific_match",
+            "language_match",
         }
         if set(self.dimensions) != required:
             raise ValueError("dimensions must contain exactly the five fixed dimension IDs")

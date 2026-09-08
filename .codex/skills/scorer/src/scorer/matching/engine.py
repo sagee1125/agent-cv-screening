@@ -9,7 +9,24 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from .config_builder import normalize_token
-from .contracts import DIMENSION_IDS, DIMENSION_LABELS, EffectiveConfig, SkillRelationResolver
+from .contracts import (
+    DIMENSION_IDS,
+    DIMENSION_LABELS,
+    EffectiveConfig,
+    LANGUAGE_BROAD_CHINESE,
+    LANGUAGE_CHINESE_DIALECTS,
+    LANGUAGE_CHINESE_ONLY_SCORE,
+    LANGUAGE_DIALECT_PARTIAL_SCORE,
+    LANGUAGE_GAP_CHINESE_ONLY,
+    LANGUAGE_GAP_DIALECT,
+    LANGUAGE_GAP_LEVEL,
+    LANGUAGE_GAP_UNSTATED,
+    LANGUAGE_LEVEL_RANK,
+    LANGUAGE_LEVEL_SCORE_STEPS,
+    LANGUAGE_UNSTATED_SCORE,
+    SkillRelationResolver,
+    language_family,
+)
 
 _TAXONOMY_LOADER = None
 _TAXONOMY_UNAVAILABLE = False
@@ -25,7 +42,6 @@ _DEGREE_PATTERNS = (
     (re.compile(r"\b(associate'?s?)\b"), "associate"),
     (re.compile(r"\b(high\s?school|secondary\s?school)\b"), "high_school"),
 )
-_LANGUAGES = {"basic": 0.5, "business": 1.0, "fluent": 2.0, "native": 3.0}
 _OWNERSHIP_SIGNALS = (
     "owned",
     "led",
@@ -792,31 +808,105 @@ def _score_education(config: dict[str, Any], cv: dict[str, Any]) -> dict[str, An
     )
 
 
+# Finds CV language records whose family satisfies a required spoken language.
+def _satisfying_languages(cv: dict[str, Any], required_name: str) -> list[tuple[int, dict[str, Any]]]:
+    required_family = language_family(required_name)
+    if required_family == LANGUAGE_BROAD_CHINESE:
+        allowed = frozenset({LANGUAGE_BROAD_CHINESE}) | LANGUAGE_CHINESE_DIALECTS
+    else:
+        allowed = frozenset({required_family})
+    return [
+        (index, item)
+        for index, item in enumerate(cv.get("languages") or [])
+        if isinstance(item, dict) and language_family(item.get("language")) in allowed
+    ]
+
+
+# Returns the strongest satisfying CV language record, or None when none satisfies.
+def _best_language_candidate(cv: dict[str, Any], required_name: str) -> tuple[int, dict[str, Any]] | None:
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+    for index, item in _satisfying_languages(cv, required_name):
+        level = str(item.get("level") or "").strip().casefold()
+        rank = LANGUAGE_LEVEL_RANK.get(level, -1)
+        ranked.append((rank, index, item))
+    if not ranked:
+        return None
+    best = min(ranked, key=lambda row: (-row[0], row[1]))
+    return best[1], best[2]
+
+
+# Returns a broad Chinese CV record that partially backs a specific dialect requirement.
+def _broad_chinese_partial(cv: dict[str, Any], required_name: str) -> tuple[int, dict[str, Any]] | None:
+    if language_family(required_name) not in LANGUAGE_CHINESE_DIALECTS:
+        return None
+    for index, item in enumerate(cv.get("languages") or []):
+        if isinstance(item, dict) and language_family(item.get("language")) == LANGUAGE_BROAD_CHINESE:
+            return index, item
+    return None
+
+
+# Returns the sibling dialect CV record that partially backs a specific dialect requirement.
+def _sibling_dialect_partial(cv: dict[str, Any], required_name: str) -> tuple[int, dict[str, Any]] | None:
+    required_family = language_family(required_name)
+    if required_family not in LANGUAGE_CHINESE_DIALECTS:
+        return None
+    for index, item in enumerate(cv.get("languages") or []):
+        family = language_family(item.get("language"))
+        if family in LANGUAGE_CHINESE_DIALECTS and family != required_family:
+            return index, item
+    return None
+
+
+# Evaluates one language requirement with a graded, weighted, alias-aware model.
+def _evaluate_language(
+    requirement: dict[str, Any],
+    cv: dict[str, Any],
+) -> tuple[str, float | None, list[dict[str, Any]], str, str | None]:
+    parameters = requirement.get("parameters") or {}
+    requirement_id = str(requirement["requirement_id"])
+    required_name = str(parameters.get("language") or "").strip()
+    text = required_name or requirement_id
+    candidate = _best_language_candidate(cv, required_name)
+    if candidate is None:
+        partial = _broad_chinese_partial(cv, required_name)
+        if partial is not None:
+            index, item = partial
+            source = {"section": "languages", "index": index, "text": f"{item.get('language')} {item.get('level') or ''}".strip(), "structured": True}
+            return "partial", LANGUAGE_CHINESE_ONLY_SCORE, [_evidence_record(source, [requirement_id])], text, LANGUAGE_GAP_CHINESE_ONLY
+        sibling = _sibling_dialect_partial(cv, required_name)
+        if sibling is not None:
+            index, item = sibling
+            source = {"section": "languages", "index": index, "text": f"{item.get('language')} {item.get('level') or ''}".strip(), "structured": True}
+            return "partial", LANGUAGE_DIALECT_PARTIAL_SCORE, [_evidence_record(source, [requirement_id])], text, LANGUAGE_GAP_DIALECT
+        return "not_met", 0.0, [], text, None
+    index, item = candidate
+    source = {"section": "languages", "index": index, "text": f"{item.get('language')} {item.get('level') or ''}".strip(), "structured": True}
+    evidence = [_evidence_record(source, [requirement_id])]
+    candidate_level = str(item.get("level") or "").strip().casefold() or None
+    if candidate_level is None or candidate_level not in LANGUAGE_LEVEL_RANK:
+        return "partial", LANGUAGE_UNSTATED_SCORE, evidence, text, LANGUAGE_GAP_UNSTATED
+    required_level = str(parameters.get("level") or "").strip().casefold() or None
+    required_rank = LANGUAGE_LEVEL_RANK.get(required_level or "", 0)
+    candidate_rank = LANGUAGE_LEVEL_RANK[candidate_level]
+    gap = required_rank - candidate_rank
+    if gap <= 0:
+        return "met", 100.0, evidence, text, None
+    step = min(gap, 3)
+    return "partial", LANGUAGE_LEVEL_SCORE_STEPS[step], evidence, text, LANGUAGE_GAP_LEVEL
+
+
 # Evaluates one supported role-specific requirement from explicit CV evidence.
 def _evaluate_specific(
     requirement: dict[str, Any],
     cv: dict[str, Any],
     sources: dict[str, list[dict[str, Any]]],
     relation_resolver: SkillRelationResolver | None,
-) -> tuple[str, float | None, list[dict[str, Any]], str]:
+) -> tuple[str, float | None, list[dict[str, Any]], str, str | None]:
     evaluator = requirement.get("evaluator_type")
     parameters = requirement.get("parameters") or {}
     requirement_id = str(requirement["requirement_id"])
-    if evaluator == "preferred_skill":
-        skill = normalize_token(parameters.get("canonical_skill"))
-        strength, _, source = _match_skill(skill, sources, relation_resolver)
-        evidence = [_evidence_record(source, [requirement_id], "exact" if strength == 1 else "related")] if source else []
-        return ("met" if strength == 1 else "partial" if strength else "not_met", strength * 100.0, evidence, skill)
     if evaluator == "language":
-        language = str(parameters.get("language") or "").casefold()
-        candidate = next((item for item in cv.get("languages") or [] if isinstance(item, dict) and str(item.get("language") or "").casefold() == language), None)
-        if not candidate:
-            return "not_met", 0.0, [], str(parameters.get("language"))
-        required_level = parameters.get("level")
-        candidate_level = candidate.get("level")
-        score = 100.0 if not required_level or not candidate_level or _LANGUAGES.get(str(candidate_level), -1) >= _LANGUAGES.get(str(required_level), 0) else 50.0
-        source = {"section": "languages", "index": (cv.get("languages") or []).index(candidate), "text": f"{candidate.get('language')} {candidate_level or ''}".strip(), "structured": True}
-        return ("met" if score == 100 else "partial", score, [_evidence_record(source, [requirement_id])], str(parameters.get("language")))
+        return _evaluate_language(requirement, cv)
     if evaluator == "research":
         publications = cv.get("publications") or []
         projects = [item for item in cv.get("projects") or [] if isinstance(item, dict) and "research" in str(item.get("description") or "").casefold()]
@@ -824,7 +914,7 @@ def _evaluate_specific(
         count = len(publications) + len(projects)
         score = min(count / minimum, 1.0) * 100.0
         evidence = [{"evidence_id": f"publications:{index}", "document": "cv", "section": "publications", "text": str(item.get("title") or ""), "matched_requirement_ids": [requirement_id], "match_type": "exact", "confidence": 0.9} for index, item in enumerate(publications) if isinstance(item, dict)]
-        return ("met" if count >= minimum else "partial" if count else "not_met", score, evidence, "research evidence")
+        return ("met" if count >= minimum else "partial" if count else "not_met", score, evidence, "research evidence", None)
     if evaluator in {"management", "domain"}:
         needle = normalize_token(parameters.get("responsibility") or parameters.get("domain"))
         matches = []
@@ -833,26 +923,53 @@ def _evaluate_specific(
             signal = evaluator == "management" and any(value in text.replace("_", " ") for value in ("managed", "led", "负责", "管理"))
             if (needle and needle in text) or signal:
                 matches.append(_evidence_record({"section": "experience", "index": index, "text": str(item.get("description") or item.get("job_title") or ""), "structured": True}, [requirement_id]))
-        return ("met" if matches else "not_met", 100.0 if matches else 0.0, matches, needle.replace("_", " "))
+        return ("met" if matches else "not_met", 100.0 if matches else 0.0, matches, needle.replace("_", " "), None)
     if evaluator == "license":
         license_name = normalize_token(parameters.get("license") or parameters.get("canonical_skill"))
         evidence = []
         for index, item in enumerate(cv.get("certifications") or []):
             if isinstance(item, dict) and license_name in normalize_token(item.get("name")):
                 evidence.append(_evidence_record({"section": "certifications", "index": index, "text": str(item.get("name")), "structured": True}, [requirement_id]))
-        return ("met" if evidence else "not_met", 100.0 if evidence else 0.0, evidence, license_name.replace("_", " "))
-    return "unknown", None, [], str(parameters.get("text") or evaluator)
+        return ("met" if evidence else "not_met", 100.0 if evidence else 0.0, evidence, license_name.replace("_", " "), None)
+    return "unknown", None, [], str(parameters.get("text") or evaluator), None
 
 
-# Scores the weighted average of evaluable role-specific requirements.
-def _score_specific(
+# Builds an accurate, PII-free gap message for one language requirement.
+def _language_gap_text(reason: str, text: str) -> str:
+    if reason == LANGUAGE_GAP_UNSTATED:
+        return f"{text} proficiency is not stated on the CV."
+    if reason == LANGUAGE_GAP_CHINESE_ONLY:
+        return f"The CV lists Chinese but does not confirm {text}."
+    if reason == LANGUAGE_GAP_DIALECT:
+        return f"The CV lists a different Chinese dialect but does not confirm {text}."
+    if reason == LANGUAGE_GAP_LEVEL:
+        return f"{text} proficiency is below the required level."
+    return f"No sufficient evidence for {text}."
+
+
+# Scores the weighted average of language requirements into the Language Match axis.
+def _score_language(
     config: dict[str, Any],
     cv: dict[str, Any],
     relation_resolver: SkillRelationResolver | None,
 ) -> dict[str, Any]:
-    settings = config["dimensions"]["job_specific_match"]
+    settings = config["dimensions"]["language_match"]
     if not settings["active"]:
-        return _inactive_dimension("job_specific_match", settings)
+        return _inactive_dimension("language_match", settings)
+    if not config["job_specific_requirements"]:
+        return _dimension(
+            "language_match",
+            settings,
+            100.0,
+            "met",
+            [],
+            [],
+            [],
+            "DR-LANG-001",
+            "Language Match: 100/100. The JD states no explicit language requirement.",
+            {"no_language_requirement": True},
+            100.0,
+        )
     sources = _skill_sources(cv)
     requirements: list[dict[str, Any]] = []
     evidence: list[dict[str, Any]] = []
@@ -863,7 +980,7 @@ def _score_specific(
     unknown_count = 0
     for item in config["job_specific_requirements"]:
         requirement_id = str(item["requirement_id"])
-        status, score, item_evidence, text = _evaluate_specific(item, cv, sources, relation_resolver)
+        status, score, item_evidence, text, gap_reason = _evaluate_specific(item, cv, sources, relation_resolver)
         requirements.append({"requirement_id": requirement_id, "text": text, "source": {"document": "jd", "section": "job_specific_requirements"}})
         evidence.extend(item_evidence)
         if score is None:
@@ -874,21 +991,22 @@ def _score_specific(
             met_names.append(text)
         else:
             gap_names.append(text)
-            gaps.append({"requirement_id": requirement_id, "reason_code": "REQUIREMENT_UNKNOWN" if status == "unknown" else "NO_EXPLICIT_CV_EVIDENCE", "text": f"No sufficient evidence for {text}."})
+            reason = gap_reason or ("REQUIREMENT_UNKNOWN" if status == "unknown" else "NO_EXPLICIT_CV_EVIDENCE")
+            gaps.append({"requirement_id": requirement_id, "reason_code": reason, "text": _language_gap_text(reason, text)})
     denominator = sum(weight for weight, _ in evaluated)
     score = sum(weight * value for weight, value in evaluated) / denominator if denominator else 0.0
     status = "unknown" if not evaluated else "met" if not gaps else "partial" if evidence else "not_met"
-    confidence = 0.0 if not evaluated else max(0.0, 90.0 * (len(evaluated) / len(requirements)))
-    summary = f"Job-Specific Match: {_round(score)}/100. Met: {', '.join(met_names) or 'none'}. Partial or missing: {', '.join(gap_names) or 'none'}."
+    confidence = 0.0 if not evaluated else max(0.0, 90.0 * (len(evaluated) / len(config["job_specific_requirements"])))
+    summary = f"Language Match: {_round(score)}/100. Met: {', '.join(met_names) or 'none'}. Partial or missing: {', '.join(gap_names) or 'none'}."
     return _dimension(
-        "job_specific_match",
+        "language_match",
         settings,
         score,
         status,
         requirements,
         evidence,
         gaps,
-        "DR-SPECIFIC-001",
+        "DR-LANG-001",
         summary,
         {"met": met_names, "gaps": gap_names, "unknown_count": unknown_count},
         confidence,
@@ -929,15 +1047,16 @@ def _evaluate_eligibility_rule(
         requirement = f"Work authorization for {parameters.get('target_region') or 'the target region'}"
     elif rule_id.startswith("mandatory_language"):
         language = str(parameters.get("language") or "")
-        candidate = next((item for item in cv.get("languages") or [] if isinstance(item, dict) and str(item.get("language") or "").casefold() == language.casefold()), None)
+        candidate = _best_language_candidate(cv, language)
         requirement = f"{language} {parameters.get('level') or ''}".strip()
         if candidate:
-            candidate_level = candidate.get("level")
-            evidence = [_cv_evidence("languages", f"{language}: {candidate_level or 'level unknown'}", rule_id)]
+            index, item = candidate
+            candidate_level = str(item.get("level") or "").strip().casefold() or None
+            evidence = [_cv_evidence("languages", f"{item.get('language')}: {candidate_level or 'level unknown'}", rule_id, index)]
             required_level = parameters.get("level")
             if not candidate_level or not required_level:
                 status, reason = "unknown", "LANGUAGE_LEVEL_UNKNOWN"
-            elif _LANGUAGES.get(str(candidate_level), -1) >= _LANGUAGES.get(str(required_level), 0):
+            elif LANGUAGE_LEVEL_RANK.get(candidate_level, -1) >= LANGUAGE_LEVEL_RANK.get(str(required_level).strip().casefold(), 0):
                 status, reason = "met", "REQUIREMENT_MET"
             else:
                 status, reason = "not_met", "LANGUAGE_LEVEL_NOT_MET"
@@ -1140,11 +1259,16 @@ def _build_questions(
     if isinstance(role, dict) and role["active"] and role["score"] < 100:
         responsibility = str(config.get("target_seniority") or "the target role")
         _question(candidates, "IQ-SENIORITY-001", "medium", "role_seniority_fit", "SENIORITY_GAP", ["target_seniority"], f"This role requires responsibility for {responsibility}. Please describe a situation where you owned a similar responsibility, including your decisions, collaborators, and outcome.", {"responsibility": responsibility})
-    job_dim = by_id.get("job_specific_match")
-    if isinstance(job_dim, dict):
-        for gap in job_dim.get("gaps") or []:
-            requirement = next((item["text"] for item in job_dim["requirements"] if item["requirement_id"] == gap["requirement_id"]), gap["requirement_id"])
-            _question(candidates, "IQ-JD-REQUIREMENT-001", "medium", "job_specific_match", gap["reason_code"], [gap["requirement_id"]], f"This role requires {requirement}. Please describe a specific example where you demonstrated this capability.", {"requirement": requirement})
+    language_dim = by_id.get("language_match")
+    if isinstance(language_dim, dict):
+        for gap in language_dim.get("gaps") or []:
+            requirement = next((item["text"] for item in language_dim["requirements"] if item["requirement_id"] == gap["requirement_id"]), gap["requirement_id"])
+            if gap["reason_code"] == LANGUAGE_GAP_UNSTATED:
+                _question(candidates, "IQ-LANGUAGE-LEVEL-001", "medium", "language_match", gap["reason_code"], [gap["requirement_id"]], f"Your CV lists {requirement} without stating a proficiency level. Please confirm your proficiency in {requirement} (basic, business, fluent, or native).", {"requirement": requirement})
+            elif gap["reason_code"] == LANGUAGE_GAP_DIALECT:
+                _question(candidates, "IQ-LANGUAGE-DIALECT-001", "medium", "language_match", gap["reason_code"], [gap["requirement_id"]], f"This role requires {requirement}, but your CV only lists a different Chinese dialect. Please confirm your proficiency in {requirement} (basic, business, fluent, or native).", {"requirement": requirement})
+            else:
+                _question(candidates, "IQ-JD-REQUIREMENT-001", "medium", "language_match", gap["reason_code"], [gap["requirement_id"]], f"This role requires {requirement}. Please describe a specific example where you demonstrated this capability.", {"requirement": requirement})
     deduplicated: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for item in candidates:
@@ -1188,7 +1312,7 @@ def match_candidate(
         experience,
         _score_role(config, cv_structured_data),
         _score_education(config, cv_structured_data),
-        _score_specific(config, cv_structured_data, relation_resolver),
+        _score_language(config, cv_structured_data, relation_resolver),
     ]
     total = _round(sum(float(item["score"]) * item["normalized_weight"] for item in dimensions if item["active"]))
     confidence = _round(sum(item["confidence"] * item["normalized_weight"] for item in dimensions if item["active"]))

@@ -12,6 +12,8 @@ from .contracts import (
     DEFAULT_WEIGHTS,
     DIMENSION_IDS,
     EffectiveConfig,
+    LANGUAGE_LEVEL_DEMAND,
+    MANDATORY_LANGUAGE_FACTOR,
     MatchingConfigError,
     SCHEMA_VERSION,
 )
@@ -87,22 +89,27 @@ def _build_preferred_skills(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
     return _normalize_preferred_weights(records)
 
 
-# Converts parsed JD language requirements into job-specific evaluators.
-def _build_job_specific(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
+# Converts parsed JD language requirements into weighted language evaluators.
+def _build_language_requirements(jd_data: dict[str, Any]) -> list[dict[str, Any]]:
     requirements: list[dict[str, Any]] = []
     for index, item in enumerate(_records(jd_data.get("language_requirements")), start=1):
         language = str(item.get("language") or "").strip()
-        if language:
-            requirements.append(
-                {
-                    "requirement_id": f"language_{normalize_token(language)}_{index}",
-                    "evaluator_type": "language",
-                    "weight": 1.0,
-                    "mandatory": bool(item.get("is_mandatory")),
-                    "parameters": {"language": language, "level": item.get("level")},
-                    "provenance": copy.deepcopy(item.get("provenance")),
-                }
-            )
+        if not language:
+            continue
+        is_mandatory = bool(item.get("is_mandatory"))
+        level = str(item.get("level") or "").strip().casefold()
+        demand = LANGUAGE_LEVEL_DEMAND.get(level, 1.0)
+        weight = round(demand * (MANDATORY_LANGUAGE_FACTOR if is_mandatory else 1.0), 4)
+        requirements.append(
+            {
+                "requirement_id": f"language_{normalize_token(language)}_{index}",
+                "evaluator_type": "language",
+                "weight": weight,
+                "mandatory": is_mandatory,
+                "parameters": {"language": language, "level": item.get("level")},
+                "provenance": copy.deepcopy(item.get("provenance")),
+            }
+        )
     return requirements
 
 
@@ -208,7 +215,7 @@ def _activation_map(config: dict[str, Any], jd_data: dict[str, Any]) -> dict[str
         "education_certification": _has_education_requirement(
             {"education_requirement": config.get("education_requirement")}, specific
         ),
-        "job_specific_match": bool(specific),
+        "language_match": True,
     }
 
 
@@ -298,7 +305,7 @@ def build_matching_config(
         "must_skills": _build_must_skills(jd_structured_data, legacy_weight_config),
         "preferred_skills": _build_preferred_skills(jd_structured_data),
         "eligibility_rules": _build_eligibility_rules(jd_structured_data),
-        "job_specific_requirements": _build_job_specific(jd_structured_data),
+        "job_specific_requirements": _build_language_requirements(jd_structured_data),
         "education_requirement": copy.deepcopy(jd_structured_data.get("education_requirement") or {}),
         "target_seniority": _target_seniority(jd_structured_data),
         "fit_bands": {"high_min": 80.0, "medium_min": 60.0},

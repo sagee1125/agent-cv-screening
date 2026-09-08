@@ -35,7 +35,7 @@ def _config_payload() -> dict:
                 "relevant_experience": {"enabled": True, "weight": 0.32},
                 "role_seniority_fit": {"enabled": True, "weight": 0.15},
                 "education_certification": {"enabled": True, "weight": 0.05},
-                "job_specific_match": {"enabled": True, "weight": 0.10},
+                "language_match": {"enabled": True, "weight": 0.10},
             },
             "must_skills": [],
             "eligibility_rules": [],

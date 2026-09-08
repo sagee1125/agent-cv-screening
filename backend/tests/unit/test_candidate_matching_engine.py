@@ -313,6 +313,8 @@ def test_interview_questions_use_only_fixed_templates() -> None:
         "IQ-DURATION-001",
         "IQ-SENIORITY-001",
         "IQ-ELIGIBILITY-001",
+        "IQ-LANGUAGE-LEVEL-001",
+        "IQ-LANGUAGE-DIALECT-001",
     }
 
     assert 3 <= len(result["interview_questions"]) <= 6
@@ -700,3 +702,275 @@ def test_preferred_duplicate_of_must_is_dropped() -> None:
     # Only the must entry counts: python 1/2 -> presence 50 -> 0.8 * 50 = 40 (no preferred double count).
     assert core["score"] == 40.0
     assert len(core["requirements"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Language Match dimension: graded weighted model and Chinese-family handling.
+# ---------------------------------------------------------------------------
+
+
+# Builds a minimal JD carrying only the supplied language requirements.
+def _language_jd(requirements: list[dict]) -> dict:
+    return {
+        "must_skills": [],
+        "preferred_skills": [],
+        "language_requirements": requirements,
+        "education_requirement": {"minimum_degree": "none", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+        "jd_overview": {},
+    }
+
+
+# Builds a minimal CV carrying only the supplied language records.
+def _language_cv(languages: list[dict]) -> dict:
+    return {"skills": [], "experience": [], "education": [], "languages": languages}
+
+
+# Verifies the renamed dimension stays last and the radar still has five axes.
+def test_language_match_dimension_is_last_with_five_axes() -> None:
+    assert "language_match" in DIMENSION_IDS
+    assert DIMENSION_IDS[-1] == "language_match"
+    assert len(DIMENSION_IDS) == 5
+
+    result = match_candidate(_cv(), build_matching_config(_jd()), "2026-01-31")
+
+    assert len(result["radar_dimensions"]) == 5
+    assert result["radar_dimensions"][-1]["dimension_id"] == "language_match"
+    assert result["radar_dimensions"][-1]["label"] == "Language Match"
+
+
+# Verifies derived weights differ by level and that the fluent requirement dominates.
+def test_language_weights_differ_and_fluent_dominates_result() -> None:
+    jd = _language_jd(
+        [
+            {"language": "English", "level": "fluent", "is_mandatory": True},
+            {"language": "Mandarin", "level": "basic", "is_mandatory": True},
+        ]
+    )
+    cv = _language_cv(
+        [
+            {"language": "English", "level": "basic"},
+            {"language": "Mandarin", "level": "fluent"},
+        ]
+    )
+    config = build_matching_config(jd).config
+    weights = {
+        item["parameters"]["language"]: item["weight"]
+        for item in config["job_specific_requirements"]
+    }
+    assert weights["English"] == 2.1  # fluent demand 1.4 x mandatory factor 1.5
+    assert weights["Mandarin"] == 0.9  # basic demand 0.6 x mandatory factor 1.5
+    assert weights["English"] != weights["Mandarin"]
+
+    lang = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][-1]
+    # English basic vs fluent = 40 (weight 2.1); Mandarin fluent vs basic = 100 (weight 0.9).
+    assert lang["score"] == 58.0  # (2.1*40 + 0.9*100) / 3.0; unweighted average would be 70.
+    assert lang["active"] is True
+
+
+# Verifies a candidate one level below the required level gets the graded 70 step, not 50.
+def test_language_one_level_below_scores_seventy_not_fifty() -> None:
+    jd = _language_jd([{"language": "English", "level": "fluent", "is_mandatory": False}])
+    cv = _language_cv([{"language": "English", "level": "business"}])
+
+    lang = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][-1]
+
+    assert lang["score"] == 70.0
+    assert lang["status"] == "partial"
+
+
+# Verifies an unstated level scores 50, generates a proficiency question, and stays in the denominator.
+def test_language_unstated_level_scores_fifty_included_and_asks_proficiency() -> None:
+    jd = _language_jd(
+        [
+            {"language": "English", "level": "fluent", "is_mandatory": True},
+            {"language": "Cantonese", "level": "fluent", "is_mandatory": True},
+        ]
+    )
+    cv = _language_cv(
+        [
+            {"language": "English", "level": "fluent"},
+            {"language": "Cantonese", "level": None},
+        ]
+    )
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    lang = result["radar_dimensions"][-1]
+
+    assert lang["score"] == 75.0  # (2.1*100 + 2.1*50) / 4.2; the 50 is included in the denominator.
+    assert lang["status"] == "partial"
+    assert any(gap["reason_code"] == "LANGUAGE_LEVEL_UNSTATED" for gap in lang["gaps"])
+    assert any(
+        question["template_id"] == "IQ-LANGUAGE-LEVEL-001"
+        and "proficiency" in question["question"].casefold()
+        for question in result["interview_questions"]
+    )
+
+
+# Verifies a Cantonese requirement gets partial credit when the CV only lists Chinese.
+def test_language_cantonese_requirement_chinese_only_partial_credit() -> None:
+    jd = _language_jd([{"language": "Cantonese", "level": "business", "is_mandatory": False}])
+    cv = _language_cv([{"language": "Chinese", "level": "fluent"}])
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    lang = result["radar_dimensions"][-1]
+
+    assert lang["score"] == 50.0
+    assert lang["status"] == "partial"
+    assert any(gap["reason_code"] == "LANGUAGE_CHINESE_ONLY" for gap in lang["gaps"])
+
+
+# Verifies a broad Chinese requirement is fully met by either Cantonese or Mandarin.
+def test_language_chinese_requirement_satisfied_by_cantonese_or_mandarin() -> None:
+    jd = _language_jd([{"language": "Chinese", "level": "fluent", "is_mandatory": True}])
+
+    for language, level in (("Cantonese", "native"), ("Mandarin", "native")):
+        cv = _language_cv([{"language": language, "level": level}])
+        lang = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][-1]
+        assert lang["score"] == 100.0
+        assert lang["status"] == "met"
+        assert lang["gaps"] == []
+
+
+# Verifies the alias families collapse the exact spec strings into one family each.
+def test_language_alias_families_collapse_cjk_variants() -> None:
+    from scorer.matching.contracts import language_family
+
+    assert {language_family(value) for value in ("Mandarin", "Putonghua", "普通话", "國語")} == {"mandarin"}
+    assert {language_family(value) for value in ("Cantonese", "粵語", "广东话")} == {"cantonese"}
+    assert language_family("Chinese") == "chinese"
+    assert language_family("English") == "english"
+
+
+# Verifies a Mandarin JD requirement matches a CV that lists a CJK alias.
+def test_language_mandarin_requirement_matches_cjk_alias_cv() -> None:
+    jd = _language_jd([{"language": "Mandarin", "level": "fluent", "is_mandatory": True}])
+
+    for alias in ("普通话", "國語", "Putonghua"):
+        cv = _language_cv([{"language": alias, "level": "native"}])
+        lang = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][-1]
+        assert lang["score"] == 100.0
+        assert lang["status"] == "met"
+
+
+# Verifies a Cantonese JD requirement matches a CV that lists a CJK alias.
+def test_language_cantonese_requirement_matches_cjk_alias_cv() -> None:
+    jd = _language_jd([{"language": "Cantonese", "level": "business", "is_mandatory": True}])
+
+    for alias in ("粵語", "广东话"):
+        cv = _language_cv([{"language": alias, "level": "native"}])
+        lang = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][-1]
+        assert lang["score"] == 100.0
+        assert lang["status"] == "met"
+
+
+# Verifies no language requirement yields an active 100 with no gaps or questions.
+def test_language_no_requirement_scores_one_hundred_active() -> None:
+    jd = {
+        "must_skills": [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "bachelor", "is_mandatory": False},
+        "visa_requirement": {"requirement_type": "unknown"},
+        "experience_requirement": {},
+        "jd_overview": {"job_title": "Senior Backend Engineer"},
+    }
+    cv = {
+        "skills": [{"canonical_skill": "python"}],
+        "experience": [
+            {
+                "job_title": "Senior Backend Engineer",
+                "start_date": "2023-01",
+                "end_date": "2024-12",
+                "description": "Built Python services.",
+                "skills_used": ["python"],
+            }
+        ],
+        "education": [{"degree": "BSc", "degree_level": "bachelor", "major": "Computer Science"}],
+    }
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    lang = result["radar_dimensions"][-1]
+    active = [item for item in result["radar_dimensions"] if item["active"]]
+
+    assert len(active) == 5
+    assert lang["active"] is True
+    assert lang["score"] == 100.0
+    assert lang["status"] == "met"
+    assert lang["requirements"] == []
+    assert lang["evidence"] == []
+    assert lang["gaps"] == []
+    assert lang["reasoning"]["facts"] == {"no_language_requirement": True}
+    assert not any(question["dimension_id"] == "language_match" for question in result["interview_questions"])
+
+
+# Verifies the mandatory-language eligibility gate stays alias aware for a Chinese requirement.
+def test_eligibility_mandatory_chinese_met_by_cantonese_candidate() -> None:
+    jd = _language_jd([{"language": "Chinese", "level": "fluent", "is_mandatory": True}])
+    cv = _language_cv([{"language": "Cantonese", "level": "native"}])
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    rule = next(
+        rule for rule in result["eligibility"]["results"] if rule["rule_id"].startswith("mandatory_language")
+    )
+
+    assert rule["status"] == "met"
+    assert rule["evidence"]
+
+
+# Verifies a dialect requirement gets small sibling-dialect credit instead of zero.
+def test_language_dialect_requirement_sibling_partial_credit() -> None:
+    cases = (
+        ("Cantonese", "Mandarin"),
+        ("Mandarin", "Cantonese"),
+    )
+    for required, sibling in cases:
+        jd = _language_jd([{"language": required, "level": "fluent", "is_mandatory": False}])
+        cv = _language_cv([{"language": sibling, "level": "native"}])
+
+        result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+        lang = result["radar_dimensions"][-1]
+
+        assert lang["score"] == 15.0, f"{required} vs {sibling}"
+        assert lang["status"] == "partial"
+        assert any(gap["reason_code"] == "LANGUAGE_DIALECT_PARTIAL" for gap in lang["gaps"])
+        assert lang["evidence"], f"{required} vs {sibling} should keep evidence"
+        assert any(
+            question["template_id"] == "IQ-LANGUAGE-DIALECT-001"
+            for question in result["interview_questions"]
+        ), f"{required} vs {sibling} should generate a dialect question"
+
+
+# Verifies sibling-dialect credit stays inside the weighted denominator.
+def test_language_dialect_partial_included_in_denominator() -> None:
+    jd = _language_jd(
+        [
+            {"language": "English", "level": "fluent", "is_mandatory": True},
+            {"language": "Cantonese", "level": "fluent", "is_mandatory": True},
+        ]
+    )
+    cv = _language_cv(
+        [
+            {"language": "English", "level": "fluent"},
+            {"language": "Mandarin", "level": "native"},
+        ]
+    )
+
+    lang = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][-1]
+
+    assert lang["score"] == 57.5  # (2.1*100 + 2.1*15) / 4.2
+
+
+# Verifies a sibling dialect never satisfies the mandatory-language eligibility gate.
+def test_eligibility_mandatory_dialect_not_met_by_sibling() -> None:
+    jd = _language_jd([{"language": "Cantonese", "level": "fluent", "is_mandatory": True}])
+    cv = _language_cv([{"language": "Mandarin", "level": "native"}])
+
+    result = match_candidate(cv, build_matching_config(jd), "2026-01-31")
+    rule = next(
+        rule for rule in result["eligibility"]["results"] if rule["rule_id"].startswith("mandatory_language")
+    )
+
+    assert rule["status"] != "met"
+    assert result["eligibility"]["status"] == "needs_review"

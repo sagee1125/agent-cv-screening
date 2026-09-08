@@ -211,7 +211,7 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
                     {"id": "role_seniority_fit", "label": "Role and Seniority Fit", "score": 30},
                     {"id": "education_certification", "label": "Education and Certification", "score": 60},
-                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 45},
+                    {"id": "language_match", "label": "Language Match", "score": 45},
                 ],
             },
         ],
@@ -407,7 +407,7 @@ def test_html_board_radar_geometry_and_scores_unchanged_by_tooltips(tmp_path: Pa
             {"id": "relevant_experience", "label": "Relevant Experience", "score": 85.0},
             {"id": "role_seniority_fit", "label": "Role and Seniority Fit", "score": 100.0},
             {"id": "education_certification", "label": "Education and Certification", "score": 60.0},
-            {"id": "job_specific_match", "label": "Job-Specific Match", "score": 80.0},
+            {"id": "language_match", "label": "Language Match", "score": 80.0},
         ]
         if enriched:
             for dim in dims:
@@ -476,11 +476,11 @@ def test_html_candidate_match_page_dimension_panel(tmp_path: Path) -> None:
                     "summary": "Relevant Experience: 85/100.",
                 },
                 {
-                    "id": "job_specific_match",
-                    "label": "Job-Specific Match",
+                    "id": "language_match",
+                    "label": "Language Match",
                     "score": 72.5,
                     "status": "partial",
-                    "summary": "Job-Specific Match: 72.5/100.",
+                    "summary": "Language Match: 72.5/100.",
                     "gaps": ["No sufficient evidence for research governance."],
                     "evidence_sections": {"experience": 2},
                 }
@@ -494,8 +494,8 @@ def test_html_candidate_match_page_dimension_panel(tmp_path: Path) -> None:
     # The match page shows the breakdown beside the radar instead of a hover overlay.
     assert 'class="match-layout"' in text
     assert '<div class="radar-tip" data-tip=' not in text
-    assert '<article class="dim-card st-partial" data-dim="job_specific_match"' in text
-    assert '<h3 class="dim-label">Job-Specific Match</h3>' in text
+    assert '<article class="dim-card st-partial" data-dim="language_match"' in text
+    assert '<h3 class="dim-label">Language Match</h3>' in text
     assert "st-partial" in text
     assert "Evidence by CV section: experience 2" in text
     # Dimension scores keep one decimal on the page too.
@@ -543,11 +543,11 @@ def test_html_board_sub_scores_on_core_and_experience_tips(tmp_path: Path) -> No
                         "evidence_metrics": {"ownership_pct": 100.0, "impact_pct": 50.0},
                     },
                     {
-                        "id": "job_specific_match",
-                        "label": "Job-Specific Match",
+                        "id": "language_match",
+                        "label": "Language Match",
                         "score": 80.0,
                         "status": "met",
-                        "summary": "Job-Specific Match: 80/100.",
+                        "summary": "Language Match: 80/100.",
                     },
                 ],
             }
@@ -562,7 +562,7 @@ def test_html_board_sub_scores_on_core_and_experience_tips(tmp_path: Path) -> No
     assert "Sub-scores: presence 90% · linkage 50%" in core_panel
     experience_panel = panels.split('<div class="radar-tip" data-tip="relevant_experience"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
     assert "Sub-scores: ownership 100% · impact 50%" in experience_panel
-    job_panel = panels.split('<div class="radar-tip" data-tip="job_specific_match"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
+    job_panel = panels.split('<div class="radar-tip" data-tip="language_match"', 1)[1].split('<div class="radar-tip" data-tip=', 1)[0]
     assert "Sub-scores:" not in job_panel
 
 
@@ -593,14 +593,14 @@ def test_html_board_full_axis_names_and_on_chart_scores(tmp_path: Path) -> None:
                     {"id": "core_skill_match", "label": "Core Skill Match", "score": 65.14},
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 100.0},
                     {"id": "education_certification", "label": "Education and Certification", "score": 77.78},
-                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 62.5},
+                    {"id": "language_match", "label": "Language Match", "score": 62.5},
                 ],
             },
         ],
     )
     text = out.read_text(encoding="utf-8")
     # Full names are used verbatim, never the old abbreviations.
-    for full in ("Core Skill Match", "Relevant Experience", "Education and Certification", "Job-Specific Match"):
+    for full in ("Core Skill Match", "Relevant Experience", "Education and Certification", "Language Match"):
         assert full in text
     for short in ("Core skills", "Job-specific", "Work auth"):
         assert short not in text
@@ -634,7 +634,7 @@ def test_html_board_tooltip_card_has_no_inner_scroll(tmp_path: Path) -> None:
                 "radar_dimensions": [
                     {"id": "core_skill_match", "label": "Core Skill Match", "score": 65.14},
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 100.0},
-                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 62.5},
+                    {"id": "language_match", "label": "Language Match", "score": 62.5},
                 ],
             },
         ],
@@ -666,7 +666,7 @@ def test_html_board_table_link_uses_sanitized_stem(tmp_path: Path) -> None:
                 "radar_dimensions": [
                     {"id": "core_skill_match", "label": "Core Skill Match", "score": 50},
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
-                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 45},
+                    {"id": "language_match", "label": "Language Match", "score": 45},
                 ],
             },
         ],
@@ -699,7 +699,7 @@ def test_html_board_rejects_unsafe_resume_url(tmp_path: Path) -> None:
                 "radar_dimensions": [
                     {"id": "core_skill_match", "label": "Core Skill Match", "score": 50},
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
-                    {"id": "job_specific_match", "label": "Job-Specific Match", "score": 45},
+                    {"id": "language_match", "label": "Language Match", "score": 45},
                 ],
             },
         ],
@@ -726,7 +726,7 @@ def test_html_candidate_match_page_score_only_dimensions(tmp_path: Path) -> None
             "radar_dimensions": [
                 {"id": "core_skill_match", "label": "Core Skill Match", "score": 90.0},
                 {"id": "relevant_experience", "label": "Relevant Experience", "score": 85.0},
-                {"id": "job_specific_match", "label": "Job-Specific Match", "score": 72.5},
+                {"id": "language_match", "label": "Language Match", "score": 72.5},
             ],
         },
         position_name="Project Associate",
