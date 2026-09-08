@@ -21,7 +21,19 @@ affected_modules:
   - frontend/src/components/JobBoard/
   - frontend/src/services/jobService.ts
   - frontend/src/types/index.ts
+superseded_by: docs/candidate-matching/PRD-Matching_v2_Evidence_Fold_v1.0.md
 ---
+
+> **Superseded** — this PRD documents `candidate-matching-v1`: **six** weighted dimensions
+> (core skill 30% / relevant experience 25% / role seniority 15% / evidence impact 15% /
+> education 5% / job-specific 10%). Matching **v2** deleted the `evidence_impact`
+> dimension and redistributed its 15% to `core_skill_match` (30% → 38%) and
+> `relevant_experience` (25% → 32%); ownership and quantified impact now live inside those
+> two dimensions' sub-scores. Current contract:
+> `.codex/skills/scorer/src/scorer/matching/contracts.py` (five dimensions,
+> `ALGORITHM_VERSION = "candidate-matching-v2"`). See
+> `docs/candidate-matching/PRD-Matching_v2_Evidence_Fold_v1.0.md`. The body below is kept
+> unchanged as a historical record.
 
 # Product Requirements Document (PRD)
 

@@ -51,7 +51,7 @@ within 0.05. If it does not, your weight assumption is wrong — re-derive it fi
 
 ## Step 2 — derive the active weights
 
-Do not assume the six documented weights (30/25/15/15/5/10). They are **renormalized over
+Do not assume the five documented weights (38/32/15/5/10). They are **renormalized over
 only the active dimensions**, and activation is JD-driven
 (`config_builder._activation_map`):
 
@@ -60,7 +60,6 @@ only the active dimensions**, and activation is JD-driven
 | `core_skill_match` | JD yielded `must_skills` |
 | `relevant_experience` | must/specific/role/experience present |
 | `role_seniority_fit` | **only** if the JD title contains one of intern/junior/mid/senior/lead/manager/director/executive |
-| `evidence_impact` | anything evaluable |
 | `education_certification` | **only** if the JD states `minimum_degree` / `field_of_study` / `certifications` / a licence |
 | `job_specific_match` | JD yielded specific requirements |
 
@@ -71,19 +70,23 @@ guessing, and tell HR plainly when a dimension is switched off.
 
 ## Step 3 — explain "why are all the scores low?"
 
-The engine is deterministic (`candidate-matching-v1`); there is no LLM in the scoring step.
+The engine is deterministic (`candidate-matching-v2`); there is no LLM in the scoring step.
 Missing evidence scores **0**, not "unknown and ignored".
 
 - `core_skill_match` (usually the binding constraint): skill tokens come only from the
   skills list, `skills_used`, and certifications. Exact hit 1.0, taxonomy-approved related
   skill 0.7, otherwise 0. A skill described in prose is not counted at all.
-- `evidence_impact` = 50×coverage + 25×ownership + 25×metric. Metric requires
-  `_METRIC_PATTERN`; ownership requires `_OWNERSHIP_SIGNALS`. Academic CVs score low here.
+- ownership and quantified impact are no longer a dimension of their own (v1's
+  `evidence_impact` was removed by the Evidence-Fold refactor). They now live inside two
+  sub-scores: `relevant_experience` quality = 0.5×ownership (`_OWNERSHIP_SIGNALS`) +
+  0.5×metric (`_METRIC_PATTERN`), and quality is 30% of that dimension — so quantified
+  impact is 0.32 × 0.3 × 0.5 ≈ **4.8%** of the total, down from 15%. `core_skill_match`
+  linkage (20% of that dimension) is the other place evidence strength is counted.
 - `relevant_experience` needs parseable `YYYY-MM` dates; it is often saturated and carries
   no discrimination — say so if everyone scores 100.
 
 Also compute the **mathematical ceiling** per candidate:
-`core × core_weight + (sum of the other three weights)`. If that is below the high-band
+`core × core_weight + (sum of the remaining active weights)`. If that is below the high-band
 threshold, that candidate *cannot* reach high no matter what else they have. This is the
 single most useful number to give HR.
 
