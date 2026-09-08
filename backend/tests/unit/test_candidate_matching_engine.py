@@ -521,25 +521,34 @@ def test_field_rule_accepts_quantitative_fallback_marker() -> None:
     assert field["reason_code"] == "FIELD_OF_STUDY_NOT_MET"
     assert field["requirement"].startswith("Mandatory field of study")
 
-# Verifies preferred skills score as a lower tier and the must floor caps zero-must candidates.
-def test_preferred_tier_scores_below_musts_and_must_floor_caps() -> None:
-    cv = _cv()
-    must_jd = _jd()
-    must_jd["must_skills"] = [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}]
-    must_jd["preferred_skills"] = []
-    preferred_jd = copy.deepcopy(must_jd)
-    preferred_jd["must_skills"] = []
-    preferred_jd["preferred_skills"] = [
-        {"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}
-    ]
+# Verifies a preferred-only JD with every preferred skill met is not capped by the must floor.
+def test_preferred_only_all_met_is_not_floor_capped() -> None:
+    cv = _cv()  # python present in skills and structured experience
+    jd = _jd()
+    jd["must_skills"] = []
+    jd["preferred_skills"] = [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}]
 
-    must_core = match_candidate(cv, build_matching_config(must_jd), "2026-01-31")["radar_dimensions"][0]
-    preferred_core = match_candidate(cv, build_matching_config(preferred_jd), "2026-01-31")["radar_dimensions"][0]
+    core = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][0]
 
-    assert must_core["score"] == 100.0
-    assert preferred_core["score"] == 60.0
-    assert preferred_core["score"] < must_core["score"]
-    assert preferred_core["reasoning"]["facts"]["score_capped_by_must_floor"] is True
+    assert core["score"] == 80.0  # presence 100 + must linkage 0 (no musts), un-capped
+    assert core["reasoning"]["facts"]["score_capped_by_must_floor"] is False
+    assert all(gap["reason_code"] != "MUST_COVERAGE_FLOOR" for gap in core["gaps"])
+
+
+# Verifies a preferred-only JD with no evidence scores zero and never trips the must floor.
+def test_preferred_only_none_met_scores_zero_without_floor() -> None:
+    jd = _jd()
+    jd["must_skills"] = []
+    jd["preferred_skills"] = [{"skill_id": "python_1", "canonical_skill": "python", "weight": 1.0}]
+    jd["language_requirements"] = []
+    jd["visa_requirement"] = {"requirement_type": "unknown"}
+    jd["experience_requirement"] = {}
+    cv = {"skills": [], "experience": [], "education": []}
+
+    core = match_candidate(cv, build_matching_config(jd), "2026-01-31")["radar_dimensions"][0]
+
+    assert core["score"] == 0.0
+    assert all(gap["reason_code"] != "MUST_COVERAGE_FLOOR" for gap in core["gaps"])
 
 
 # Verifies the must-coverage floor caps Core even when preferred skills lift blended presence.

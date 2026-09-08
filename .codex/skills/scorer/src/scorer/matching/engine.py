@@ -465,7 +465,7 @@ def _score_core(
     linkage = 100.0 * (linked_count / matched_count) if matched_count else 0.0
     score = _round(CORE_PRESENCE_WEIGHT * presence + CORE_LINKAGE_WEIGHT * linkage)
     floor_applied = False
-    if must_presence < MUST_COVERAGE_FLOOR:
+    if must_total and must_presence < MUST_COVERAGE_FLOOR:
         if score > MUST_COVERAGE_FLOOR:
             score = _round(MUST_COVERAGE_FLOOR)
             floor_applied = True
