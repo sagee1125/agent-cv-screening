@@ -45,13 +45,31 @@ def find_source_excerpt(jd_text: str, needles: list[str]) -> dict[str, Any]:
     }
 
 
-def find_cue_excerpt(jd_text: str, cues: list[str]) -> str:
-    """Return the original JD line matching a requirement cue, or empty."""
-    match = _first_needle_match(jd_text, cues)
+def find_cue_excerpt(jd_text: str, cues: list[str], prefer_cues: list[str] | None = None) -> str:
+    """Return the original JD line matching a cue, preferring cue-word sentences."""
+    match = _first_needle_match(jd_text, cues, prefer_cues=prefer_cues)
     if match is None:
         return ""
     excerpt, _, _ = _excerpt_around(jd_text, match[0], match[1])
     return excerpt
+
+
+def find_line_excerpt(jd_text: str, lowered_line: str) -> str:
+    """Relocate a lower-cased detection line in the original JD and excerpt it."""
+    fragment = (lowered_line or "").strip().rstrip(".;!?。；")
+    if len(fragment) < 2:
+        return ""
+    pattern = re.compile(_flexible_fragment(fragment), re.IGNORECASE | re.DOTALL)
+    match = pattern.search(jd_text)
+    if match is None:
+        return ""
+    excerpt, _, _ = _excerpt_around(jd_text, match.start(), match.end())
+    return excerpt
+
+
+def _flexible_fragment(fragment: str) -> str:
+    """Escape a lowered fragment, allowing any whitespace run between words."""
+    return r"\s+".join(re.escape(token) for token in fragment.split())
 
 
 def _match_in_noise_line(text: str, position: int) -> bool:
@@ -64,9 +82,14 @@ def _match_in_noise_line(text: str, position: int) -> bool:
     return any(stripped.startswith(prefix) for prefix in _NOISE_PREFIXES)
 
 
-def _first_needle_match(text: str, needles: list[str]) -> tuple[int, int] | None:
-    """Find the earliest non-boilerplate case-insensitive needle span in text."""
+def _first_needle_match(
+    text: str,
+    needles: list[str],
+    prefer_cues: list[str] | None = None,
+) -> tuple[int, int] | None:
+    """Find the earliest needle span, preferring one in a cue-bearing sentence."""
     best: tuple[int, int] | None = None
+    best_cued: tuple[int, int] | None = None
     seen: set[str] = set()
     for needle in needles:
         cleaned = (needle or "").strip()
@@ -84,10 +107,49 @@ def _first_needle_match(text: str, needles: list[str]) -> tuple[int, int] | None
             if _match_in_noise_line(text, found.start()):
                 continue
             span = (found.start(), found.end())
-            if best is None or span[0] < best[0] or (span[0] == best[0] and span[1] > best[1]):
-                best = span
-            break
-    return best
+            best = _preferred_span(best, span)
+            if prefer_cues and _sentence_has_any_cue(text, span, prefer_cues):
+                best_cued = _preferred_span(best_cued, span)
+    return best_cued if best_cued is not None else best
+
+
+def _preferred_span(current: tuple[int, int] | None, span: tuple[int, int]) -> tuple[int, int]:
+    """Return the earlier span, preferring the longer one when starts tie."""
+    if current is None:
+        return span
+    if span[0] < current[0] or (span[0] == current[0] and span[1] > current[1]):
+        return span
+    return current
+
+
+def _sentence_has_any_cue(text: str, span: tuple[int, int], cues: list[str]) -> bool:
+    """Return True when the sentence holding a span contains any cue word."""
+    sentence = _enclosing_sentence(text, span[0], span[1]).casefold()
+    for cue in cues:
+        cleaned = (cue or "").strip().casefold()
+        if len(cleaned) < 2:
+            continue
+        if re.search(r"(?<![a-z0-9])" + re.escape(cleaned) + r"(?![a-z0-9])", sentence):
+            return True
+    return False
+
+
+def _enclosing_sentence(text: str, match_start: int, match_end: int) -> str:
+    """Return the full untruncated sentence or line holding a character span."""
+    line_start = text.rfind("\n", 0, match_start) + 1
+    line_end = text.find("\n", match_end)
+    if line_end < 0:
+        line_end = len(text)
+    line = text[line_start:line_end]
+    rel_start = match_start - line_start
+    rel_end = match_end - line_start
+    sentence_start = 0
+    for found in _SENTENCE_BREAK.finditer(line):
+        if found.end() <= rel_start:
+            sentence_start = found.end()
+        elif found.start() >= rel_end:
+            return line[sentence_start:found.start() + 1]
+    return line[sentence_start:]
 
 
 

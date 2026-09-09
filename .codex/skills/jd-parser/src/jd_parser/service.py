@@ -21,6 +21,7 @@ from jd_parser.prompts import (
 from jd_parser.provenance import (
     empty_skill_provenance,
     find_cue_excerpt,
+    find_line_excerpt,
     find_source_excerpt,
 )
 from jd_parser.mode import normalize_mode
@@ -29,6 +30,19 @@ from jd_parser.providers.base import JDEnrichmentProvider
 
 # Taxonomy category whose nodes are languages, not job skills.
 _LANGUAGE_CATEGORY = "languages"
+# Cue words marking a genuine spoken/written language requirement in a JD sentence.
+_LANGUAGE_PROVENANCE_CUES = [
+    "fluent",
+    "fluency",
+    "proficient",
+    "proficiency",
+    "spoken",
+    "written",
+    "command of",
+    "working knowledge",
+    "native",
+    "mother tongue",
+]
 # Maximum skills kept in each must/preferred bucket after extraction or LLM refine.
 # Sized so a dense PolyU qualifications list (Stata/R/Python plus the engineering
 # toolchain) is not truncated; overflow skills are dropped entirely, not demoted.
@@ -549,6 +563,7 @@ class JDParserService:
                             "level": level,
                             "is_mandatory": is_mandatory,
                             "provenance": "",
+                            "_source_line": line,
                         }
                         order.append(key)
                         continue
@@ -557,6 +572,8 @@ class JDParserService:
                         current["is_mandatory"] = True
                     if _LANGUAGE_LEVEL_RANK.get(level, 0) > _LANGUAGE_LEVEL_RANK.get(current["level"], 0):
                         current["level"] = level
+                        # Provenance follows the line that set the emitted level.
+                        current["_source_line"] = line
 
         return [found[key] for key in order]
 
@@ -851,7 +868,17 @@ class JDParserService:
             if not isinstance(item, dict):
                 continue
             language = str(item.get("language") or "").strip()
-            item["provenance"] = find_cue_excerpt(jd_text, self._needles_for_language(language))
+            captured_line = item.pop("_source_line", None)
+            if isinstance(captured_line, str) and captured_line:
+                excerpt = find_line_excerpt(jd_text, captured_line)
+                if excerpt:
+                    item["provenance"] = excerpt
+                    continue
+            item["provenance"] = find_cue_excerpt(
+                jd_text,
+                self._needles_for_language(language),
+                prefer_cues=_LANGUAGE_PROVENANCE_CUES,
+            )
 
         education = structured_data.get("education_requirement")
         if isinstance(education, dict):

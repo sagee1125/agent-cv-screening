@@ -123,3 +123,23 @@ async def test_hybrid_strips_languages_from_refined_skills() -> None:
     assert "putonghua" not in skill_names
     assert "mandarin" not in skill_names
     assert {item["language"] for item in data["language_requirements"]} >= {"English", "Chinese", "Cantonese"}
+
+
+# Mirrors refno 260901004: an ASR duty mentions code-switched Cantonese-English-
+# Putonghua speech before the real "be fluent in ..." language requirement.
+_LANGUAGE_TECHNICAL_JD = """Research Associate
+Requirements:
+have experience in building natural language processing pipelines (such as text classification) and/or audio processing pipelines covering automatic speech recognition, speaker diarisation, voice-activity detection, forced alignment and the handling of code-switched Cantonese-English-Putonghua speech; be fluent in Cantonese, English and Putonghua, with a strong command of written and spoken English for the preparation of statistical reports and research outputs; and be able to work independently.
+"""
+
+
+@pytest.mark.asyncio
+async def test_language_provenance_quotes_real_requirement_not_technical_mention() -> None:
+    """Language provenance quotes the fluent requirement, not an earlier ASR mention."""
+    service = JDParserService()
+    result = await service.parse_jd(_LANGUAGE_TECHNICAL_JD)
+    languages = {item["language"]: item for item in result["structured_data"]["language_requirements"]}
+    assert set(languages) == {"Cantonese", "English", "Mandarin"}
+    for item in languages.values():
+        assert "be fluent in Cantonese, English and Putonghua" in item["provenance"]
+        assert "natural language processing" not in item["provenance"]
