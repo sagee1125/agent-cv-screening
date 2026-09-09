@@ -484,3 +484,42 @@ def test_pipeline_forwards_jd_inputs_to_board_and_match_reports(tmp_path, monkey
     board_calls = [cmd for cmd in commands if cmd[2] == "board"]
     assert len(board_calls) == 1
     assert second["ranking_overview_html"]
+
+# Public interview questions keep template_id + allowlisted variables; CV text never leaks.
+def test_board_row_publishes_only_allowlisted_question_variables(tmp_path) -> None:
+    module = _import_pipeline()
+    detail = tmp_path / "detail-123456.json"
+    detail.write_text(
+        json.dumps(
+            {
+                "radar_dimensions": [],
+                "interview_questions": [
+                    {
+                        "template_id": "IQ-MISSING-001",
+                        "priority": "high",
+                        "question": "We could not find clear evidence of Automation in your CV. Do you have relevant experience? If so, please describe a specific example.",
+                        "variables": {"requirement": "Automation", "achievement": "SECRET_CV_TEXT"},
+                    },
+                    {
+                        "template_id": "IQ-IMPACT-001",
+                        "priority": "medium",
+                        "question": "Your CV mentions SECRET_CV_TEXT. What metric was used?",
+                        "variables": {"achievement": "SECRET_CV_TEXT"},
+                    },
+                    {"priority": "low", "question": "Legacy plain question."},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    public = module._board_row({"_detail": str(detail), "rank": 1, "appno": "123456"})
+    questions = public["interview_questions"]
+    assert questions[0]["template_id"] == "IQ-MISSING-001"
+    assert questions[0]["variables"] == {"requirement": "Automation"}
+    assert "SECRET_CV_TEXT" not in json.dumps(questions[0].get("variables") or {})
+    # IQ-IMPACT-001 has no allowlisted variable -> template_id/variables are dropped.
+    assert "template_id" not in questions[1]
+    assert "variables" not in questions[1]
+    assert "SECRET_CV_TEXT" in questions[1]["question"]  # pre-existing plain question text
+    # Legacy rows without template metadata pass through unchanged.
+    assert questions[2] == {"priority": "low", "question": "Legacy plain question."}

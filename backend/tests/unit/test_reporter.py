@@ -502,10 +502,10 @@ def test_html_candidate_match_page_dimension_panel(tmp_path: Path) -> None:
     # Dimension scores keep one decimal on the page too.
     assert '<p class="dim-score">72.5<span class="dim-total">/100</span></p>' in text
 
-def test_report_fingerprint_version_bumped_for_jd_panel() -> None:
+def test_report_fingerprint_version_bumped_for_skill_markup() -> None:
     from screening_core.report_fingerprint import REPORT_FINGERPRINT_VERSION
 
-    assert REPORT_FINGERPRINT_VERSION == "hr-report-v5"
+    assert REPORT_FINGERPRINT_VERSION == "hr-report-v6"
 
 
 # F1.2: Core/Experience tooltip cards preview Evidence-axis sub-metrics (Option B aid).
@@ -969,3 +969,186 @@ def test_html_candidate_match_page_jd_compact_tags_only(tmp_path: Path) -> None:
     assert "Full JD body" not in text
     assert "class='jd-text'" not in text
     assert "<details" not in text
+# ---------------------------------------------------------------------------
+# Interview-prompt skill highlighting (F1.8)
+# ---------------------------------------------------------------------------
+
+
+# Known IQ-MISSING-001 prompts wrap the requirement slot in a styled span.
+def test_render_question_html_wraps_requirement_span() -> None:
+    from report_gen.html_board import _render_question_html
+
+    rendered = _render_question_html(
+        {
+            "template_id": "IQ-MISSING-001",
+            "priority": "high",
+            "question": "We could not find clear evidence of Automation in your CV. Do you have relevant experience? If so, please describe a specific example.",
+            "variables": {"requirement": "Automation"},
+        }
+    )
+    assert rendered == (
+        'We could not find clear evidence of <span class="skill">Automation</span> in your CV. '
+        "Do you have relevant experience? If so, please describe a specific example."
+    )
+
+
+# Known IQ-SKILL-DEPTH-001 prompts highlight the skill while context stays plain text.
+def test_render_question_html_wraps_skill_only_for_depth_template() -> None:
+    from report_gen.html_board import _render_question_html
+
+    rendered = _render_question_html(
+        {
+            "template_id": "IQ-SKILL-DEPTH-001",
+            "priority": "medium",
+            "question": "Your CV mentions using Python in Work Experience. Please describe your responsibility, the main challenge, the approach you took, and the outcome.",
+            "variables": {"skill": "Python", "context": "Work Experience"},
+        }
+    )
+    assert rendered == (
+        'Your CV mentions using <span class="skill">Python</span> in Work Experience. '
+        "Please describe your responsibility, the main challenge, the approach you took, and the outcome."
+    )
+
+
+# Unknown or missing templates fall back to the plain escaped question, no markup.
+def test_render_question_html_falls_back_for_unknown_or_missing_template() -> None:
+    from report_gen.html_board import _render_question_html
+
+    unknown = _render_question_html(
+        {
+            "template_id": "IQ-UNKNOWN-001",
+            "priority": "high",
+            "question": "Could you confirm <b>this</b> & that?",
+            "variables": {"requirement": "Automation"},
+        }
+    )
+    assert unknown == "Could you confirm &lt;b&gt;this&lt;/b&gt; &amp; that?"
+    plain = _render_question_html({"priority": "medium", "question": "Walk through a data pipeline you owned."})
+    assert plain == "Walk through a data pipeline you owned."
+
+
+# A missing template slot (variables stripped by the payload allowlist) falls back safely.
+def test_render_question_html_falls_back_when_slot_missing() -> None:
+    from report_gen.html_board import _render_question_html
+
+    rendered = _render_question_html(
+        {
+            "template_id": "IQ-MISSING-001",
+            "priority": "high",
+            "question": "We could not find clear evidence of Automation in your CV.",
+            "variables": {},
+        }
+    )
+    assert rendered == "We could not find clear evidence of Automation in your CV."
+
+
+# Slot values are escaped before wrapping: & and < cannot inject live markup.
+def test_render_question_html_escapes_slot_value_before_span() -> None:
+    from report_gen.html_board import _render_question_html
+
+    rendered = _render_question_html(
+        {
+            "template_id": "IQ-MISSING-001",
+            "priority": "high",
+            "question": "We could not find clear evidence of X in your CV.",
+            "variables": {"requirement": '<img src=x onerror="alert(1)"> & <b>SQL</b>'},
+        }
+    )
+    assert '<span class="skill">&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &lt;b&gt;SQL&lt;/b&gt;</span>' in rendered
+    assert "<img" not in rendered
+    assert "<b>SQL</b>" not in rendered
+
+
+# The ranking board renders spans for known templates and plain text for legacy rows.
+def test_html_board_highlights_known_prompt_skills(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-skill-spans.html"
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+        refno="260901004",
+        rows=[
+            {
+                "rank": 1,
+                "refno": "260901004",
+                "appno": "260901008",
+                "total_score": 82.71,
+                "tier": "high",
+                "radar_dimensions": [
+                    {"id": "core_skill_match", "label": "Core Skill Match", "score": 90.0},
+                    {"id": "relevant_experience", "label": "Relevant Experience", "score": 85.0},
+                ],
+                "interview_questions": [
+                    {
+                        "template_id": "IQ-MISSING-001",
+                        "priority": "high",
+                        "question": "We could not find clear evidence of Automation in your CV. Do you have relevant experience? If so, please describe a specific example.",
+                        "variables": {"requirement": "Automation"},
+                    },
+                    {
+                        "template_id": "IQ-MISSING-001",
+                        "priority": "high",
+                        "question": "We could not find clear evidence of C & C++ <script> in your CV.",
+                        "variables": {"requirement": "C & C++ <script>"},
+                    },
+                    {"priority": "medium", "question": "Walk through a data pipeline you owned."},
+                ],
+            }
+        ],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert 'We could not find clear evidence of <span class="skill">Automation</span> in your CV.' in text
+    assert '<span class="skill">C &amp; C++ &lt;script&gt;</span>' in text
+    assert "<script>" not in text
+    assert "<script" not in text
+    # Legacy rows without template metadata stay plain text.
+    assert "<li>Walk through a data pipeline you owned.</li>" in text
+    # The .skill style rule is present and readable on the light card background.
+    assert ".skill {" in text
+    assert "font-weight: 600" in text
+
+
+# The per-candidate match page (layout=detail) highlights prompts the same way.
+def test_html_candidate_match_page_highlights_known_prompt_skills(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "260901008.html"
+    service.generate_candidate_match_html(
+        str(out),
+        row={
+            "rank": 1,
+            "refno": "260901004",
+            "appno": "260901008",
+            "total_score": 82.71,
+            "tier": "high",
+            "radar_dimensions": [
+                {"id": "core_skill_match", "label": "Core Skill Match", "score": 90.0},
+                {"id": "relevant_experience", "label": "Relevant Experience", "score": 85.0},
+                {"id": "education_certification", "label": "Education and Certification", "score": 100.0},
+            ],
+            "interview_questions": [
+                {
+                    "template_id": "IQ-SKILL-DEPTH-001",
+                    "priority": "medium",
+                    "question": "Your CV mentions using Python in Work Experience. Please describe your responsibility, the main challenge, the approach you took, and the outcome.",
+                    "variables": {"skill": "Python", "context": "Work Experience"},
+                },
+                {
+                    "template_id": "IQ-MISSING-001",
+                    "priority": "high",
+                    "question": "We could not find clear evidence of Data Analysis in your CV. Do you have relevant experience? If so, please describe a specific example.",
+                    "variables": {"requirement": "Data Analysis"},
+                },
+            ],
+        },
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+    )
+    text = out.read_text(encoding="utf-8")
+    assert 'Your CV mentions using <span class="skill">Python</span> in Work Experience.' in text
+    assert 'clear evidence of <span class="skill">Data Analysis</span> in your CV.' in text
+    assert ".skill {" in text

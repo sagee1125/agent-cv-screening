@@ -10,7 +10,8 @@ from typing import Any
 # v4: radar axes print full dimension names plus on-chart scores, tooltip cards auto-size,
 #     and the candidate match page shows an always-visible dimension breakdown (F1.3-F1.6).
 # v5: ranking board carries a JD description + parsed-requirements panel keyed to a JD digest.
-REPORT_FINGERPRINT_VERSION = "hr-report-v5"
+# v6: interview prompts carry template_id + allowlisted variables and highlight skill names.
+REPORT_FINGERPRINT_VERSION = "hr-report-v6"
 INPUT_FINGERPRINT_VERSION = "hr-input-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"
 

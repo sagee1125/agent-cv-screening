@@ -78,6 +78,9 @@ _PAGE_CSS_BASE = """
     .axis-label { font-size: 9.5px; fill: #334155; }
     .axis-score { font-size: 10.5px; font-weight: 700; fill: #2563eb; }
     .questions { padding-left: 1.1rem; }
+    /* Interview-prompt skill names pop so HR can scan prompts without re-reading them. */
+    .skill { display: inline; font-weight: 600; color: #1e40af; background: #dbeafe;
+             border-radius: 4px; padding: 0 4px; }
     a { color: #1d4ed8; }
     .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 14px 16px; margin: 20px 0 0; }
     .note h2 { margin: 0 0 6px; font-size: 1rem; }
@@ -569,6 +572,48 @@ def _low_band_advisory(ranked: list[dict[str, Any]]) -> str:
     )
 
 
+# Fixed interview-prompt templates whose skill/requirement slot is highlighted in HTML.
+# Values are escaped before insertion; only these slot names are ever interpolated.
+_INTERVIEW_TEMPLATES: dict[str, tuple[str, frozenset[str]]] = {
+    "IQ-MISSING-001": (
+        "We could not find clear evidence of {requirement} in your CV. Do you have "
+        "relevant experience? If so, please describe a specific example.",
+        frozenset({"requirement"}),
+    ),
+    "IQ-SKILL-DEPTH-001": (
+        "Your CV mentions using {skill} in {context}. Please describe your responsibility, "
+        "the main challenge, the approach you took, and the outcome.",
+        frozenset({"skill"}),
+    ),
+}
+_TEMPLATE_SLOT = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+# Rebuild a known interview prompt as HTML with its skill slot wrapped in a span;
+# falls back to the plain escaped sentence for unknown/missing templates.
+def _render_question_html(item: dict[str, Any]) -> str:
+    template_id = item.get("template_id")
+    variables = item.get("variables")
+    spec = _INTERVIEW_TEMPLATES.get(template_id) if isinstance(template_id, str) else None
+    if spec and isinstance(variables, dict):
+        text, highlight = spec
+
+        def _slot(match: re.Match[str]) -> str:
+            name = match.group(1)
+            if name not in variables:
+                raise KeyError(name)
+            value = _esc(variables[name])
+            if name in highlight:
+                return f'<span class="skill">{value}</span>'
+            return value
+
+        try:
+            return _TEMPLATE_SLOT.sub(_slot, text)
+        except (KeyError, TypeError):
+            pass
+    return _esc(item.get("question"))
+
+
 # Render one candidate card: scores, radar, optional interview prompts.
 # layout="board" keeps the hover tooltip overlay; layout="detail" swaps it for an
 # always-visible dimension breakdown rendered beside the radar.
@@ -583,9 +628,9 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
     q_html = ""
     if questions:
         items = "".join(
-            # Interview prompts render as plain questions; the priority label
-            # (high/medium) is intentionally not shown on HR-facing HTML.
-            f"<li>{_esc(q.get('question'))}</li>"
+            # Interview prompts highlight the skill/requirement slot from a known
+            # template; the priority label is intentionally not shown on HR HTML.
+            f"<li>{_render_question_html(q)}</li>"
             for q in questions[:8]
         )
         q_html = f"<h3>Interview prompts</h3><ol class='questions'>{items}</ol>"

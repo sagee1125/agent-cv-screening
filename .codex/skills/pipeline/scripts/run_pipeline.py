@@ -556,6 +556,11 @@ def _load_resume_links(out_dir: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in payload.items() if value}
 
 
+# Variable keys from matching interview questions that may be published to HR reports.
+# CV text must never reach reports, so only requirement/skill/context names are allowed.
+PUBLIC_QUESTION_VARIABLE_KEYS = frozenset({"requirement", "skill", "context"})
+
+
 # Public ranking fields plus radar tooltip/interview numbers from matching detail (allow-listed reasoning only, no raw CV text).
 def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
     public = {key: value for key, value in row.items() if not str(key).startswith("_")}
@@ -581,12 +586,22 @@ def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
     for item in detail.get("interview_questions") or []:
         if not isinstance(item, dict) or not item.get("question"):
             continue
-        questions.append(
-            {
-                "priority": item.get("priority"),
-                "question": str(item.get("question"))[:240],
+        entry = {
+            "priority": item.get("priority"),
+            "question": str(item.get("question"))[:240],
+        }
+        raw_variables = item.get("variables")
+        if isinstance(raw_variables, dict):
+            variables = {
+                key: value for key, value in raw_variables.items() if key in PUBLIC_QUESTION_VARIABLE_KEYS
             }
-        )
+        else:
+            variables = {}
+        template_id = item.get("template_id")
+        if isinstance(template_id, str) and template_id and variables:
+            entry["template_id"] = template_id
+            entry["variables"] = variables
+        questions.append(entry)
     if questions:
         public["interview_questions"] = questions[:8]
     return public
