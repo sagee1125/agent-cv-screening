@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -803,13 +804,14 @@ def test_html_board_jd_panel_omitted_without_jd_inputs(tmp_path: Path) -> None:
     assert "No parsed skills yet." not in text
 
 
-# The JD panel renders all tag groups, language mandatory state, and escaped/scrubbed JD text.
+# The JD panel renders ordered metadata rows, tag groups, and escaped/scrubbed JD text.
 def test_html_board_jd_panel_renders_groups_languages_and_escaping(tmp_path: Path) -> None:
     from app.services.reporter import ReporterService
 
     service = ReporterService()
     out = tmp_path / "board-jd.html"
     jd = (
+        "Reference number: 260901004\n"
         'Duties: run <script>alert("x")</script> analysis with Python & Stata.\n'
         "Contact: hr@polyu.example for details or phone 2766 1234.\n"
         "Posting date: 2026-08-25\n"
@@ -824,7 +826,8 @@ def test_html_board_jd_panel_renders_groups_languages_and_escaping(tmp_path: Pat
     )
     text = out.read_text(encoding="utf-8")
     assert "class='jd-panel'" in text
-    assert "Full job description" in text
+    assert "class='jd-details'" in text
+    assert "Job details" in text
     assert "Must Skills (2)" in text
     assert "Preferred Skills (1)" in text
     assert "Language Requirements (2)" in text
@@ -836,7 +839,7 @@ def test_html_board_jd_panel_renders_groups_languages_and_escaping(tmp_path: Pat
     assert "Education:" in text
     # The visa requirement is unknown, so the work-authorisation line stays hidden.
     assert "Work authorisation:" not in text
-    # Free JD text is HTML-escaped and never emits live markup.
+    # The JD metadata list is HTML-escaped and never emits live markup.
     assert "&lt;script&gt;" in text
     assert "<script>alert" not in text
     assert "<script" not in text
@@ -848,23 +851,90 @@ def test_html_board_jd_panel_renders_groups_languages_and_escaping(tmp_path: Pat
     assert "src='http" not in text
 
 
-# The full JD body sits inside a <details> element collapsed by default.
+# The structured JD metadata list sits inside a <details> element collapsed by default.
 def test_html_board_jd_panel_collapsed_by_default(tmp_path: Path) -> None:
     from app.services.reporter import ReporterService
 
     service = ReporterService()
     out = tmp_path / "board-jd-collapsed.html"
+    jd = (
+        "Reference number: 260901004\n"
+        "Description: First paragraph line.\n"
+        "Second paragraph line with more detail.\n"
+        "Posting date: 2026-08-25\n"
+    )
     service.generate_screening_board_html(
         str(out),
         position_name="Research Assistant",
         report_date=datetime(2026, 1, 1),
         rows=[{"rank": 1, "refno": "260901004", "appno": "260901008", "total_score": 78.7, "tier": "medium"}],
-        jd_text="Full JD body here.\n",
+        jd_text=jd,
         jd_parsed=_sample_jd_parsed(),
     )
     text = out.read_text(encoding="utf-8")
     assert "<details class='jd-details'>" in text
     assert "<details open" not in text
+    assert "class='jd-desc'" in text
+    assert "First paragraph line." in text
+    assert "Second paragraph line with more detail." in text
+
+
+# The JD metadata panel orders the standard fields and keeps duplicate/extras under Other fields.
+def test_html_board_jd_meta_panel_orders_fields_keeps_duplicates(tmp_path: Path) -> None:
+    from app.services.reporter import ReporterService
+
+    service = ReporterService()
+    out = tmp_path / "board-jd-meta.html"
+    jd = (
+        "Reference number: 260901004\n"
+        "Job group: Research / Project Posts\n"
+        "Unit: School of Accounting and Finance\n"
+        "Post title: Research Assistant\n"
+        "Project Title: AI Agents in Fintech Intermediation: Household Decision-Making\n"
+        "Appointment Period: Fixed-term gratuity-bearing contract for 12 months\n"
+        "Description: Duties:\n"
+        "The appointee will assist on the project titled AI Agents in Fintech Intermediation: "
+        "Household Decision-Making.\n"
+        "Qualifications:\n"
+        "hold an honours degree in a related field.\n"
+        "Conditions of service (display to external ads only): Conditions of Service\n"
+        "A competitive package will be offered.\n"
+        "Description: Consideration of applications will commence on 15 Sep 2026.\n"
+        "Posting date: 2026-08-25\n"
+        "List in external/internal: External Advertisement\n"
+    )
+    service.generate_screening_board_html(
+        str(out),
+        position_name="Research Assistant",
+        report_date=datetime(2026, 1, 1),
+        rows=[{"rank": 1, "refno": "260901004", "appno": "260901008", "total_score": 78.7, "tier": "medium"}],
+        jd_text=jd,
+    )
+    text = out.read_text(encoding="utf-8")
+    labels = re.findall(r"<dt>(.*?)</dt>", text)
+    assert labels[:9] == [
+        "Reference number",
+        "Job group",
+        "Unit",
+        "Post title",
+        "Project Title",
+        "Appointment Period",
+        "Description",
+        "Posting date",
+        "List in external/internal",
+    ]
+    # Both Description texts survive: the long one in the ordered rows, the short note as (2).
+    assert "<dt>Description</dt>" in text
+    assert "<dt>Description (2)</dt>" in text
+    assert "Consideration of applications will commence on 15 Sep 2026." in text
+    # Unlisted fields and duplicate rows are grouped under a collapsed Other fields details.
+    assert "<summary>Other fields</summary>" in text
+    assert "Conditions of service (display to external ads only)" in text
+    assert "Duties:" in text
+    # Multi-line values render with pre-line whitespace so paragraph breaks stay visible.
+    assert "white-space: pre-line" in text
+    # A description continuation line containing ": " is not mistaken for a new field.
+    assert "titled AI Agents in Fintech Intermediation: Household Decision-Making." in text
 
 
 # Forwarded candidate match pages show a compact tags-only JD panel (no full JD text).

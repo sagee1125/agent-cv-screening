@@ -34,6 +34,20 @@ _FALLBACK_DIMS = (
     "experience_quality",
 )
 
+
+# Job metadata fields rendered as ordered rows in the JD panel (duplicates go to Other fields).
+_JD_FIELD_ORDER = (
+    "Reference number",
+    "Job group",
+    "Unit",
+    "Post title",
+    "Project Title",
+    "Appointment Period",
+    "Description",
+    "Posting date",
+    "List in external/internal",
+)
+
 _RADAR_TOOLTIP_IDS = (
     "core_skill_match",
     "relevant_experience",
@@ -131,8 +145,14 @@ _PAGE_CSS_BASE = """
     .jd-panel summary { cursor: pointer; font-weight: 600; color: #0f172a; padding: 2px 0; }
     .jd-panel summary:hover { color: #2563eb; }
     .jd-details { margin-top: 2px; }
-    .jd-text { white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;
-               color: #334155; font-size: .9rem; line-height: 1.55; padding: 12px 14px; margin: 10px 0 0; }
+    .jd-meta { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+               gap: 10px 18px; margin: 12px 0 0; align-items: baseline; }
+    .jd-meta dt { font-weight: 600; color: #64748b; }
+    .jd-meta dd { margin: 0; font-weight: 400; color: #334155; line-height: 1.55; }
+    .jd-meta dd.jd-desc { white-space: pre-line; }
+    .jd-other { margin-top: 14px; border-top: 1px dashed #e2e8f0; padding-top: 12px; }
+    .jd-other summary { cursor: pointer; font-weight: 600; color: #475569; font-size: .88rem; }
+    .jd-other summary:hover { color: #2563eb; }
     .jd-empty { color: #64748b; font-size: .9rem; margin: 12px 0 0; }
     .tag-groups { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
     .tag-group { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
@@ -629,17 +649,107 @@ def _source_sentence(provenance: Any) -> str | None:
     return text or None
 
 
-# Render the full JD text inside a collapsed <details> block, scrubbed of contacts.
-def _jd_text_block(jd_text: str | None) -> str:
+# Field labels stay short and plain; prose value lines never look like labels.
+_JD_LABEL_CHARS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 /().,&'\u2019-]*$")
+_JD_LABEL_MAX_CHARS = 80
+
+
+# True when a line prefix could be a short JD field label rather than prose.
+def _looks_like_jd_label(candidate: str) -> bool:
+    value = candidate.strip()
+    return 0 < len(value) <= _JD_LABEL_MAX_CHARS and _JD_LABEL_CHARS.match(value) is not None
+
+
+# Split JD text into (label, value) fields, keeping multi-line values intact.
+def _split_jd_fields(jd_text: str) -> list[tuple[str, str]]:
+    fields: list[tuple[str, str]] = []
+    label: str | None = None
+    lines: list[str] = []
+
+    # Close the buffered field, if any, and reset for the next label line.
+    def flush() -> None:
+        nonlocal label, lines
+        if label is not None:
+            fields.append((label, "\n".join(lines).strip("\n")))
+        label = None
+        lines = []
+
+    for raw_line in jd_text.split("\n"):
+        match = re.match(r"^([^:]+):[ \t]+(.*)$", raw_line)
+        if match and _looks_like_jd_label(match.group(1)):
+            flush()
+            label = match.group(1).strip()
+            lines = [match.group(2).rstrip()]
+        elif label is not None:
+            lines.append(raw_line)
+    flush()
+    return fields
+
+
+# Split fields into ordered metadata rows and leftovers shown under "Other fields".
+def _partition_jd_fields(
+    fields: list[tuple[str, str]],
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    ordered: list[tuple[str, str]] = []
+    used = [False] * len(fields)
+    for wanted in _JD_FIELD_ORDER:
+        key = wanted.casefold()
+        for index, (label, value) in enumerate(fields):
+            if not used[index] and label.casefold() == key:
+                ordered.append((wanted, value))
+                used[index] = True
+                break
+    positions: dict[str, int] = {}
+    for label, _value in fields:
+        positions[label.casefold()] = positions.get(label.casefold(), 0) + 1
+    listed = {label.casefold() for label in _JD_FIELD_ORDER}
+    extras: list[tuple[str, str]] = []
+    for index, (label, value) in enumerate(fields):
+        if used[index]:
+            continue
+        key = label.casefold()
+        if key in listed:
+            display = label if positions[key] <= 1 else f"{label} ({positions[key]})"
+        else:
+            display = label
+        extras.append((display, value))
+    return ordered, extras
+
+
+# Render one definition-list row for a scrubbed, escaped JD metadata field.
+def _jd_meta_row(label: str, value: str) -> str:
+    dd_class = " class='jd-desc'" if "\n" in value else ""
+    return f"<dt>{_esc(label)}</dt><dd{dd_class}>{_esc(_scrub_contact(value))}</dd>"
+
+
+# Render JD metadata as a collapsed <details> definition list; empty when no JD text exists.
+def _jd_meta_panel(jd_text: str | None) -> str:
     raw = str(jd_text or "").strip()
     if not raw:
         return ""
-    body = _esc(_scrub_contact(raw))
+    fields = _split_jd_fields(raw)
+    if not fields:
+        return ""
+    ordered, extras = _partition_jd_fields(fields)
+    parts: list[str] = []
+    if ordered:
+        parts.append(
+            "<dl class='jd-meta'>"
+            + "".join(_jd_meta_row(label, value) for label, value in ordered)
+            + "</dl>"
+        )
+    if extras:
+        parts.append(
+            "<details class='jd-other'><summary>Other fields</summary><dl class='jd-meta'>"
+            + "".join(_jd_meta_row(label, value) for label, value in extras)
+            + "</dl></details>"
+        )
+    if not parts:
+        return ""
     return (
-        "<details class='jd-details'>"
-        "<summary>Full job description</summary>"
-        f"<div class='jd-text'>{body}</div>"
-        "</details>"
+        "<details class='jd-details'><summary>Job details</summary>"
+        + "".join(parts)
+        + "</details>"
     )
 
 
@@ -767,23 +877,23 @@ def _parsed_groups(parsed: dict | None) -> str:
     return "\n".join(chunks)
 
 
-# Build the JD context panel (collapsible text + parsed tags) or empty when no JD inputs are given.
+# Build the JD context panel (collapsible metadata + parsed tags) or empty when no JD inputs are given.
 def _jd_panel(jd_text: str | None, jd_parsed: dict | None, *, compact: bool = False) -> str:
     parsed = _jd_structured(jd_parsed)
     if jd_text is None and parsed is None:
         return ""
-    text_html = "" if compact else _jd_text_block(jd_text)
+    meta_html = "" if compact else _jd_meta_panel(jd_text)
     groups_html = _parsed_groups(parsed)
-    if not text_html and not groups_html:
+    if not meta_html and not groups_html:
         return ""
     if not groups_html:
         groups_html = "<p class='jd-empty'>No parsed skills yet.</p>"
-    if text_html:
+    if meta_html:
         heading = "Job Description &amp; Parsed Requirements"
     else:
         heading = "Parsed Job Requirements"
     body = "".join(
-        part for part in (text_html, f"<div class='tag-groups'>{groups_html}</div>") if part
+        part for part in (meta_html, f"<div class='tag-groups'>{groups_html}</div>") if part
     )
     return (
         "<section class='jd-panel' aria-label='Job description and parsed requirements'>"
