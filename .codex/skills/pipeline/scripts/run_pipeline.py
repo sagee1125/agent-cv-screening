@@ -457,7 +457,7 @@ def _run_legacy_engine(
     rows.sort(key=lambda r: r["total_score"], reverse=True)
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
-    reports = _generate_reports(args, out_dir, rows, failures)
+    reports = _generate_reports(args, out_dir, rows, failures, jd_source=jd_source, jd_text=jd_text)
     return _build_manifest(args, out_dir, jd_source, config_out, rows, reports, failures, engine="legacy")
 
 
@@ -538,7 +538,7 @@ def _run_matching_engine(
     rows.sort(key=lambda r: r["total_score"], reverse=True)
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
-    reports = _generate_reports(args, out_dir, rows, failures)
+    reports = _generate_reports(args, out_dir, rows, failures, jd_source=jd_source, jd_text=jd_text)
     return _build_manifest(args, out_dir, jd_source, None, rows, reports, failures, engine="matching")
 
 

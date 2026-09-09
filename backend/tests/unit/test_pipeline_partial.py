@@ -419,3 +419,68 @@ def test_pipeline_resume_rebuilds_replaced_cv(tmp_path, monkeypatch, capsys) -> 
     cv.write_bytes(b"%PDF-two")
     _run_cli(module, argv, monkeypatch, capsys)
     assert len(parse_calls) == 2
+
+
+# JD inputs are forwarded to report-gen so the board/matches render the JD panel.
+def test_pipeline_forwards_jd_inputs_to_board_and_match_reports(tmp_path, monkeypatch) -> None:
+    """Board and match-html commands carry --jd-file/--jd-json when JD inputs exist."""
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    report_dir = tmp_path / "hr"
+    out_dir.mkdir()
+    report_dir.mkdir()
+    extracted = out_dir / "extracted-123456.json"
+    score = out_dir / "score-123456.json"
+    jd_source = tmp_path / "jd-parse.json"
+    extracted.write_text("{}", encoding="utf-8")
+    score.write_text('{"total_score": 80, "tier": "Tier 2"}', encoding="utf-8")
+    jd_source.write_text('{"structured_data": {"must_skills": []}}', encoding="utf-8")
+    jd_text = "Reference number: 260818001\nPost title: Project Associate\n"
+    (out_dir / "jd.txt").write_text(jd_text, encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def fake_retries(cmd, max_retries):
+        commands.append(cmd)
+        output = Path(cmd[cmd.index("--output") + 1])
+        output.write_bytes(b"%PDF-fake" if output.suffix == ".pdf" else b"<html></html>")
+        return 1, None
+
+    monkeypatch.setattr(module, "_run_with_retries", fake_retries)
+    args = argparse.Namespace(
+        skip_reports=False,
+        position="Project Associate",
+        engine="legacy",
+        refno="260818001",
+        max_retries=0,
+        fail_fast=False,
+        report_dir=str(report_dir),
+    )
+    row = {
+        "rank": 1,
+        "refno": "260818001",
+        "appno": "123456",
+        "display_label": "260818001/123456",
+        "total_score": 80,
+        "tier": "Tier 2",
+        "_extracted": extracted,
+        "_score": score,
+        "_source": "123456.pdf",
+    }
+    failures: list = []
+    first = module._generate_reports(
+        args, out_dir, [dict(row)], failures, jd_source=jd_source, jd_text=jd_text
+    )
+    board_cmd = next(cmd for cmd in commands if cmd[2] == "board")
+    assert _flag(board_cmd, "--jd-file") == str(out_dir / "jd.txt")
+    assert _flag(board_cmd, "--jd-json") == str(jd_source)
+    match_cmd = next(cmd for cmd in commands if cmd[2] == "match-html")
+    assert _flag(match_cmd, "--jd-json") == str(jd_source)
+    assert first["ranking_overview_html"]
+
+    # The same JD bytes let the second run reuse the board (no extra board call).
+    second = module._generate_reports(
+        args, out_dir, [dict(row)], failures, jd_source=jd_source, jd_text=jd_text
+    )
+    board_calls = [cmd for cmd in commands if cmd[2] == "board"]
+    assert len(board_calls) == 1
+    assert second["ranking_overview_html"]
