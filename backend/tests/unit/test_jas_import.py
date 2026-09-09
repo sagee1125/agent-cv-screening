@@ -154,7 +154,10 @@ def test_build_jd_text_includes_description() -> None:
     text = build_jd_text(detail)
     assert "Post title: Project Associate" in text
     assert "Description: Design and implement data governance and data management." in text
-    assert "Conditions of service: Conditions of Service A highly competitive remuneration package will be offered." in text
+    assert (
+        "Conditions of service: Conditions of Service\n"
+        "A highly competitive remuneration package will be offered." in text
+    )
 
 
 # Confirm the skill payload never carries identity columns from the candidate table.
@@ -210,3 +213,21 @@ def test_parse_job_status_single_t_maps_to_tbc() -> None:
     )
     detail = parse_job_html(html)
     assert detail.candidates[0].status == "TBC"
+
+
+# Description cell paragraphs survive scrape as lines, not one flattened run-on.
+def test_build_jd_text_preserves_description_paragraph_breaks() -> None:
+    html = JOB_HTML.replace(
+        '<tr><td class="f-header">Description</td><td class="f-data-1"><p>Design and implement data governance and data management.</p></td></tr>',
+        '<tr><td class="f-header">Description</td><td class="f-data-1">'
+        "<p>Design and implement data governance and data management.</p>"
+        "<p>The work covers the project titled Data governance: records and analytics.</p>"
+        "</td></tr>",
+    )
+    text = build_jd_text(parse_job_html(html))
+    assert (
+        "Description: Design and implement data governance and data management.\n"
+        "The work covers the project titled Data governance: records and analytics." in text
+    )
+    # The second paragraph keeps its colon intact and stays on its own line.
+    assert "The work covers the project titled Data governance: records and analytics." in text

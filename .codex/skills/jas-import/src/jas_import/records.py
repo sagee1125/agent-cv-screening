@@ -151,6 +151,24 @@ def _clean(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+# Keep real block-element line breaks while reflowing soft-wrapped source lines.
+def _clean_block(parts: list[str]) -> str:
+    lines: list[str] = []
+    buffer: list[str] = []
+    for part in parts:
+        if part == "\n":
+            line = re.sub(r"\s+", " ", "".join(buffer)).strip()
+            if line:
+                lines.append(line)
+            buffer = []
+        else:
+            buffer.append(part)
+    line = re.sub(r"\s+", " ", "".join(buffer)).strip()
+    if line:
+        lines.append(line)
+    return "\n".join(lines)
+
+
 # Convert a parsed cell buffer into a JSON-friendly dict.
 def _normalize_cell(cell: _Cell) -> dict[str, Any]:
     links = []
@@ -163,6 +181,7 @@ def _normalize_cell(cell: _Cell) -> dict[str, Any]:
     return {
         "tag": cell.tag,
         "text": _clean(" ".join(cell.text_parts)),
+        "text_block": _clean_block(cell.text_parts),
         "link_text": _clean(" ".join(link_texts)),
         "links": links,
     }
@@ -209,6 +228,11 @@ def _text(cell: dict[str, Any]) -> str:
     return cell["text"]
 
 
+# Extract the block-preserving (multi-paragraph) text of a cell.
+def _text_block(cell: dict[str, Any]) -> str:
+    return cell.get("text_block") or ""
+
+
 # Extract a query parameter value from an absolute or relative URL.
 def _query_value(url: str, key: str) -> str | None:
     try:
@@ -245,7 +269,7 @@ def _key_value_rows(table: dict[str, Any]) -> list[tuple[str, str]]:
         if len(row) >= 2:
             label = _text(row[0])
             if label:
-                fields.append((label, _text(row[1])))
+                fields.append((label, _text_block(row[1])))
     return fields
 
 
