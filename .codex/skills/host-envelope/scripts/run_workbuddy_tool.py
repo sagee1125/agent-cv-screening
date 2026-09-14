@@ -125,12 +125,14 @@ def _run_screen_refno(args: argparse.Namespace) -> int:
         # An empty target still asks the skill, which answers need_input(refno); a bare
         # None would crash subprocess before the skill could reply.
         cmd = [PYTHON, str(script), target or args.refno or "", "--driver", args.driver]
-        if args.conditions:
-            cmd += ["--conditions", args.conditions]
-        if args.no_open:
-            cmd.append("--no-open")
-        if args.keep_browser:
-            cmd.append("--keep-browser")
+    # Flags both routes accept: run_jas_import forwards argv verbatim to run_jas_screening,
+    # which reaches the same pipeline, so the conditions decision must be offered to both.
+    if args.conditions:
+        cmd += ["--conditions", args.conditions]
+    if args.no_open:
+        cmd.append("--no-open")
+    if args.keep_browser:
+        cmd.append("--keep-browser")
     exit_code, payload = _run_skill(cmd)
     # Only trust the manifest when this run actually produced one. A run that stopped early
     # (need_input / conditions_pending / error) writes no manifest, so the previous run's

@@ -344,7 +344,8 @@ def test_stale_manifest_is_not_projected_after_an_early_stop(monkeypatch, capsys
 
 
 # --conditions is forwarded to the skill so the conversation can answer the gate.
-def test_conditions_flag_is_forwarded_to_the_skill(monkeypatch, capsys) -> None:
+# Both routes reach the same pipeline, so both must carry it.
+def test_conditions_flag_is_forwarded_to_the_skill(tmp_path, monkeypatch, capsys) -> None:
     module = _import_module()
     seen: list[list[str]] = []
 
@@ -362,9 +363,21 @@ def test_conditions_flag_is_forwarded_to_the_skill(monkeypatch, capsys) -> None:
         monkeypatch,
         capsys,
     )
-
     assert "--conditions" in seen[0]
     assert seen[0][seen[0].index("--conditions") + 1] == "confirmed"
+
+    # The exported-folder route goes through jas-import, which forwards argv verbatim to
+    # the same pipeline: dropping the flag here would silently ignore HR's decision.
+    folder = tmp_path / "export"
+    folder.mkdir()
+    _run(
+        module,
+        ["screen_refno", str(folder), "--conditions", "discard"],
+        monkeypatch,
+        capsys,
+    )
+    assert "--conditions" in seen[1]
+    assert seen[1][seen[1].index("--conditions") + 1] == "discard"
 
 
 # The WebBridge browser session counts as granted JAS access (it is the default driver).

@@ -242,6 +242,9 @@ def main() -> int:
             result["hr_files"] = f"Desktop/{HR_PACK_FOLDER}/{refno or 'job'}"
         # A run that stopped to ask about stored conditions is not a failure: pass the
         # status and the stored conditions through so the host can read them back to HR.
+        # Return before the exit_code branch (which would relabel this an error) and before
+        # the tab-closing block: nothing was generated, so HR should keep the ad on screen
+        # while she answers.
         if pipeline_payload.get("status") == "conditions_pending":
             result["status"] = "conditions_pending"
             result["ask"] = pipeline_payload.get("ask")
