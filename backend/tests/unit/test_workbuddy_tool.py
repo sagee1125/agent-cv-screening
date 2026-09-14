@@ -275,6 +275,98 @@ def test_check_updates_error_returns_exit_code_1(monkeypatch, capsys) -> None:
     assert envelope["status"] == "error"
 
 
+# A run that stops to ask about stored conditions must reach the conversation as a question.
+def test_conditions_pending_reaches_the_envelope(monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    def fake_run_skill(cmd):
+        return 2, {
+            "status": "conditions_pending",
+            "missing": ["conditions"],
+            "questions": ["Reuse the saved conditions, or screen against the job ad alone?"],
+            "ask": {
+                "missing": ["conditions"],
+                "questions": ["Reuse the saved conditions, or screen against the job ad alone?"],
+                "conditions": {
+                    "collected_at": "2026-09-14",
+                    "must_skills": ["Python", "R"],
+                    "preferred_skills": ["Docker"],
+                },
+            },
+            "hr_files": "Desktop/workbuddy-cv-screen/260901004",
+        }
+
+    monkeypatch.setattr(module, "_run_skill", fake_run_skill)
+    monkeypatch.setattr(module, "_read_pipeline_manifest", lambda s: {})
+    monkeypatch.setattr(module, "_read_jas_manifest", lambda s: {})
+
+    exit_code, out, _ = _run(module, ["screen_refno", "260901004", "--driver", "http"], monkeypatch, capsys)
+
+    assert exit_code == 2
+    envelope = json.loads(out)
+    assert envelope["status"] == "conditions_pending"
+    assert envelope["error_code"] == "conditions_pending"
+    # HR is shown what would be reused, so the question is answerable.
+    assert envelope["ask"]["missing"] == ["conditions"]
+    assert envelope["ask"]["conditions"]["must_skills"] == ["Python", "R"]
+    assert envelope["ask"]["conditions"]["collected_at"] == "2026-09-14"
+
+
+# A run that stopped early must never be reported as the previous run's success.
+def test_stale_manifest_is_not_projected_after_an_early_stop(monkeypatch, capsys) -> None:
+    module = _import_module()
+
+    def fake_run_skill(cmd):
+        # The run wrote no manifest of its own; only the previous run's is on disk.
+        return 2, {
+            "status": "conditions_pending",
+            "missing": ["conditions"],
+            "questions": ["Reuse?"],
+            "hr_files": "Desktop/workbuddy-cv-screen/260901004",
+        }
+
+    stale = {
+        "status": "success",
+        "refno": "260901004",
+        "candidates": [{"rank": 1, "appno": "260901008", "total_score": 82.71, "tier": "high"}],
+    }
+    monkeypatch.setattr(module, "_run_skill", fake_run_skill)
+    monkeypatch.setattr(module, "_read_pipeline_manifest", lambda s: stale)
+    monkeypatch.setattr(module, "_read_jas_manifest", lambda s: {})
+
+    exit_code, out, _ = _run(module, ["screen_refno", "260901004", "--driver", "http"], monkeypatch, capsys)
+
+    envelope = json.loads(out)
+    assert exit_code == 2
+    assert envelope["status"] == "conditions_pending"
+    # The previous run's ranking must not be reported as this run's result.
+    assert envelope["ranking"] == []
+
+
+# --conditions is forwarded to the skill so the conversation can answer the gate.
+def test_conditions_flag_is_forwarded_to_the_skill(monkeypatch, capsys) -> None:
+    module = _import_module()
+    seen: list[list[str]] = []
+
+    def fake_run_skill(cmd):
+        seen.append(list(cmd))
+        return 0, {"status": "success", "hr_files": "Desktop/workbuddy-cv-screen/260901004"}
+
+    monkeypatch.setattr(module, "_run_skill", fake_run_skill)
+    monkeypatch.setattr(module, "_read_pipeline_manifest", lambda s: {})
+    monkeypatch.setattr(module, "_read_jas_manifest", lambda s: {})
+
+    _run(
+        module,
+        ["screen_refno", "260901004", "--driver", "http", "--conditions", "confirmed"],
+        monkeypatch,
+        capsys,
+    )
+
+    assert "--conditions" in seen[0]
+    assert seen[0][seen[0].index("--conditions") + 1] == "confirmed"
+
+
 # The WebBridge browser session counts as granted JAS access (it is the default driver).
 def test_check_updates_webbridge_reports_session_granted(monkeypatch, capsys) -> None:
     module = _import_module()

@@ -411,7 +411,7 @@ def test_cli_http_driver_runs_pipeline(tmp_path, monkeypatch, capsys) -> None:
     def fake_collect_job(**kwargs):
         return manifest
 
-    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports):
+    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports, conditions=None):
         return 0, {"status": "success", "hr_files": "Desktop/workbuddy-cv-screen/2600827001"}
 
     monkeypatch.setattr(module, "collect_job", fake_collect_job)
@@ -613,7 +613,7 @@ def _run_cli(module, monkeypatch, tmp_path, extra_args, pipeline_exit=0, pipelin
         },
     )
 
-    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports):
+    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports, conditions=None):
         return pipeline_exit, {"status": pipeline_status, "hr_files": "Desktop/workbuddy-cv-screen/2600827001"}
 
     monkeypatch.setattr(module, "run_pipeline", fake_run_pipeline)

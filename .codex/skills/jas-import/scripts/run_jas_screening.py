@@ -233,6 +233,7 @@ def _pipeline_cmd(
     fail_fast: bool,
     refno: str | None = None,
     report_dir: Path | None = None,
+    conditions: str | None = None,
 ) -> list[str]:
     cmd = [
         PYTHON,
@@ -252,6 +253,8 @@ def _pipeline_cmd(
         cmd += ["--report-dir", str(report_dir)]
     if refno:
         cmd += ["--refno", str(refno)]
+    if conditions:
+        cmd += ["--conditions", conditions]
     if skip_reports:
         cmd.append("--skip-reports")
     if resume:
@@ -364,6 +367,7 @@ def _run_screening(
         args.fail_fast,
         refno=refno,
         report_dir=job_dir,
+        conditions=getattr(args, "conditions", None),
     )
     exit_code, payload = _run_pipeline(cmd)
     # Persist run history + CV hashes so later runs can skip unchanged downloads.
@@ -636,6 +640,16 @@ def main() -> int:
         help="Do not open ranking-overview.html after a successful run.",
     )
     parser.add_argument("--resume", action="store_true", help="Reuse usable artifacts already in --output-dir.")
+    parser.add_argument(
+        "--conditions",
+        choices=("confirmed", "discard"),
+        default=None,
+        help=(
+            "What to do with conditions saved by an earlier conversation for this job. "
+            "Omit to be asked (status conditions_pending); 'confirmed' applies them, "
+            "'discard' screens against the job ad alone."
+        ),
+    )
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure.")
     parser.add_argument("--max-retries", type=int, default=2, help="Extra attempts per candidate step.")
     args = parser.parse_args()

@@ -70,6 +70,8 @@ def _status(value: object) -> str:
 def _error_code(status: str, error_message: str | None) -> str | None:
     if status == "need_input":
         return "need_input"
+    if status == "conditions_pending":
+        return "conditions_pending"
     if status == "partial_success":
         return "partial_failures"
     if status != "error":
@@ -99,6 +101,7 @@ def _project_error_code(payload: dict[str, Any], status: str, error_message: str
 # Intersects ask.missing with the host enum; empty lists become ["input"].
 def _project_ask(payload: dict[str, Any]) -> dict[str, Any] | None:
     ask = payload.get("ask") if isinstance(payload.get("ask"), dict) else None
+    status = payload.get("status")
     missing_raw = []
     questions_raw = []
     if ask:
@@ -112,9 +115,9 @@ def _project_ask(payload: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(questions_raw, str):
         questions_raw = [questions_raw]
     missing = [str(item) for item in missing_raw if str(item) in ALLOWED_MISSING]
-    if payload.get("status") == "need_input" and not missing:
+    if status == "need_input" and not missing:
         missing = ["input"]
-    if not missing and payload.get("status") != "need_input":
+    if not missing and status != "need_input":
         return None
     questions = [sanitize_text(item, 120) for item in list(questions_raw)[:6] if str(item).strip()]
     questions = [
@@ -124,7 +127,34 @@ def _project_ask(payload: dict[str, Any]) -> dict[str, Any] | None:
     ][:6]
     if not questions:
         questions = ["Provide the missing screening inputs."]
-    return {"missing": missing or ["input"], "questions": questions}
+    projected: dict[str, Any] = {"missing": missing or ["input"], "questions": questions}
+    # Conditions the engine is holding back until HR answers: the conversation must be able
+    # to read them back, otherwise it can only ask "reuse?" without saying what "them" is.
+    if status == "conditions_pending":
+        conditions = _project_conditions(ask.get("conditions") if ask else None)
+        if conditions:
+            projected["conditions"] = conditions
+    return projected
+
+
+# Keeps the stored conditions readable to HR while staying inside the host whitelist.
+def _project_conditions(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    for key in ("must_skills", "preferred_skills", "languages"):
+        values = raw.get(key)
+        if isinstance(values, list):
+            cleaned = [sanitize_text(item, 80) for item in values[:40] if str(item).strip()]
+            out[key] = [item for item in cleaned if item and not looks_like_forbidden_payload(item)]
+    collected = raw.get("collected_at")
+    if collected:
+        out["collected_at"] = sanitize_text(collected, 40)
+    for key in ("target_seniority", "min_relevant_years"):
+        value = raw.get(key)
+        if value is not None:
+            out[key] = sanitize_text(value, 40)
+    return out or None
 
 
 # Restricts an appno to the host schema charset; never copies a personal name field.
@@ -450,7 +480,9 @@ def project_host_return(
         "candidate_count": len([row for row in ranking if not row["parse_failed"]]),
         "failed_count": failed_count,
         "auth": auth,
-        "ask": _project_ask({**skill, "status": status}) if status == "need_input" else None,
+        "ask": _project_ask({**skill, "status": status})
+        if status in ("need_input", "conditions_pending")
+        else None,
         "ranking": ranking,
         "reports": _project_reports(skill),
         "scratch_retained": scratch_retained,

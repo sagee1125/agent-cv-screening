@@ -73,13 +73,23 @@ def _resolve_records_url(refno: str | None, records_url: str | None, base_url: s
 
 
 # Run the existing jas-import pipeline on the collected folder.
-def run_pipeline(folder: Path, *, report_dir: str | None, engine: str, no_open: bool, skip_reports: bool) -> tuple[int, dict]:
+def run_pipeline(
+    folder: Path,
+    *,
+    report_dir: str | None,
+    engine: str,
+    no_open: bool,
+    skip_reports: bool,
+    conditions: str | None = None,
+) -> tuple[int, dict]:
     script = _bootstrap.REPO_ROOT / ".codex" / "skills" / "jas-import" / "scripts" / "run_jas_import.py"
     cmd = [sys.executable, str(script), str(folder)]
     if report_dir:
         cmd += ["--output-dir", report_dir]
     if engine:
         cmd += ["--engine", engine]
+    if conditions:
+        cmd += ["--conditions", conditions]
     if no_open:
         cmd += ["--no-open"]
     if skip_reports:
@@ -122,6 +132,12 @@ def main() -> int:
     parser.add_argument("--no-pipeline", action="store_true", help="Collect only; do not run the screening pipeline.")
     parser.add_argument("--report-dir", default=None, help="Pipeline output parent (default Desktop/workbuddy-cv-screen).")
     parser.add_argument("--engine", choices=("legacy", "matching"), default="matching", help="Scoring engine.")
+    parser.add_argument(
+        "--conditions",
+        choices=("confirmed", "discard"),
+        default=None,
+        help="Apply conditions saved by an earlier conversation, or screen against the job ad alone.",
+    )
     parser.add_argument("--no-open", action="store_true", help="Do not open ranking-overview.html after the run.")
     parser.add_argument("--skip-reports", action="store_true", help="Skip HTML/PDF/Excel generation (testing only).")
     parser.add_argument("--cleanup", action="store_true", help="Delete the collected folder after a successful pipeline run.")
@@ -215,6 +231,7 @@ def main() -> int:
             engine=args.engine,
             no_open=args.no_open,
             skip_reports=args.skip_reports,
+            conditions=args.conditions,
         )
         result["pipeline_status"] = pipeline_payload.get("status")
         if "hr_files" in pipeline_payload:
@@ -223,6 +240,12 @@ def main() -> int:
             result["hr_files"] = str(Path(args.report_dir) / (refno or "job"))
         else:
             result["hr_files"] = f"Desktop/{HR_PACK_FOLDER}/{refno or 'job'}"
+        # A run that stopped to ask about stored conditions is not a failure: pass the
+        # status and the stored conditions through so the host can read them back to HR.
+        if pipeline_payload.get("status") == "conditions_pending":
+            result["status"] = "conditions_pending"
+            result["ask"] = pipeline_payload.get("ask")
+            return _emit(result)
         if exit_code != 0:
             result["status"] = "error"
             result["error_message"] = pipeline_payload.get("error_message") or f"pipeline exited {exit_code}"

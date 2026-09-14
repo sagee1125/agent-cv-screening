@@ -5,7 +5,7 @@ from typing import Any
 
 SCHEMA_VERSION = "1.0.0"
 ALLOWED_TOOLS = frozenset({"request_jas_access", "screen_refno", "get_run_status", "check_updates"})
-ALLOWED_STATUS = frozenset({"success", "partial_success", "need_input", "error"})
+ALLOWED_STATUS = frozenset({"success", "partial_success", "need_input", "conditions_pending", "error"})
 ALLOWED_ERROR_CODES = frozenset(
     {
         "envelope_rejected",
@@ -15,13 +15,16 @@ ALLOWED_ERROR_CODES = frozenset(
         "refno_invalid",
         "fetch_failed",
         "need_input",
+        "conditions_pending",
         "not_found",
         "pipeline_error",
         "partial_failures",
         "internal",
     }
 )
-ALLOWED_MISSING = frozenset({"jas_session", "refno", "candidates", "jd", "position", "scope", "input"})
+ALLOWED_MISSING = frozenset(
+    {"jas_session", "refno", "candidates", "jd", "position", "scope", "input", "conditions"}
+)
 ALLOWED_HR_STATUS = frozenset({"TBC", "P", "S", "N"})
 ALLOWED_FAILURE_STAGES = frozenset({"cv-parse", "score", "match", "report-gen", "download"})
 ALLOWED_SESSION = frozenset({"missing", "granted", "denied", "expired"})

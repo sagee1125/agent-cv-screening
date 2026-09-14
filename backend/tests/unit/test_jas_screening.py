@@ -135,6 +135,27 @@ def test_pipeline_cmd_shape(tmp_path) -> None:
     assert "--cv" in cmd and str(tmp_path / "123456.pdf") in cmd
 
 
+# The conditions decision must reach the pipeline, otherwise the gate cannot be answered.
+def test_pipeline_cmd_forwards_conditions(tmp_path) -> None:
+    base = (
+        tmp_path / "jd.txt",
+        [tmp_path / "123456.pdf"],
+        "Project Associate",
+        tmp_path / "out",
+        "matching",
+        2,
+        False,
+        False,
+        False,
+    )
+    assert "--conditions" not in module._pipeline_cmd(*base)
+
+    for decision in ("confirmed", "discard"):
+        cmd = module._pipeline_cmd(*base, conditions=decision)
+        assert "--conditions" in cmd
+        assert cmd[cmd.index("--conditions") + 1] == decision
+
+
 # Return need_input when the folder has no CV files.
 def test_run_jas_screening_need_input_when_no_cvs(tmp_path, capsys) -> None:
     jas_dir = tmp_path / "job"
