@@ -523,3 +523,73 @@ def test_board_row_publishes_only_allowlisted_question_variables(tmp_path) -> No
     assert "SECRET_CV_TEXT" in questions[1]["question"]  # pre-existing plain question text
     # Legacy rows without template metadata pass through unchanged.
     assert questions[2] == {"priority": "low", "question": "Legacy plain question."}
+
+
+# Stored HR conditions must not be applied until the current conversation confirms them.
+def test_pipeline_asks_before_reusing_stored_conditions(tmp_path, monkeypatch, capsys) -> None:
+    """A fresh run for a job with saved conditions returns conditions_pending, not scores."""
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text("{}", encoding="utf-8")
+    # Conditions left behind by an earlier conversation for the same job.
+    (out_dir / "jd-overrides.yaml").write_text(
+        "collected_at: '2026-09-14'\nmust_skills:\n  - Python\npreferred_skills:\n  - Docker\n",
+        encoding="utf-8",
+    )
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+
+    exit_code, out, _err = _run_cli(
+        module,
+        ["--jd-json", str(jd), "--cv", str(cv), "--skip-reports", "--output-dir", str(out_dir)],
+        monkeypatch,
+        capsys,
+    )
+
+    payload = json.loads(out)
+    assert exit_code == 2
+    assert payload["status"] == "conditions_pending"
+    assert payload["missing"] == ["conditions"]
+    # HR is shown what would be reused instead of it being applied behind their back.
+    assert payload["ask"]["conditions"]["must_skills"] == ["Python"]
+    # Nothing was scored and no merged JD was written.
+    assert parse_calls == []
+    assert not (out_dir / "jd-final.json").exists()
+
+
+# Confirming the stored conditions merges them and the scores are actually rebuilt.
+def test_pipeline_applies_conditions_only_when_confirmed(tmp_path, monkeypatch, capsys) -> None:
+    """--conditions confirmed merges the saved conditions; --conditions discard does not."""
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text(
+        json.dumps({"structured_data": {"must_skills": [], "preferred_skills": []}}),
+        encoding="utf-8",
+    )
+    (out_dir / "jd-overrides.yaml").write_text(
+        "must_skills:\n  - Python\npreferred_skills:\n  - Docker\n", encoding="utf-8"
+    )
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+
+    base = ["--jd-json", str(jd), "--cv", str(cv), "--skip-reports", "--output-dir", str(out_dir)]
+
+    exit_code, out, _err = _run_cli(module, base + ["--conditions", "confirmed"], monkeypatch, capsys)
+    assert exit_code == 0
+    assert json.loads(out)["status"] == "success"
+    final = json.loads((out_dir / "jd-final.json").read_text(encoding="utf-8"))
+    assert [item["display_name"] for item in final["structured_data"]["must_skills"]] == ["Python"]
+
+    # Discarding drops the merged JD and re-scores against the job ad alone.
+    exit_code, out, _err = _run_cli(module, base + ["--conditions", "discard"], monkeypatch, capsys)
+    assert exit_code == 0
+    assert json.loads(out)["status"] == "success"
+    assert not (out_dir / "jd-final.json").exists()

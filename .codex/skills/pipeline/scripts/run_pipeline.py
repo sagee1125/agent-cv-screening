@@ -44,7 +44,12 @@ from screening_core.input_policy import (
     validate_path,
     validate_reference,
 )
-from screening_core.jd_overrides import OVERRIDES_FILENAME, write_final_jd
+from screening_core.jd_overrides import (
+    FINAL_JD_FILENAME,
+    OVERRIDES_FILENAME,
+    describe_overrides,
+    write_final_jd,
+)
 from screening_core.job_state import load_job_state, save_job_state
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
@@ -71,10 +76,19 @@ EXIT_NEED_INPUT = 2
 
 # Raised when the run cannot start until the caller supplies missing inputs.
 class NeedInputError(Exception):
-    def __init__(self, missing: list[str], questions: list[str]) -> None:
+    def __init__(
+        self,
+        missing: list[str],
+        questions: list[str],
+        *,
+        status: str = "need_input",
+        details: dict | None = None,
+    ) -> None:
         """Record which inputs are missing and the questions to ask the caller."""
         self.missing = missing
         self.questions = questions
+        self.status = status
+        self.details = details or {}
         super().__init__(", ".join(missing))
 
 
@@ -190,6 +204,7 @@ def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
         jd_paths=jd_paths,
         cv_hashes=cv_hashes,
         overrides_path=out_dir / OVERRIDES_FILENAME,
+        apply_overrides=bool(getattr(args, "_conditions_confirmed", False)),
     )
 
 
@@ -301,10 +316,39 @@ def _resolve_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Path, s
 
 
 # Fold HR-supplied conditions onto the parsed JD so scores use the agreed conditions.
+# Stored conditions are only merged once the current conversation confirms them; the
+# file lives in the shared per-refno output directory and outlives the conversation
+# that wrote it, so merging on sight would leak one conversation's edits into the next.
 def _apply_jd_overrides(args: argparse.Namespace, out_dir: Path, jd_parse_path: Path) -> Path:
     """Return the JD JSON to score against: the merged one when HR conditions apply."""
+    if getattr(args, "_conditions_confirmed", False):
+        return _merge_jd_overrides(args, out_dir, jd_parse_path)
+    if getattr(args, "_discard_conditions", False):
+        # HR chose to screen against the job ad alone: an answer, so nothing to ask.
+        args._jd_overrides = {"applied": False, "reason": "discarded by HR"}
+        return jd_parse_path
+    pending = describe_overrides(out_dir)
+    if pending is None:
+        args._jd_overrides = {"applied": False, "reason": "no conditions file"}
+        return jd_parse_path
+    # Unconfirmed conditions are an answered question, not a silent inheritance.
+    raise NeedInputError(
+        ["conditions"],
+        [
+            "This job already has saved conditions from an earlier conversation. "
+            "Read them back to HR and ask whether to reuse them, change them, or screen "
+            "against the job ad alone; then re-run with --conditions confirmed|discard.",
+        ],
+        status="conditions_pending",
+        details={"conditions": pending},
+    )
+
+
+# Merge confirmed HR conditions onto the parsed JD, falling back on any merge error.
+def _merge_jd_overrides(args: argparse.Namespace, out_dir: Path, jd_parse_path: Path) -> Path:
+    """Return the merged JD path when HR conditions changed something, else the parsed JD."""
     try:
-        final_path, summary = write_final_jd(out_dir, jd_parse_path)
+        final_path, summary = write_final_jd(out_dir, jd_parse_path, confirmed=True)
     except Exception as exc:  # never block a screening because the merge failed
         args._jd_overrides = {"applied": False, "reason": f"merge failed: {exc}"}
         return jd_parse_path
@@ -977,6 +1021,13 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         out_dir = REPO_ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # HR's answer about previously saved conditions decides whether they are merged.
+    args._conditions_confirmed = args.conditions == "confirmed"
+    args._discard_conditions = args.conditions == "discard"
+    if args._discard_conditions:
+        # Screen against the job ad alone: drop the merged JD so nothing can pick it up.
+        (out_dir / FINAL_JD_FILENAME).unlink(missing_ok=True)
+
     _enforce_input_policy(args, out_dir)
     if not args.refno:
         args.refno = refno_from_url(getattr(args, "jd_url", None)) or getattr(args, "polyu_ref", None)
@@ -997,12 +1048,12 @@ def _run_pipeline(args: argparse.Namespace) -> int:
 
 
 def _print_need_input(exc: NeedInputError) -> int:
-    """Print a need_input envelope for the L1 agent and return exit code 2."""
+    """Print a need_input (or conditions_pending) envelope and return exit code 2."""
     payload = {
-        "status": "need_input",
+        "status": exc.status,
         "missing": exc.missing,
         "questions": exc.questions,
-        "ask": {"missing": exc.missing, "questions": exc.questions},
+        "ask": {"missing": exc.missing, "questions": exc.questions, **exc.details},
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return EXIT_NEED_INPUT
@@ -1035,6 +1086,16 @@ def main() -> int:
         "--base-url",
         default=None,
         help="Base URL for CV link resolution in fetched pages (public demo).",
+    )
+    parser.add_argument(
+        "--conditions",
+        choices=("confirmed", "discard"),
+        default=None,
+        help=(
+            "What to do with conditions saved by an earlier conversation for this job. "
+            "Omit to be asked (status conditions_pending); 'confirmed' applies them, "
+            "'discard' screens against the job ad alone."
+        ),
     )
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Directory for downloaded CV files.")
     parser.add_argument(

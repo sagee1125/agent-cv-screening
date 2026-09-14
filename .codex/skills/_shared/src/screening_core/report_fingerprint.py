@@ -71,6 +71,7 @@ def input_run_payload(
     jd_paths: list[Path | str | None],
     cv_hashes: dict[str, str],
     overrides_path: Path | str | None = None,
+    apply_overrides: bool = False,
 ) -> dict[str, Any]:
     jd_chunks = [sha256_file(path) for path in jd_paths if path]
     return {
@@ -81,6 +82,9 @@ def input_run_payload(
         "jd": sha256_text("|".join(jd_chunks)),
         # HR-supplied conditions are tracked separately: they change scores, not the parse.
         "overrides": sha256_file(overrides_path),
+        # Whether those conditions were actually merged: a "screen against the ad alone"
+        # run must not reuse scores that were computed with conditions applied.
+        "overrides_applied": bool(apply_overrides),
         "cvs": dict(sorted(cv_hashes.items())),
     }
 
@@ -97,7 +101,9 @@ def jd_inputs_changed(previous: dict[str, Any] | None, current: dict[str, Any]) 
 def overrides_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
     prior = previous or {}
     # An absent key means the fingerprint predates conditions support: force one recompute.
-    return prior.get("overrides", "") != current.get("overrides", "")
+    return prior.get("overrides", "") != current.get("overrides", "") or bool(
+        prior.get("overrides_applied", False)
+    ) != bool(current.get("overrides_applied", False))
 
 
 # Slugs whose CV bytes changed (or are new) and must be re-parsed.

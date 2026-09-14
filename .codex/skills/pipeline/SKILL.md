@@ -45,6 +45,8 @@ venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
 | `--reference-date <YYYY-MM-DD>`   | Reference date for the matching engine (default: today)                                                                                 |
 | `--skip-reports`                  | Score + rank only; skip PDF/Excel generation                                                                                            |
 | `--output-dir <dir>`              | Output directory for intermediate JSONs and reports (default `data/pipeline_out`)                                                       |
+| **HR conditions**                 |                                                                                                                                         |
+| `--conditions <confirmed\|discard>` | What to do with conditions saved by an earlier conversation for this job (see below). Omit to be asked                          |
 | **L1 reliability**                |                                                                                                                                         |
 | `--max-retries <N>`               | Extra attempts per candidate step after the first (default `2`)                                                                         |
 | `--resume`                        | Skip JD parse / CV parse / score when usable JSON exists **and** JD/CV bytes match the last run. If the JD or a CV file changed, cache is rebuilt. Unchanged PDFs/HTML are skipped by fingerprint even without this flag |
@@ -63,6 +65,33 @@ venv/Scripts/python.exe .codex/skills/pipeline/scripts/run_pipeline.py \
 
 - **`legacy` (default)**: `scorer build-config` + `scorer score` -> `dimension_scores` + `interview_suggestions`. PDF radar is drawn from `dimension_scores`.
 - **`matching`**: `scorer match` per candidate -> the same radar/interview-question detail payload the frontend candidate-match modal shows (`match_score`, `fit_band`, `eligibility`, `evidence_confidence`, `radar_dimensions` with per-dimension reasoning/gaps, `interview_questions`). PDFs render the modal content: radar chart, dimension details, and suggested interview questions. The Excel rows map `core_skill_match` / `relevant_experience` / `education_certification` to the standard Skill / Experience / Education comparison columns.
+
+## HR conditions (`_pipeline/jd-overrides.yaml`)
+
+The JD grill collects corrections from HR in the conversation and writes them to
+`_pipeline/jd-overrides.yaml` in the output directory. That file describes the **complete**
+must-have / nice-to-have lists, the language gates, the degree gate and the seniority, so the
+scorer can rank against the conditions HR agreed to rather than the raw ad text.
+
+**Stored conditions are never merged until the current conversation confirms them.** The file
+lives in the shared per-refno output directory and outlives the conversation that wrote it, so
+merging it on sight would leak one conversation's edits into the next. A run that finds the file
+without being told what to do stops with:
+
+```json
+{ "status": "conditions_pending", "missing": ["conditions"],
+  "questions": ["..."], "ask": { "conditions": { "must_skills": ["..."], "...": "..." } } }
+```
+
+exit code `2`, before any CV is parsed or scored. Read `ask.conditions` back to HR, then re-run
+with one of:
+
+- `--conditions confirmed` — merge the stored conditions into `jd-final.json` and score against it.
+- `--conditions discard` — screen against the job ad alone; any stale `jd-final.json` is removed.
+
+Editing the conditions file invalidates the cached **scores** but not the **parsed JD**, so
+must/nice assignment is never re-derived by the LLM. A confirmed run and a discard run do not
+share cached scores, because the fingerprint records which branch was taken.
 
 ## Output manifest
 
@@ -96,10 +125,10 @@ stdout prints a JSON manifest:
 }
 ```
 
-- `status` is `success` (everyone succeeded), `partial_success` (at least one candidate succeeded and at least one failed), `error` (JD/config hard-fail or zero candidates succeeded), or `need_input` (missing JD, CVs, or `--position`).
+- `status` is `success` (everyone succeeded), `partial_success` (at least one candidate succeeded and at least one failed), `error` (JD/config hard-fail or zero candidates succeeded), `need_input` (missing JD, CVs, or `--position`), or `conditions_pending` (stored HR conditions need a `--conditions` answer).
 - Candidates in the manifest are labeled by `refno` + `appno` (`display_label`). Personal names are never included.
 - Intermediate files (`jd-parse.json`, `config.json`, `extracted-<slug>.json`, `score-<slug>.json`, `manifest.json`, `rows.json`) are kept in `--output-dir` for inspection and `--resume`.
-- Exit codes: `0` for `success` / `partial_success`; `2` for `need_input` (stdout JSON with `missing` + `questions`); `1` for `error` (stderr JSON).
+- Exit codes: `0` for `success` / `partial_success`; `2` for `need_input` / `conditions_pending` (stdout JSON with `missing` + `questions`); `1` for `error` (stderr JSON).
 
 ## Behavior notes
 

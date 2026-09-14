@@ -123,18 +123,84 @@ def test_conditions_edit_invalidates_scores_but_not_the_parse(tmp_path) -> None:
 def test_write_final_jd_is_skipped_when_nothing_changes(tmp_path) -> None:
     jd_path = tmp_path / "jd-parse.json"
     jd_path.write_text(json.dumps(_jd(["Python"], [])), encoding="utf-8")
-    assert write_final_jd(tmp_path, jd_path)[0] is None
+    assert write_final_jd(tmp_path, jd_path, confirmed=True)[0] is None
 
     (tmp_path / "jd-overrides.yaml").write_text(
         "must_skills:\n  - Python\npreferred_skills:\n  - Docker\n", encoding="utf-8"
     )
-    path, summary = write_final_jd(tmp_path, jd_path)
+    path, summary = write_final_jd(tmp_path, jd_path, confirmed=True)
 
     assert path is not None and path.name == FINAL_JD_FILENAME
     assert summary["applied"] is True
     envelope = json.loads(path.read_text(encoding="utf-8"))
     assert envelope["jd_overrides"]["applied"] is True
     assert envelope["structured_data"]["preferred_skills"][0]["display_name"] == "Docker"
+
+
+# Stored conditions must never be merged until the current conversation confirms them.
+def test_write_final_jd_refuses_unconfirmed_conditions(tmp_path) -> None:
+    jd_path = tmp_path / "jd-parse.json"
+    jd_path.write_text(json.dumps(_jd(["Python"], [])), encoding="utf-8")
+    (tmp_path / "jd-overrides.yaml").write_text(
+        "must_skills:\n  - Python\npreferred_skills:\n  - Docker\n", encoding="utf-8"
+    )
+
+    path, summary = write_final_jd(tmp_path, jd_path)
+
+    assert path is None
+    assert summary["applied"] is False
+    assert summary["reason"] == "awaiting confirmation"
+    assert not (tmp_path / FINAL_JD_FILENAME).exists()
+
+
+# The conversation is handed the stored conditions so it can read them back to HR.
+def test_describe_overrides_summarises_stored_conditions(tmp_path) -> None:
+    from screening_core.jd_overrides import describe_overrides
+
+    assert describe_overrides(tmp_path) is None
+
+    (tmp_path / "jd-overrides.yaml").write_text(
+        "collected_at: '2026-09-14'\n"
+        "must_skills:\n  - Python\n  - R\n"
+        "preferred_skills:\n  - Docker\n"
+        "language_requirements:\n  - language: Cantonese\n",
+        encoding="utf-8",
+    )
+    summary = describe_overrides(tmp_path)
+
+    assert summary is not None
+    assert summary["must_skills"] == ["Python", "R"]
+    assert summary["preferred_skills"] == ["Docker"]
+    assert summary["languages"] == ["Cantonese"]
+    assert summary["collected_at"] == "2026-09-14"
+
+
+# Applying vs discarding conditions must not reuse each other's cached scores.
+def test_conditions_applied_flag_invalidates_cached_scores(tmp_path) -> None:
+    jd_path = tmp_path / "jd-parse.json"
+    jd_path.write_text('{"structured_data": {}}', encoding="utf-8")
+    overrides = tmp_path / "jd-overrides.yaml"
+    overrides.write_text("must_skills:\n  - Python\n", encoding="utf-8")
+
+    def payload(applied: bool) -> dict:
+        return input_run_payload(
+            engine="matching",
+            position="Research Assistant",
+            refno="260901004",
+            jd_paths=[jd_path],
+            cv_hashes={"cv1": "abc"},
+            overrides_path=overrides,
+            apply_overrides=applied,
+        )
+
+    assert overrides_changed(payload(True), payload(True)) is False
+    # Same file, opposite decision: the scores are stale either way.
+    assert overrides_changed(payload(True), payload(False)) is True
+    # A fingerprint written before the flag existed reads as "not applied", so the first
+    # confirmed run recomputes once rather than silently reusing unconfirmed scores.
+    legacy = {key: value for key, value in payload(True).items() if key != "overrides_applied"}
+    assert overrides_changed(legacy, payload(True)) is True
+    assert overrides_changed(legacy, payload(False)) is False
 
 
 # The report tooltip must label conversation-sourced requirements differently from the ad.

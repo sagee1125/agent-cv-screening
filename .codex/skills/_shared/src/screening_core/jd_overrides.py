@@ -306,13 +306,51 @@ def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], di
     return data, summary
 
 
+# Describe stored conditions so the conversation can read them back to HR before reuse.
+def describe_overrides(out_dir: Path | str) -> dict[str, Any] | None:
+    """Return a summary of the stored conditions, or None when there are none."""
+    overrides = load_overrides(out_dir)
+    if overrides is None:
+        return None
+    must = [str(name) for name in overrides.get("must_skills") or [] if str(name or "").strip()]
+    preferred = [
+        str(name) for name in overrides.get("preferred_skills") or [] if str(name or "").strip()
+    ]
+    return {
+        "collected_at": overrides.get("collected_at"),
+        "must_skills": must,
+        "preferred_skills": preferred,
+        "target_seniority": overrides.get("target_seniority"),
+        "min_relevant_years": overrides.get("min_relevant_years"),
+        "languages": [
+            str(item.get("language"))
+            for item in overrides.get("language_requirements") or []
+            if isinstance(item, dict) and item.get("language")
+        ],
+        "notes": str(overrides.get("extra_notes") or "").strip() or None,
+    }
+
+
 # Write jd-final.json for one output directory; returns (path or None, summary).
+# `confirmed` is the conversation's answer to "reuse the stored conditions?": the file
+# alone is never enough, because it outlives the conversation that produced it.
 def write_final_jd(
-    out_dir: Path | str, jd_parsed_path: Path | str
+    out_dir: Path | str,
+    jd_parsed_path: Path | str,
+    *,
+    confirmed: bool = False,
 ) -> tuple[Path | None, dict[str, Any]]:
     overrides = load_overrides(out_dir)
     if overrides is None:
         return None, {"applied": False, "reason": "no conditions file"}
+    if not confirmed:
+        # Refusing here is what stops a fresh conversation from silently inheriting
+        # another conversation's conditions. The caller must ask HR first.
+        return None, {
+            "applied": False,
+            "reason": "awaiting confirmation",
+            "counts": None,
+        }
     try:
         raw = json.loads(Path(jd_parsed_path).read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
