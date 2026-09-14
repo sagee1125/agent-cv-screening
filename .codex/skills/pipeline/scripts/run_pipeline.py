@@ -44,6 +44,7 @@ from screening_core.input_policy import (
     validate_path,
     validate_reference,
 )
+from screening_core.jd_overrides import OVERRIDES_FILENAME, write_final_jd
 from screening_core.job_state import load_job_state, save_job_state
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
@@ -51,6 +52,7 @@ from screening_core.report_fingerprint import (
     input_run_payload,
     jd_inputs_changed,
     load_fingerprints,
+    overrides_changed,
     save_fingerprints,
     sha256_file,
     sha256_text,
@@ -160,9 +162,21 @@ def _clear_candidate_artifacts(out_dir: Path, slug: str) -> None:
         (out_dir / f"{prefix}{slug}.json").unlink(missing_ok=True)
 
 
+# Deletes every cached score so a conditions change is re-scored without re-parsing.
+def _clear_score_artifacts(out_dir: Path) -> None:
+    """Remove per-candidate scores, rows and board rows; keep the parsed JD and CVs."""
+    for prefix in ("detail-", "score-"):
+        for path in out_dir.glob(f"{prefix}*.json"):
+            path.unlink(missing_ok=True)
+    (out_dir / "rows.json").unlink(missing_ok=True)
+    for path in out_dir.glob("board-row-*.json"):
+        path.unlink(missing_ok=True)
+    (out_dir / "jd-final.json").unlink(missing_ok=True)
+
+
 # Snapshot JD + CV bytes so --resume does not reuse stale parse/score JSON.
-def _input_payload(args: argparse.Namespace) -> dict:
-    """Hash the current JD files and CV/extracted files for resume invalidation."""
+def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
+    """Hash the JD files, HR conditions and CV/extracted files for resume invalidation."""
     jd_paths: list[Path | str | None] = [getattr(args, "jd_file", None), getattr(args, "jd_json", None)]
     used: set[str] = set()
     cv_hashes: dict[str, str] = {}
@@ -175,13 +189,14 @@ def _input_payload(args: argparse.Namespace) -> dict:
         refno=getattr(args, "refno", None),
         jd_paths=jd_paths,
         cv_hashes=cv_hashes,
+        overrides_path=out_dir / OVERRIDES_FILENAME,
     )
 
 
 # Turn off --resume or drop per-CV cache when JD text or a CV file changed.
 def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
     """Keep --resume only when JD/engine match; rebuild CVs whose bytes changed."""
-    payload = _input_payload(args)
+    payload = _input_payload(args, out_dir)
     args._input_payload = payload
     previous = load_fingerprints(out_dir).get("input")
     prior = previous if isinstance(previous, dict) else {}
@@ -193,6 +208,12 @@ def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
         args._inputs_unchanged = False
         (out_dir / "jd-parse.json").unlink(missing_ok=True)
         (out_dir / "config.json").unlink(missing_ok=True)
+        return
+    if overrides_changed(prior, payload):
+        # HR edited the conditions: the parsed JD still stands, only the scores are stale.
+        # --resume stays on so the JD is not re-parsed and must/nice assignment stays stable.
+        _clear_score_artifacts(out_dir)
+        args._inputs_unchanged = False
         return
     for slug in stale_cv_slugs(prior, payload):
         _clear_candidate_artifacts(out_dir, slug)
@@ -275,6 +296,24 @@ def _collect_need_input(args: argparse.Namespace) -> None:
 
 def _resolve_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Path, str | None]:
     """Return (jd JSON path for build-config/match, optional JD text for CV context)."""
+    jd_path, jd_text = _resolve_raw_jd_source(args, out_dir)
+    return _apply_jd_overrides(args, out_dir, jd_path), jd_text
+
+
+# Fold HR-supplied conditions onto the parsed JD so scores use the agreed conditions.
+def _apply_jd_overrides(args: argparse.Namespace, out_dir: Path, jd_parse_path: Path) -> Path:
+    """Return the JD JSON to score against: the merged one when HR conditions apply."""
+    try:
+        final_path, summary = write_final_jd(out_dir, jd_parse_path)
+    except Exception as exc:  # never block a screening because the merge failed
+        args._jd_overrides = {"applied": False, "reason": f"merge failed: {exc}"}
+        return jd_parse_path
+    args._jd_overrides = summary
+    return final_path or jd_parse_path
+
+
+def _resolve_raw_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Path, str | None]:
+    """Return (parsed JD JSON path, optional JD text) before HR conditions are merged."""
     if args.polyu_ref:
         polyu_out = out_dir / "polyu-parsed.json"
         if args.resume and _is_usable_json(polyu_out):

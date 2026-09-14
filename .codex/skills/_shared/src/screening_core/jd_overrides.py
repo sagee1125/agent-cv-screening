@@ -1,0 +1,328 @@
+# Merge HR-supplied job conditions (collected in conversation) onto the parsed JD.
+"""Deterministic merge of the JD-grill output onto a parsed JD.
+
+The JD grill collects corrections and additions from HR in the conversation. Those
+conditions are written to `_pipeline/jd-overrides.yaml`. This module folds them onto
+`jd-parse.json` and produces `jd-final.json`, which is what every downstream consumer
+(sorer, report-gen) should read.
+
+The merge is deterministic on purpose. Re-parsing a JD that HR has edited would make
+must-have / nice-to-have assignment probabilistic again, and that assignment is both
+the field HR edits most and the least stable output of the parser.
+"""
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+from typing import Any
+
+from screening_core.paths import taxonomy_yaml_path
+from screening_core.taxonomy import SkillTaxonomyLoader
+
+# HR conditions file written by the conversation grill inside the output directory.
+OVERRIDES_FILENAME = "jd-overrides.yaml"
+# Merged JD every downstream consumer should score and report against.
+FINAL_JD_FILENAME = "jd-final.json"
+
+# Provenance origins marking a requirement as coming from the conversation, not the ad.
+ORIGIN_SUPPLEMENT = "hr_supplement"
+ORIGIN_MOVED = "hr_moved"
+
+# Seniority keywords the scorer recognises when deciding whether to activate its axis.
+_SENIORITY_LEVELS = ("executive", "director", "manager", "lead", "senior", "junior", "intern", "mid")
+
+
+# Return the path of the HR conditions file for one pipeline output directory.
+def overrides_path(out_dir: Path | str) -> Path:
+    return Path(out_dir) / OVERRIDES_FILENAME
+
+
+# Load HR-supplied conditions, returning None when the file is absent or unusable.
+def load_overrides(out_dir: Path | str) -> dict[str, Any] | None:
+    path = overrides_path(out_dir)
+    if not path.is_file():
+        return None
+    try:
+        import yaml  # imported lazily so a missing PyYAML never breaks the pipeline
+    except ImportError:
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+# Normalize a skill or requirement name into the canonical underscore token form.
+def _token(value: Any) -> str:
+    return "_".join(str(value or "").strip().casefold().replace("-", " ").split())
+
+
+# Return the structured_data block, unwrapping a jd-parse envelope when present.
+def _structured(jd_parsed: Any) -> dict[str, Any]:
+    nested = jd_parsed.get("structured_data") if isinstance(jd_parsed, dict) else None
+    return nested if isinstance(nested, dict) else (jd_parsed if isinstance(jd_parsed, dict) else {})
+
+
+# Load the shared skill taxonomy once, or None when it cannot be read.
+def _taxonomy() -> SkillTaxonomyLoader | None:
+    try:
+        return SkillTaxonomyLoader(str(taxonomy_yaml_path()))
+    except Exception:
+        return None
+
+
+# Attach an origin marker to a record, tolerating a plain-string provenance.
+def _stamp_origin(record: dict[str, Any], origin: str) -> None:
+    provenance = record.get("provenance")
+    if isinstance(provenance, dict):
+        provenance["origin"] = origin
+        return
+    record["provenance"] = {
+        "origin": origin,
+        "source_sentence": str(provenance) if provenance else None,
+    }
+
+
+# Build one skill record for a name HR supplied that the job ad never mentioned.
+def _new_skill(name: str, taxonomy: SkillTaxonomyLoader | None, order: int) -> dict[str, Any]:
+    canonical = None
+    if taxonomy is not None:
+        try:
+            canonical = taxonomy.normalize_skill(str(name))
+        except Exception:
+            canonical = None
+    token = _token(canonical or name)
+    record: dict[str, Any] = {
+        "skill_id": f"{token}_{order}",
+        "display_name": str(name).strip(),
+        "canonical_skill": token,
+        "priority_order": order,
+        "weight": 1.0,
+        "provenance": {"origin": ORIGIN_SUPPLEMENT, "source_sentence": None, "confidence": 1.0},
+    }
+    if canonical is None:
+        # Not in the taxonomy: keep it visible but flag it so HR is told it will not match.
+        record["provenance"]["unmatched"] = True
+    return record
+
+
+# Reclassify parsed skills against HR's final must/preferred lists and stamp provenance.
+# Returns how many requirements HR moved, added or dropped.
+def _merge_skill_lists(data: dict[str, Any], overrides: dict[str, Any], taxonomy) -> int:
+    final_must = overrides.get("must_skills")
+    final_preferred = overrides.get("preferred_skills")
+    if not isinstance(final_must, list) and not isinstance(final_preferred, list):
+        return 0
+
+    # HR's lists are authoritative: a parsed skill in neither list was dropped by HR.
+    must_tokens = {_token(name) for name in final_must or [] if str(name or "").strip()}
+    preferred_tokens = {_token(name) for name in final_preferred or [] if str(name or "").strip()}
+
+    claimed: set[str] = set()
+    must: list[dict[str, Any]] = []
+    preferred: list[dict[str, Any]] = []
+    changed = 0
+
+    for original, items in (
+        ("must_skills", data.get("must_skills")),
+        ("preferred_skills", data.get("preferred_skills")),
+    ):
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            record = copy.deepcopy(item)
+            token = _token(record.get("canonical_skill") or record.get("display_name"))
+            if not token:
+                continue
+            if token in must_tokens:
+                target = "must_skills"
+            elif token in preferred_tokens:
+                target = "preferred_skills"
+            else:
+                changed += 1
+                continue
+            if target != original:
+                # Must-have weight is the record's own weight; preferred is normalized later.
+                if target == "must_skills":
+                    record["weight"] = 1.0
+                _stamp_origin(record, ORIGIN_MOVED)
+                changed += 1
+            claimed.add(token)
+            (must if target == "must_skills" else preferred).append(record)
+
+    # Names HR supplied that the ad never mentioned become new requirements.
+    for names, bucket in ((final_must, must), (final_preferred, preferred)):
+        for order, name in enumerate(names or [], start=1):
+            token = _token(name)
+            if not token or token in claimed:
+                continue
+            bucket.append(_new_skill(name, taxonomy, order))
+            claimed.add(token)
+            changed += 1
+
+    if not changed:
+        return 0
+    for order, record in enumerate(must, start=1):
+        record["priority_order"] = order
+    for order, record in enumerate(preferred, start=1):
+        record["priority_order"] = order
+    data["must_skills"] = must
+    data["preferred_skills"] = preferred
+    return changed
+
+
+# Replace parsed language requirements when HR supplied their own list.
+# Returns how many language entries HR changed or added.
+def _merge_languages(data: dict[str, Any], overrides: dict[str, Any]) -> int:
+    supplied = overrides.get("language_requirements")
+    if not isinstance(supplied, list) or not supplied:
+        return 0
+    existing = {
+        _token(item.get("language")): item
+        for item in data.get("language_requirements") or []
+        if isinstance(item, dict)
+    }
+    merged: list[dict[str, Any]] = []
+    changed = 0
+    for item in supplied:
+        if not isinstance(item, dict):
+            continue
+        language = str(item.get("language") or "").strip()
+        if not language:
+            continue
+        source = existing.get(_token(language))
+        record = copy.deepcopy(source) if isinstance(source, dict) else {}
+        record["language"] = language
+        for key in ("level", "is_mandatory"):
+            if key in item and record.get(key) != item[key]:
+                record[key] = item[key]
+                changed += 1
+        if not isinstance(source, dict):
+            record["provenance"] = {"origin": ORIGIN_SUPPLEMENT}
+            changed += 1
+        merged.append(record)
+    if not merged or not changed:
+        return 0
+    data["language_requirements"] = merged
+    return changed
+
+
+# Apply HR's degree and field-of-study gates onto the parsed education requirement.
+# Returns 1 when HR changed the gate, 0 otherwise.
+def _merge_education(data: dict[str, Any], overrides: dict[str, Any]) -> int:
+    rules = overrides.get("eligibility_rules")
+    if not isinstance(rules, list) or not rules:
+        return 0
+    degree_rule = next(
+        (rule for rule in rules if isinstance(rule, dict) and rule.get("rule") == "minimum_degree"),
+        None,
+    )
+    if not isinstance(degree_rule, dict):
+        return 0
+    record = copy.deepcopy(data.get("education_requirement") or {})
+    if not isinstance(record, dict):
+        record = {}
+    before = json.dumps(record, sort_keys=True, ensure_ascii=False)
+    if degree_rule.get("value"):
+        record["minimum_degree"] = degree_rule["value"]
+    if degree_rule.get("field_of_study"):
+        record["field_of_study"] = degree_rule["field_of_study"]
+    if "is_mandatory" in degree_rule:
+        record["is_mandatory"] = bool(degree_rule["is_mandatory"])
+    if json.dumps(record, sort_keys=True, ensure_ascii=False) == before:
+        return 0
+    _stamp_origin(record, ORIGIN_SUPPLEMENT)
+    data["education_requirement"] = record
+    return 1
+
+
+# Apply HR's minimum-years gate onto the parsed experience requirement.
+# Returns 1 when HR set or changed the gate, 0 otherwise.
+def _merge_experience(data: dict[str, Any], overrides: dict[str, Any]) -> int:
+    years = overrides.get("min_relevant_years")
+    if years is None:
+        return 0
+    try:
+        value = float(years)
+    except (TypeError, ValueError):
+        return 0
+    record = copy.deepcopy(data.get("experience_requirement") or {})
+    if not isinstance(record, dict):
+        record = {}
+    if record.get("minimum_years") == value:
+        return 0
+    record["minimum_years"] = value
+    _stamp_origin(record, ORIGIN_SUPPLEMENT)
+    data["experience_requirement"] = record
+    return 1
+
+
+# Apply HR's target seniority so the seniority dimension becomes scoreable.
+# Returns 1 when HR set a seniority the ad did not state, 0 otherwise.
+def _merge_seniority(data: dict[str, Any], overrides: dict[str, Any]) -> int:
+    level = str(overrides.get("target_seniority") or "").strip().casefold()
+    if level not in _SENIORITY_LEVELS:
+        return 0
+    overview = copy.deepcopy(data.get("jd_overview") or {})
+    if not isinstance(overview, dict):
+        overview = {}
+    if str(overview.get("seniority") or "").strip().casefold() == level:
+        return 0
+    overview["seniority"] = level
+    data["jd_overview"] = overview
+    data["seniority"] = level
+    return 1
+
+
+# Merge HR conditions onto parsed JD data and return the structured block plus a summary.
+def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    data = copy.deepcopy(_structured(jd_parsed))
+    if not isinstance(data, dict):
+        data = {}
+    if not isinstance(overrides, dict):
+        return data, {"applied": False, "reason": "no conditions"}
+    taxonomy = _taxonomy()
+    counts: dict[str, int] = {}
+    for section, changed in (
+        ("skills", _merge_skill_lists(data, overrides, taxonomy)),
+        ("languages", _merge_languages(data, overrides)),
+        ("education", _merge_education(data, overrides)),
+        ("experience", _merge_experience(data, overrides)),
+        ("seniority", _merge_seniority(data, overrides)),
+    ):
+        if changed:
+            counts[section] = changed
+    summary = {
+        "applied": bool(counts),
+        "collected_at": overrides.get("collected_at"),
+        "sections": sorted(counts),
+        "counts": counts,
+        # Total requirements HR changed, used for the report's conditions label.
+        "changed": sum(counts.values()),
+    }
+    data["hr_conditions"] = summary
+    return data, summary
+
+
+# Write jd-final.json for one output directory; returns (path or None, summary).
+def write_final_jd(
+    out_dir: Path | str, jd_parsed_path: Path | str
+) -> tuple[Path | None, dict[str, Any]]:
+    overrides = load_overrides(out_dir)
+    if overrides is None:
+        return None, {"applied": False, "reason": "no conditions file"}
+    try:
+        raw = json.loads(Path(jd_parsed_path).read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return None, {"applied": False, "reason": "unreadable parsed JD"}
+    structured, summary = merge_structured(raw, overrides)
+    if not summary.get("applied"):
+        return None, summary
+    envelope = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    envelope["structured_data"] = structured
+    envelope["jd_overrides"] = summary
+    final_path = Path(out_dir) / FINAL_JD_FILENAME
+    final_path.write_text(json.dumps(envelope, ensure_ascii=False, indent=2), encoding="utf-8")
+    return final_path, summary

@@ -175,9 +175,14 @@ _PAGE_CSS_BASE = """
     .tag:hover .tag-tip, .tag:focus-visible .tag-tip { opacity: 1; visibility: visible; }
     .tag-meta { display: block; font-size: .66rem; font-weight: 600; text-transform: uppercase;
                 letter-spacing: .05em; color: #94a3b8; margin-bottom: 2px; }
+    .tag-meta-hr { color: #fda4af; }
     .jd-line { margin: 0; font-size: .9rem; line-height: 1.5; color: #334155; }
     .jd-line + .jd-line { margin-top: 6px; }
     .jd-line-label { font-weight: 700; color: #0f172a; }
+    .conditions-line { font-weight: 600; color: #0f172a; margin-bottom: 8px; }
+    .hr-mark { display: inline-block; padding: 0 5px; border-radius: 6px; background: #fee2e2;
+               color: #b91c1c; font-size: .68rem; font-weight: 700; letter-spacing: .05em;
+               vertical-align: middle; }
 """
 
 _TOOLTIP_SHOW_RULES = "\n".join(
@@ -694,6 +699,53 @@ def _source_sentence(provenance: Any) -> str | None:
     return text or None
 
 
+# Read the origin marker the JD merge stamps on requirements HR changed in conversation.
+def _provenance_origin(provenance: Any) -> str | None:
+    if not isinstance(provenance, dict):
+        return None
+    origin = provenance.get("origin")
+    return str(origin) if origin else None
+
+
+# Tooltip heading plus fallback body for each provenance origin.
+_TIP_DEFAULT = ("JD source (auto-extracted)", "")
+_TIP_BY_ORIGIN = {
+    "hr_supplement": (
+        "Added by HR (conversation)",
+        "Added during the conversation; the job ad does not state this.",
+    ),
+    "hr_moved": ("Moved by HR (conversation)", ""),
+}
+
+
+# Render a compact badge marking a requirement HR changed in the conversation.
+def _hr_mark(provenance: Any) -> str:
+    origin = _provenance_origin(provenance)
+    if origin not in _TIP_BY_ORIGIN:
+        return ""
+    heading = _TIP_BY_ORIGIN[origin][0]
+    return f" <span class='hr-mark' title='{_esc(heading)}'>HR</span>"
+
+
+# State which conditions produced this ranking, so a reader knows what it is based on.
+def _conditions_line(parsed: dict | None) -> str:
+    conditions = (parsed or {}).get("hr_conditions")
+    changed = 0
+    if isinstance(conditions, dict) and conditions.get("applied"):
+        try:
+            changed = int(conditions.get("changed") or 0)
+        except (TypeError, ValueError):
+            changed = 0
+    if changed > 0:
+        plural = "supplement" if changed == 1 else "supplements"
+        label = f"Conditions: job ad + {changed} HR {plural}"
+        title = f" title='{_esc(str(conditions.get('collected_at') or ''))}'"
+    else:
+        label = "Conditions: job ad only"
+        title = ""
+    return f"<p class='jd-line conditions-line'{title}>{_esc(label)}</p>"
+
+
 # Field labels stay short and plain; prose value lines never look like labels.
 _JD_LABEL_CHARS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 /().,&'\u2019-]*$")
 _JD_LABEL_MAX_CHARS = 80
@@ -799,17 +851,28 @@ def _jd_meta_panel(jd_text: str | None) -> str:
 
 
 # Render one pill badge with an optional hover source tip and mandatory marker.
-def _tag(label: str, tip: str | None, variant: str, *, mandatory: bool = False) -> str:
+def _tag(
+    label: str,
+    tip: str | None,
+    variant: str,
+    *,
+    mandatory: bool = False,
+    origin: str | None = None,
+) -> str:
     title = ' title="Mandatory"' if mandatory else ""
     marker = "<span aria-hidden='true'>*</span>" if mandatory else ""
+    heading, fallback = _TIP_BY_ORIGIN.get(origin or "", _TIP_DEFAULT)
+    body = tip or fallback
     tip_html = ""
-    if tip:
+    # A conversation-sourced requirement always gets a tip, even without a JD sentence.
+    if body or origin in _TIP_BY_ORIGIN:
+        meta_class = "tag-meta tag-meta-hr" if origin in _TIP_BY_ORIGIN else "tag-meta"
         tip_html = (
             "<span class='tag-tip'>"
-            "<span class='tag-meta'>JD source (auto-extracted)</span>"
-            f"{_esc(tip)}</span>"
+            f"<span class='{meta_class}'>{_esc(heading)}</span>"
+            f"{_esc(body)}</span>"
         )
-    tabindex = " tabindex='0'" if tip else ""
+    tabindex = " tabindex='0'" if tip_html else ""
     return (
         f"<span class='tag tag-{variant}'{title}{tabindex}>"
         f"{_esc(label)}{marker}{tip_html}</span>"
@@ -837,7 +900,10 @@ def _skill_pills(items: Any, variant: str) -> list[str]:
         ).strip()
         if not label:
             continue
-        pills.append(_tag(label, _source_sentence(item.get("provenance")), variant))
+        provenance = item.get("provenance")
+        pills.append(
+            _tag(label, _source_sentence(provenance), variant, origin=_provenance_origin(provenance))
+        )
     return pills
 
 
@@ -855,7 +921,16 @@ def _language_pills(items: Any) -> list[str]:
         label = language if not level else language + " \u00b7 " + level
         if mandatory:
             label = label + " \u00b7 mandatory"
-        pills.append(_tag(label, _source_sentence(item.get("provenance")), "language", mandatory=mandatory))
+        provenance = item.get("provenance")
+        pills.append(
+            _tag(
+                label,
+                _source_sentence(provenance),
+                "language",
+                mandatory=mandatory,
+                origin=_provenance_origin(provenance),
+            )
+        )
     return pills
 
 
@@ -872,7 +947,9 @@ def _education_line(value: Any) -> str:
         bits.append("mandatory")
     return (
         "<p class='jd-line'><span class='jd-line-label'>Education:</span> "
-        + _esc(" \u00b7 ".join(bits)) + "</p>"
+        + _esc(" \u00b7 ".join(bits))
+        + _hr_mark(value.get("provenance"))
+        + "</p>"
     )
 
 
@@ -893,7 +970,9 @@ def _visa_line(value: Any) -> str:
         return ""
     return (
         "<p class='jd-line'><span class='jd-line-label'>Work authorisation:</span> "
-        + _esc(" \u00b7 ".join(bits)) + "</p>"
+        + _esc(" \u00b7 ".join(bits))
+        + _hr_mark(value.get("provenance"))
+        + "</p>"
     )
 
 
@@ -937,8 +1016,11 @@ def _jd_panel(jd_text: str | None, jd_parsed: dict | None, *, compact: bool = Fa
         heading = "Job Description &amp; Parsed Requirements"
     else:
         heading = "Parsed Job Requirements"
+    conditions_html = _conditions_line(parsed)
     body = "".join(
-        part for part in (meta_html, f"<div class='tag-groups'>{groups_html}</div>") if part
+        part
+        for part in (conditions_html, meta_html, f"<div class='tag-groups'>{groups_html}</div>")
+        if part
     )
     return (
         "<section class='jd-panel' aria-label='Job description and parsed requirements'>"
