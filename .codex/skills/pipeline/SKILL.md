@@ -73,6 +73,21 @@ The JD grill collects corrections from HR in the conversation and writes them to
 must-have / nice-to-have lists, the language gates, the degree gate and the seniority, so the
 scorer can rank against the conditions HR agreed to rather than the raw ad text.
 
+Must-have skill entries accept either a bare name or an explicit relative weight:
+
+```yaml
+must_skills:
+  - Python
+  - name: R
+    weight: 2.0
+```
+
+Only `must_skills` accepts a weight. The allowed range is `0.5` to `3.0`; omit the weight for
+the existing `1.0` behaviour. An explicit weight overrides the ad's weight and also applies when
+HR moves or adds the skill. Duplicate tokens keep the maximum weight instead of summing.
+`preferred_skills` remains name-only: a weight there is rejected and reported under
+`jd_overrides.rejected_weights`, never silently ignored.
+
 **Stored conditions are never merged until the current conversation confirms them.** The file
 lives in the shared per-refno output directory and outlives the conversation that wrote it, so
 merging it on sight would leak one conversation's edits into the next. A run that finds the file

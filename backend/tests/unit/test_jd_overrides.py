@@ -76,6 +76,128 @@ def test_merge_adds_new_skill_as_hr_supplement() -> None:
     assert added["provenance"]["origin"] == ORIGIN_SUPPLEMENT
 
 
+# String-only skill lists keep the parsed weights and add no weight metadata.
+def test_string_skill_entries_preserve_existing_merge_shape() -> None:
+    parsed = _jd(["Python"], ["R"])
+    parsed["structured_data"]["must_skills"][0]["weight"] = 2.5
+
+    merged, summary = merge_structured(
+        parsed,
+        {"must_skills": ["Python"], "preferred_skills": ["R"]},
+    )
+
+    assert merged["must_skills"][0]["weight"] == 2.5
+    assert "rejected_weights" not in summary
+    assert "must_skill_weights" not in summary
+
+
+# A valid mapping weight overrides the ad weight on a must-have skill.
+def test_mapping_weight_overrides_existing_must_weight() -> None:
+    merged, summary = merge_structured(
+        _jd(["Python"], []),
+        {"must_skills": [{"name": "Python", "weight": 2.5}], "preferred_skills": []},
+    )
+
+    assert merged["must_skills"][0]["weight"] == 2.5
+    assert summary["counts"] == {"skills": 1}
+    assert summary["changed"] == 1
+
+
+# Bare names and weighted mappings can be mixed in the same must-have list.
+def test_mixed_skill_entry_shapes_merge_together() -> None:
+    merged, _ = merge_structured(
+        _jd(["Python", "R"], ["Docker"]),
+        {
+            "must_skills": ["Python", {"name": "R", "weight": 2.0}],
+            "preferred_skills": ["Docker"],
+        },
+    )
+
+    assert [item["display_name"] for item in merged["must_skills"]] == ["Python", "R"]
+    assert [item["weight"] for item in merged["must_skills"]] == [1.0, 2.0]
+
+
+# An explicit weight overrides the normal 1.0 reset for preferred-to-must moves.
+def test_explicit_weight_overrides_preferred_to_must_reset() -> None:
+    merged, _ = merge_structured(
+        _jd([], ["Python"]),
+        {"must_skills": [{"name": "Python", "weight": 2.5}], "preferred_skills": []},
+    )
+
+    moved = merged["must_skills"][0]
+    assert moved["weight"] == 2.5
+    assert moved["provenance"]["origin"] == ORIGIN_MOVED
+
+
+# A brand-new skill supplied by HR carries its explicit must-have weight.
+def test_new_skill_carries_explicit_weight() -> None:
+    merged, _ = merge_structured(
+        _jd(["Python"], []),
+        {"must_skills": ["Python", {"name": "R", "weight": 2.0}], "preferred_skills": []},
+    )
+
+    added = next(item for item in merged["must_skills"] if item["display_name"] == "R")
+    assert added["weight"] == 2.0
+    assert added["provenance"]["origin"] == ORIGIN_SUPPLEMENT
+
+
+# Invalid must-have weights are rejected, reported, and never block the merge.
+def test_invalid_must_weight_is_rejected_and_reported() -> None:
+    for invalid in ("heavy", -1, 0, 99, float("nan")):
+        merged, summary = merge_structured(
+            _jd(["Python"], []),
+            {
+                "must_skills": [{"name": "Python", "weight": invalid}],
+                "preferred_skills": [],
+            },
+        )
+
+        assert merged["must_skills"][0]["weight"] == 1.0
+        assert summary["applied"] is False
+        rejected = summary["rejected_weights"]
+        assert rejected[0]["name"] == "Python"
+        assert rejected[0]["reason"]
+
+
+# A weight on a preferred skill is rejected without changing preferred behaviour.
+def test_preferred_weight_is_rejected_and_preferred_list_is_unchanged() -> None:
+    merged, summary = merge_structured(
+        _jd(["Python"], ["Docker"]),
+        {
+            "must_skills": ["Python"],
+            "preferred_skills": [{"name": "Docker", "weight": 3.0}],
+        },
+    )
+
+    assert merged["preferred_skills"][0]["weight"] == 1.0
+    assert summary["applied"] is False
+    assert summary["rejected_weights"] == [
+        {
+            "name": "Docker",
+            "weight": 3.0,
+            "reason": "weights are only allowed on must-have skills",
+        }
+    ]
+
+
+# Duplicate skill tokens keep the maximum explicit weight instead of summing it.
+def test_duplicate_must_skills_keep_maximum_weight() -> None:
+    merged, summary = merge_structured(
+        _jd(["Python"], []),
+        {
+            "must_skills": [
+                "Python",
+                {"name": "Python", "weight": 3.0},
+                {"name": "Python", "weight": 2.0},
+            ],
+            "preferred_skills": [],
+        },
+    )
+
+    assert merged["must_skills"][0]["weight"] == 3.0
+    assert summary["changed"] == 1
+
+
 # With no usable conditions file the parsed JD must come back untouched.
 def test_merge_ignores_absent_and_empty_overrides() -> None:
     original = _jd(["Python"], [])
@@ -173,6 +295,30 @@ def test_describe_overrides_summarises_stored_conditions(tmp_path) -> None:
     assert summary["preferred_skills"] == ["Docker"]
     assert summary["languages"] == ["Cantonese"]
     assert summary["collected_at"] == "2026-09-14"
+
+
+# Stored conditions expose valid weights for readback and report rejected ones.
+def test_describe_overrides_surfaces_skill_weights(tmp_path) -> None:
+    from screening_core.jd_overrides import describe_overrides
+
+    (tmp_path / "jd-overrides.yaml").write_text(
+        "must_skills:\n"
+        "  - Python\n"
+        "  - name: R\n"
+        "    weight: 2.0\n"
+        "preferred_skills:\n"
+        "  - name: Docker\n"
+        "    weight: 3.0\n",
+        encoding="utf-8",
+    )
+
+    summary = describe_overrides(tmp_path)
+
+    assert summary is not None
+    assert summary["must_skills"] == ["Python", "R ×2"]
+    assert summary["must_skill_weights"] == [{"name": "R", "weight": 2.0}]
+    assert summary["preferred_skills"] == ["Docker"]
+    assert summary["rejected_weights"][0]["name"] == "Docker"
 
 
 # Applying vs discarding conditions must not reuse each other's cached scores.

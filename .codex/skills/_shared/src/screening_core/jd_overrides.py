@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,10 @@ ORIGIN_MOVED = "hr_moved"
 
 # Seniority keywords the scorer recognises when deciding whether to activate its axis.
 _SENIORITY_LEVELS = ("executive", "director", "manager", "lead", "senior", "junior", "intern", "mid")
+
+# Relative weights HR may put on individual must-have skills.
+_MIN_MUST_SKILL_WEIGHT = 0.5
+_MAX_MUST_SKILL_WEIGHT = 3.0
 
 
 # Return the path of the HR conditions file for one pipeline output directory.
@@ -57,6 +62,99 @@ def load_overrides(out_dir: Path | str) -> dict[str, Any] | None:
 # Normalize a skill or requirement name into the canonical underscore token form.
 def _token(value: Any) -> str:
     return "_".join(str(value or "").strip().casefold().replace("-", " ").split())
+
+
+# Return name and raw-weight pairs from either supported HR skill-list shape.
+def _skill_entries(raw: Any) -> list[tuple[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    entries: list[tuple[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            raw_weight = item.get("weight") if "weight" in item else None
+        else:
+            name = str(item or "").strip()
+            if not name:
+                continue
+            raw_weight = None
+        entries.append((name, raw_weight))
+    return entries
+
+
+# Keep rejected YAML values JSON-friendly when they appear in summaries.
+def _reported_weight(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+# Validate HR weights without blocking unrelated conditions from being merged.
+def _normalize_skill_entries(
+    raw: Any, *, allow_weight: bool
+) -> tuple[list[tuple[str, float | None]], list[dict[str, Any]]]:
+    entries: list[tuple[str, float | None]] = []
+    rejected: list[dict[str, Any]] = []
+    for name, raw_weight in _skill_entries(raw):
+        weight: float | None = None
+        if raw_weight is not None:
+            reason: str | None = None
+            if not allow_weight:
+                reason = "weights are only allowed on must-have skills"
+            elif isinstance(raw_weight, bool):
+                reason = "must-have weight must be numeric"
+            else:
+                try:
+                    candidate = float(raw_weight)
+                except (TypeError, ValueError):
+                    reason = "must-have weight must be numeric"
+                else:
+                    if not math.isfinite(candidate):
+                        reason = (
+                            "must-have weight must be a finite number between "
+                            f"{_MIN_MUST_SKILL_WEIGHT:g} and {_MAX_MUST_SKILL_WEIGHT:g}"
+                        )
+                    elif not _MIN_MUST_SKILL_WEIGHT <= candidate <= _MAX_MUST_SKILL_WEIGHT:
+                        reason = (
+                            "must-have weight must be between "
+                            f"{_MIN_MUST_SKILL_WEIGHT:g} and {_MAX_MUST_SKILL_WEIGHT:g}"
+                        )
+                    else:
+                        weight = candidate
+            if reason:
+                rejected.append(
+                    {"name": name, "weight": _reported_weight(raw_weight), "reason": reason}
+                )
+        entries.append((name, weight))
+    return entries, rejected
+
+
+# Deduplicate skills by token, keeping an explicit weight over an absent one.
+def _dedupe_skill_entries(
+    entries: list[tuple[str, float | None]],
+) -> list[tuple[str, float | None]]:
+    deduped: list[tuple[str, float | None]] = []
+    positions: dict[str, int] = {}
+    for name, weight in entries:
+        token = _token(name)
+        if not token:
+            continue
+        index = positions.get(token)
+        if index is None:
+            positions[token] = len(deduped)
+            deduped.append((name, weight))
+            continue
+        current_name, current_weight = deduped[index]
+        if weight is not None and (current_weight is None or weight > current_weight):
+            deduped[index] = (current_name, weight)
+    return deduped
+
+
+# Render a relative weight compactly for the conversation to read back.
+def _format_skill_weight(weight: float) -> str:
+    return f"{weight:g}"
 
 
 # Return the structured_data block, unwrapping a jd-parse envelope when present.
@@ -86,7 +184,12 @@ def _stamp_origin(record: dict[str, Any], origin: str) -> None:
 
 
 # Build one skill record for a name HR supplied that the job ad never mentioned.
-def _new_skill(name: str, taxonomy: SkillTaxonomyLoader | None, order: int) -> dict[str, Any]:
+def _new_skill(
+    name: str,
+    taxonomy: SkillTaxonomyLoader | None,
+    order: int,
+    weight: float | None = None,
+) -> dict[str, Any]:
     canonical = None
     if taxonomy is not None:
         try:
@@ -99,7 +202,7 @@ def _new_skill(name: str, taxonomy: SkillTaxonomyLoader | None, order: int) -> d
         "display_name": str(name).strip(),
         "canonical_skill": token,
         "priority_order": order,
-        "weight": 1.0,
+        "weight": weight if weight is not None else 1.0,
         "provenance": {"origin": ORIGIN_SUPPLEMENT, "source_sentence": None, "confidence": 1.0},
     }
     if canonical is None:
@@ -109,16 +212,27 @@ def _new_skill(name: str, taxonomy: SkillTaxonomyLoader | None, order: int) -> d
 
 
 # Reclassify parsed skills against HR's final must/preferred lists and stamp provenance.
-# Returns how many requirements HR moved, added or dropped.
-def _merge_skill_lists(data: dict[str, Any], overrides: dict[str, Any], taxonomy) -> int:
+# Returns how many requirements changed plus any rejected skill weights.
+def _merge_skill_lists(
+    data: dict[str, Any], overrides: dict[str, Any], taxonomy
+) -> tuple[int, list[dict[str, Any]]]:
     final_must = overrides.get("must_skills")
     final_preferred = overrides.get("preferred_skills")
     if not isinstance(final_must, list) and not isinstance(final_preferred, list):
-        return 0
+        return 0, []
+
+    must_entries, must_rejected = _normalize_skill_entries(final_must, allow_weight=True)
+    preferred_entries, preferred_rejected = _normalize_skill_entries(
+        final_preferred, allow_weight=False
+    )
+    must_entries = _dedupe_skill_entries(must_entries)
+    preferred_entries = _dedupe_skill_entries(preferred_entries)
+    rejected = [*must_rejected, *preferred_rejected]
 
     # HR's lists are authoritative: a parsed skill in neither list was dropped by HR.
-    must_tokens = {_token(name) for name in final_must or [] if str(name or "").strip()}
-    preferred_tokens = {_token(name) for name in final_preferred or [] if str(name or "").strip()}
+    must_tokens = {_token(name) for name, _ in must_entries}
+    preferred_tokens = {_token(name) for name, _ in preferred_entries}
+    must_weights = {_token(name): weight for name, weight in must_entries if weight is not None}
 
     claimed: set[str] = set()
     must: list[dict[str, Any]] = []
@@ -144,33 +258,43 @@ def _merge_skill_lists(data: dict[str, Any], overrides: dict[str, Any], taxonomy
                 changed += 1
                 continue
             if target != original:
-                # Must-have weight is the record's own weight; preferred is normalized later.
+                # Moved must-haves normally reset to 1.0; an explicit HR weight overrides that reset.
                 if target == "must_skills":
-                    record["weight"] = 1.0
+                    record["weight"] = must_weights.get(token, 1.0)
                 _stamp_origin(record, ORIGIN_MOVED)
                 changed += 1
+            elif target == "must_skills":
+                explicit_weight = must_weights.get(token)
+                if explicit_weight is not None:
+                    try:
+                        weight_changed = float(record.get("weight", 1.0)) != explicit_weight
+                    except (TypeError, ValueError):
+                        weight_changed = True
+                    record["weight"] = explicit_weight
+                    if weight_changed:
+                        changed += 1
             claimed.add(token)
             (must if target == "must_skills" else preferred).append(record)
 
     # Names HR supplied that the ad never mentioned become new requirements.
-    for names, bucket in ((final_must, must), (final_preferred, preferred)):
-        for order, name in enumerate(names or [], start=1):
+    for entries, bucket in ((must_entries, must), (preferred_entries, preferred)):
+        for order, (name, weight) in enumerate(entries, start=1):
             token = _token(name)
             if not token or token in claimed:
                 continue
-            bucket.append(_new_skill(name, taxonomy, order))
+            bucket.append(_new_skill(name, taxonomy, order, weight))
             claimed.add(token)
             changed += 1
 
     if not changed:
-        return 0
+        return 0, rejected
     for order, record in enumerate(must, start=1):
         record["priority_order"] = order
     for order, record in enumerate(preferred, start=1):
         record["priority_order"] = order
     data["must_skills"] = must
     data["preferred_skills"] = preferred
-    return changed
+    return changed, rejected
 
 
 # Replace parsed language requirements when HR supplied their own list.
@@ -285,8 +409,9 @@ def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], di
         return data, {"applied": False, "reason": "no conditions"}
     taxonomy = _taxonomy()
     counts: dict[str, int] = {}
+    skills_changed, rejected_weights = _merge_skill_lists(data, overrides, taxonomy)
     for section, changed in (
-        ("skills", _merge_skill_lists(data, overrides, taxonomy)),
+        ("skills", skills_changed),
         ("languages", _merge_languages(data, overrides)),
         ("education", _merge_education(data, overrides)),
         ("experience", _merge_experience(data, overrides)),
@@ -302,6 +427,8 @@ def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], di
         # Total requirements HR changed, used for the report's conditions label.
         "changed": sum(counts.values()),
     }
+    if rejected_weights:
+        summary["rejected_weights"] = rejected_weights
     data["hr_conditions"] = summary
     return data, summary
 
@@ -312,14 +439,26 @@ def describe_overrides(out_dir: Path | str) -> dict[str, Any] | None:
     overrides = load_overrides(out_dir)
     if overrides is None:
         return None
-    must = [str(name) for name in overrides.get("must_skills") or [] if str(name or "").strip()]
-    preferred = [
-        str(name) for name in overrides.get("preferred_skills") or [] if str(name or "").strip()
+    must_entries, must_rejected = _normalize_skill_entries(
+        overrides.get("must_skills"), allow_weight=True
+    )
+    preferred_entries, preferred_rejected = _normalize_skill_entries(
+        overrides.get("preferred_skills"), allow_weight=False
+    )
+    must_entries = _dedupe_skill_entries(must_entries)
+    preferred_entries = _dedupe_skill_entries(preferred_entries)
+    weighted_must = [
+        {"name": name, "weight": weight}
+        for name, weight in must_entries
+        if weight is not None
     ]
-    return {
+    summary = {
         "collected_at": overrides.get("collected_at"),
-        "must_skills": must,
-        "preferred_skills": preferred,
+        "must_skills": [
+            f"{name} ×{_format_skill_weight(weight)}" if weight is not None else name
+            for name, weight in must_entries
+        ],
+        "preferred_skills": [name for name, _ in preferred_entries],
         "target_seniority": overrides.get("target_seniority"),
         "min_relevant_years": overrides.get("min_relevant_years"),
         "languages": [
@@ -329,6 +468,12 @@ def describe_overrides(out_dir: Path | str) -> dict[str, Any] | None:
         ],
         "notes": str(overrides.get("extra_notes") or "").strip() or None,
     }
+    if weighted_must:
+        summary["must_skill_weights"] = weighted_must
+    rejected = [*must_rejected, *preferred_rejected]
+    if rejected:
+        summary["rejected_weights"] = rejected
+    return summary
 
 
 # Write jd-final.json for one output directory; returns (path or None, summary).
