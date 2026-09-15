@@ -231,6 +231,7 @@ Top-level keys only. Nested objects may only use keys listed under them.
 | `ask`              | object or null  | See 5.2.3; set when `status=need_input`                                                     |
 | `ranking`          | array           | Max 200 items; see 5.2.4                                                                    |
 | `reports`          | object or null  | **Opaque paths for the UI**, see 5.2.5. Model may show “report ready”, must not read files. |
+| `conditions`       | object or null  | Accepted/rejected must-have weight outcomes; see 5.2.6                                      |
 | `scratch_retained` | boolean or null | Whether downloaded CVs were retained (kept by default); never list files                                      |
 
 #### 5.2.1 `error_code` enum
@@ -286,6 +287,13 @@ Forbidden on ranking rows: `name`, `email`, `phone`, `source` (raw filename), `e
 
 **Preferred MVP:** booleans + counts + `run_id`, not filesystem paths, so Windows `C:\Users\...` never reaches the model. If a path must be returned for a dumb host, it is still on the whitelist **only** under `reports.directory` and must not appear in `error_message` or `ask.questions`.
 
+#### 5.2.6 `conditions`
+
+Set only when a screening run has per-skill weight metadata. `must_skill_weights[]` contains
+accepted `{skill, weight}` records; `rejected_weights[]` contains bounded
+`{skill, weight, reason}` records for values HR supplied but the engine refused. Names,
+emails, phones, and other candidate identity are never allowed here.
+
 ### 5.3 Example (success)
 
 ```json
@@ -327,6 +335,7 @@ Forbidden on ranking rows: `name`, `email`, `phone`, `source` (raw filename), `e
     "html_ready": true,
     "open_hint": "open_in_panel"
   },
+  "conditions": null,
   "scratch_retained": false
 }
 ```
@@ -468,6 +477,8 @@ WorkBuddy must not implement a second scorer. It must not pass `jd_text` into `c
 | `failures[]` | `failed_count` + `ranking[].parse_failed` / `failure_stage` |
 | `reports.comparison_xlsx` path | `reports.comparison_xlsx: true`; `directory` is always `null` |
 | `reports.screening_board_html` path | `reports.html_ready: true` |
+| `jd_overrides.must_skill_weights` | `conditions.must_skill_weights` (`skill` + numeric weight only) |
+| `jd_overrides.rejected_weights` | `conditions.rejected_weights` (`skill` + bounded reason only) |
 | `ask.missing` | intersect with enum (`jas_session` / `refno` / `candidates` / `jd` / `position` / `scope` / `input`) |
 | `error_message` | sanitize; HTML / `Set-Cookie` / base64 → `envelope_rejected` |
 

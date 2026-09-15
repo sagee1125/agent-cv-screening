@@ -87,6 +87,8 @@ the existing `1.0` behaviour. An explicit weight overrides the ad's weight and a
 HR moves or adds the skill. Duplicate tokens keep the maximum weight instead of summing.
 `preferred_skills` remains name-only: a weight there is rejected and reported under
 `jd_overrides.rejected_weights`, never silently ignored.
+The manifest carries the merge summary in `jd_overrides`; `host-envelope` projects accepted and
+rejected weight metadata as the top-level `conditions` object.
 
 **Stored conditions are never merged until the current conversation confirms them.** The file
 lives in the shared per-refno output directory and outlives the conversation that wrote it, so
@@ -119,6 +121,12 @@ stdout prints a JSON manifest:
   "refno": "260818001",
   "output_dir": ".../data/pipeline_out",
   "jd_source": ".../data/pipeline_out/jd-parse.json",
+  "jd_overrides": {
+    "applied": true,
+    "changed": 1,
+    "must_skill_weights": [{"name": "Python", "weight": 2.0}],
+    "rejected_weights": []
+  },
   "config_json": ".../data/pipeline_out/config.json",
   "candidates": [
     {

@@ -43,6 +43,7 @@ TOP_KEYS = frozenset(
         "failed_count",
         "auth",
         "ask",
+        "conditions",
         "ranking",
         "reports",
         "scratch_retained",

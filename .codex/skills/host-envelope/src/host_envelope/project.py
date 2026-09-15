@@ -1,6 +1,7 @@
 # Projects skill stdout onto the WorkBuddy host-visible JSON whitelist.
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ def rejected_envelope(tool: str, message: str) -> dict[str, Any]:
         "failed_count": None,
         "auth": None,
         "ask": None,
+        "conditions": None,
         "ranking": [],
         "reports": None,
         "scratch_retained": None,
@@ -147,6 +149,12 @@ def _project_conditions(raw: Any) -> dict[str, Any] | None:
         if isinstance(values, list):
             cleaned = [sanitize_text(item, 80) for item in values[:40] if str(item).strip()]
             out[key] = [item for item in cleaned if item and not looks_like_forbidden_payload(item)]
+    accepted_weights = _project_skill_weights(raw.get("must_skill_weights"))
+    if accepted_weights:
+        out["must_skill_weights"] = accepted_weights
+    rejected_weights = _project_rejected_weights(raw.get("rejected_weights"))
+    if rejected_weights:
+        out["rejected_weights"] = rejected_weights
     collected = raw.get("collected_at")
     if collected:
         out["collected_at"] = sanitize_text(collected, 40)
@@ -154,7 +162,73 @@ def _project_conditions(raw: Any) -> dict[str, Any] | None:
         value = raw.get(key)
         if value is not None:
             out[key] = sanitize_text(value, 40)
+    applied = raw.get("applied")
+    if isinstance(applied, bool):
+        out["applied"] = applied
+    changed = raw.get("changed")
+    if isinstance(changed, int) and not isinstance(changed, bool):
+        out["changed"] = max(0, min(changed, 1000))
     return out or None
+
+
+# Projects accepted must-have weights into bounded host-safe records.
+def _project_skill_weights(values: Any) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in values[:40]:
+        if not isinstance(item, dict):
+            continue
+        name = sanitize_text(item.get("name"), 80)
+        if not name or looks_like_forbidden_payload(name):
+            continue
+        try:
+            weight = float(item.get("weight"))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(weight) or not 0.5 <= weight <= 3.0:
+            continue
+        out.append({"skill": name, "weight": weight})
+    return out
+
+
+# Projects rejected must-have weights and reasons without exposing raw payloads.
+def _project_rejected_weights(values: Any) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in values[:20]:
+        if not isinstance(item, dict):
+            continue
+        name = sanitize_text(item.get("name"), 80)
+        reason = sanitize_text(item.get("reason"), 160)
+        if not name or not reason:
+            continue
+        if looks_like_forbidden_payload(name) or looks_like_forbidden_payload(reason):
+            continue
+        record: dict[str, Any] = {"skill": name, "reason": reason}
+        raw_weight = item.get("weight")
+        if isinstance(raw_weight, bool):
+            record["weight"] = str(raw_weight).lower()
+        elif isinstance(raw_weight, (int, float)):
+            record["weight"] = (
+                f"{raw_weight:g}" if math.isfinite(float(raw_weight)) else str(raw_weight)
+            )
+        else:
+            weight_text = sanitize_text(raw_weight, 40)
+            if weight_text and not looks_like_forbidden_payload(weight_text):
+                record["weight"] = weight_text
+        out.append(record)
+    return out
+
+
+# Projects only weight-related run conditions into the top-level host envelope.
+def _project_run_conditions(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    if not raw.get("must_skill_weights") and not raw.get("rejected_weights"):
+        return None
+    return _project_conditions(raw)
 
 
 # Restricts an appno to the host schema charset; never copies a personal name field.
@@ -377,6 +451,7 @@ def _project_check_updates(payload: dict[str, Any], jas_session: str | None, coo
         "failed_count": None,
         "auth": auth,
         "ask": _project_ask({**payload, "status": status}) if status == "need_input" else None,
+        "conditions": None,
         "ranking": [],
         "reports": None,
         "scratch_retained": None,
@@ -425,6 +500,7 @@ def project_host_return(
                 "missing": ["jas_session"],
                 "questions": ["Allow WorkBuddy to use your current JAS login. Do not paste session values."],
             },
+            "conditions": None,
             "ranking": [],
             "reports": None,
             "scratch_retained": None,
@@ -483,6 +559,7 @@ def project_host_return(
         "ask": _project_ask({**skill, "status": status})
         if status in ("need_input", "conditions_pending")
         else None,
+        "conditions": _project_run_conditions(skill.get("jd_overrides")),
         "ranking": ranking,
         "reports": _project_reports(skill),
         "scratch_retained": scratch_retained,

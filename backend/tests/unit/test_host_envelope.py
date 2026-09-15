@@ -42,6 +42,49 @@ def test_project_strips_name_and_uses_appno() -> None:
     assert "C:\\\\Users" not in dumped and "C:\\Users" not in dumped
 
 
+# Accepted and rejected skill weights are exposed as host-safe condition metadata.
+def test_project_surfaces_condition_weight_metadata() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260901004",
+            "jd_overrides": {
+                "applied": True,
+                "changed": 2,
+                "must_skill_weights": [{"name": "R", "weight": 3.0}],
+                "rejected_weights": [
+                    {
+                        "name": "Docker",
+                        "weight": 3.0,
+                        "reason": "weights are only allowed on must-have skills",
+                    },
+                    {"name": "Python", "weight": 99, "reason": "must-have weight must be between 0.5 and 3"},
+                ],
+            },
+        },
+    )
+
+    assert validate_envelope(envelope) == []
+    assert envelope["conditions"] == {
+        "must_skill_weights": [{"skill": "R", "weight": 3.0}],
+        "rejected_weights": [
+            {
+                "skill": "Docker",
+                "reason": "weights are only allowed on must-have skills",
+                "weight": "3",
+            },
+            {
+                "skill": "Python",
+                "reason": "must-have weight must be between 0.5 and 3",
+                "weight": "99",
+            },
+        ],
+        "applied": True,
+        "changed": 2,
+    }
+
+
 # Nested screening-agent result payloads are unwrapped before projection.
 def test_project_unwraps_screening_agent_result() -> None:
     inner = json.loads(EXAMPLE_STDOUT.read_text(encoding="utf-8"))

@@ -12,6 +12,7 @@ WorkBuddy (and any other chat host) must not attach raw skill stdout to the conv
 - Host-visible rows are keyed by `appno` (plus `refno` on the envelope). Names, first-letter masks, emails, cookies, JD/CV text, and report file contents are dropped.
 - Report paths become booleans (`comparison_xlsx`, `pdf_count`, `html_ready`). `reports.directory` stays `null`.
 - Cookie files are represented only as `auth.cookie_file_present`.
+- Accepted and rejected skill weights are projected into top-level `conditions`; rejected records use the non-identity key `skill` and include the bounded rejection reason.
 
 ## Run
 

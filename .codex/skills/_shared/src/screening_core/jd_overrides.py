@@ -215,11 +215,11 @@ def _new_skill(
 # Returns how many requirements changed plus any rejected skill weights.
 def _merge_skill_lists(
     data: dict[str, Any], overrides: dict[str, Any], taxonomy
-) -> tuple[int, list[dict[str, Any]]]:
+) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]]]:
     final_must = overrides.get("must_skills")
     final_preferred = overrides.get("preferred_skills")
     if not isinstance(final_must, list) and not isinstance(final_preferred, list):
-        return 0, []
+        return 0, [], []
 
     must_entries, must_rejected = _normalize_skill_entries(final_must, allow_weight=True)
     preferred_entries, preferred_rejected = _normalize_skill_entries(
@@ -233,6 +233,11 @@ def _merge_skill_lists(
     must_tokens = {_token(name) for name, _ in must_entries}
     preferred_tokens = {_token(name) for name, _ in preferred_entries}
     must_weights = {_token(name): weight for name, weight in must_entries if weight is not None}
+    applied_weights = [
+        {"name": name, "weight": weight}
+        for name, weight in must_entries
+        if weight is not None
+    ]
 
     claimed: set[str] = set()
     must: list[dict[str, Any]] = []
@@ -287,14 +292,14 @@ def _merge_skill_lists(
             changed += 1
 
     if not changed:
-        return 0, rejected
+        return 0, rejected, applied_weights
     for order, record in enumerate(must, start=1):
         record["priority_order"] = order
     for order, record in enumerate(preferred, start=1):
         record["priority_order"] = order
     data["must_skills"] = must
     data["preferred_skills"] = preferred
-    return changed, rejected
+    return changed, rejected, applied_weights
 
 
 # Replace parsed language requirements when HR supplied their own list.
@@ -409,7 +414,9 @@ def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], di
         return data, {"applied": False, "reason": "no conditions"}
     taxonomy = _taxonomy()
     counts: dict[str, int] = {}
-    skills_changed, rejected_weights = _merge_skill_lists(data, overrides, taxonomy)
+    skills_changed, rejected_weights, applied_weights = _merge_skill_lists(
+        data, overrides, taxonomy
+    )
     for section, changed in (
         ("skills", skills_changed),
         ("languages", _merge_languages(data, overrides)),
@@ -427,6 +434,8 @@ def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], di
         # Total requirements HR changed, used for the report's conditions label.
         "changed": sum(counts.values()),
     }
+    if applied_weights:
+        summary["must_skill_weights"] = applied_weights
     if rejected_weights:
         summary["rejected_weights"] = rejected_weights
     data["hr_conditions"] = summary

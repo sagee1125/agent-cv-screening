@@ -99,6 +99,7 @@ def test_mapping_weight_overrides_existing_must_weight() -> None:
     )
 
     assert merged["must_skills"][0]["weight"] == 2.5
+    assert summary["must_skill_weights"] == [{"name": "Python", "weight": 2.5}]
     assert summary["counts"] == {"skills": 1}
     assert summary["changed"] == 1
 

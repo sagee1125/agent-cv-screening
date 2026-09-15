@@ -140,6 +140,41 @@
         }
       }
     },
+    "conditions": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "applied": { "type": "boolean" },
+        "changed": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "must_skill_weights": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["skill", "weight"],
+            "properties": {
+              "skill": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+              "weight": { "type": "number", "minimum": 0.5, "maximum": 3.0 }
+            }
+          }
+        },
+        "rejected_weights": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["skill", "reason"],
+            "properties": {
+              "skill": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+              "weight": { "type": "string", "maxLength": 40, "pattern": "^[^\\r\\n]*$" },
+              "reason": { "type": "string", "maxLength": 160, "pattern": "^[^\\r\\n]*$" }
+            }
+          }
+        }
+      }
+    },
     "scratch_retained": { "type": ["boolean", "null"] },
     "has_changes": { "type": ["boolean", "null"] },
     "first_check": { "type": ["boolean", "null"] },

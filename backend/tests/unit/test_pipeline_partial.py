@@ -593,3 +593,120 @@ def test_pipeline_applies_conditions_only_when_confirmed(tmp_path, monkeypatch, 
     assert exit_code == 0
     assert json.loads(out)["status"] == "success"
     assert not (out_dir / "jd-final.json").exists()
+
+
+# Rejected weight details reach the manifest so the host can tell HR what was ignored.
+def test_pipeline_manifest_exposes_rejected_weights(tmp_path, monkeypatch, capsys) -> None:
+    """A confirmed preferred-skill weight is rejected but still visible to the host."""
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text(
+        json.dumps({"structured_data": {"must_skills": [], "preferred_skills": []}}),
+        encoding="utf-8",
+    )
+    (out_dir / "jd-overrides.yaml").write_text(
+        "must_skills:\n"
+        "  - name: Python\n"
+        "    weight: 2.0\n"
+        "preferred_skills:\n"
+        "  - name: Docker\n"
+        "    weight: 3.0\n",
+        encoding="utf-8",
+    )
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+
+    exit_code, out, _err = _run_cli(
+        module,
+        [
+            "--jd-json",
+            str(jd),
+            "--cv",
+            str(cv),
+            "--skip-reports",
+            "--output-dir",
+            str(out_dir),
+            "--conditions",
+            "confirmed",
+        ],
+        monkeypatch,
+        capsys,
+    )
+
+    manifest = json.loads(out)
+    assert exit_code == 0
+    assert manifest["status"] == "success"
+    assert manifest["jd_overrides"]["rejected_weights"] == [
+        {
+            "name": "Docker",
+            "weight": 3.0,
+            "reason": "weights are only allowed on must-have skills",
+        }
+    ]
+    assert manifest["jd_overrides"]["must_skill_weights"] == [{"name": "Python", "weight": 2.0}]
+
+
+# Rejected-only weights still reach the manifest even when no merged JD is written.
+def test_pipeline_manifest_exposes_rejected_only_weight(tmp_path, monkeypatch, capsys) -> None:
+    """An invalid weight leaves scoring unchanged but remains visible to the host."""
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cv = tmp_path / "good.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text(
+        json.dumps(
+            {
+                "structured_data": {
+                    "must_skills": [
+                        {
+                            "skill_id": "python",
+                            "display_name": "Python",
+                            "canonical_skill": "python",
+                            "weight": 1.0,
+                        }
+                    ],
+                    "preferred_skills": [],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (out_dir / "jd-overrides.yaml").write_text(
+        "must_skills:\n"
+        "  - name: Python\n"
+        "    weight: 99\n"
+        "preferred_skills: []\n",
+        encoding="utf-8",
+    )
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", _fake_skill_runner(parse_calls))
+
+    exit_code, out, _err = _run_cli(
+        module,
+        [
+            "--jd-json",
+            str(jd),
+            "--cv",
+            str(cv),
+            "--skip-reports",
+            "--output-dir",
+            str(out_dir),
+            "--conditions",
+            "confirmed",
+        ],
+        monkeypatch,
+        capsys,
+    )
+
+    manifest = json.loads(out)
+    assert exit_code == 0
+    assert manifest["status"] == "success"
+    assert manifest["jd_source"] == str(jd)
+    assert manifest["jd_overrides"]["rejected_weights"][0]["name"] == "Python"
+    assert not (out_dir / "jd-final.json").exists()

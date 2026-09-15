@@ -932,6 +932,7 @@ def _build_manifest(
         "refno": args.refno,
         "output_dir": str(out_dir),
         "jd_source": str(jd_source),
+        "jd_overrides": getattr(args, "_jd_overrides", None),
         "config_json": str(config_out) if config_out else None,
         "candidates": manifest_rows,
         "failures": [item.to_dict() for item in failures],
