@@ -673,15 +673,29 @@ def _resume_cell(row: dict[str, Any]) -> str:
     return f"<a href='{_esc(resume_url)}' target='_blank' rel='noopener'>Resume</a>"
 
 
-# Remove email and phone-like patterns from free JD text before it is rendered.
+# Remove email, phone and contact-name patterns from free JD text before it is rendered.
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(r"(?<![\d+])(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)[\s.-]?)?\d{3,4}(?:[\s.-]+\d{3,4})+(?!\d)")
+# The person a JD contact line names, e.g. "contact Prof. Brian Lee at telephone number ...".
+# Two narrow forms only, so an ordinary requirement sentence cannot lose a capitalised word:
+# a title after "contact", or a name immediately followed by the contact details themselves.
+_CONTACT_NAME_RE = re.compile(
+    r"\b(?P<cue>(?i:contact|enquir(?:y|ies)))\s+"
+    r"(?:"
+    r"(?P<titled>(?i:prof|dr|mr|ms|mrs|miss|ir|sr)\.?\s+[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,4})"
+    r"|"
+    r"(?P<plain>[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,4})"
+    r"(?=\s+(?i:at|via|on|by)\s+(?i:telephone|tel|fax|email|phone))"
+    r")"
+)
 
 
-# Scrub contact details (emails, phone numbers) out of raw JD text.
+# Scrub contact details (emails, phone numbers, the named contact) out of raw JD text.
+# Applied at render time only: the raw advertisement stays intact in _pipeline for audit.
 def _scrub_contact(text: str) -> str:
     without_emails = _EMAIL_RE.sub("[email removed]", text)
-    return _PHONE_RE.sub("[phone removed]", without_emails)
+    without_phones = _PHONE_RE.sub("[phone removed]", without_emails)
+    return _CONTACT_NAME_RE.sub(lambda match: f"{match.group('cue')} [name removed]", without_phones)
 
 
 # Return the parsed JD dict, unwrapping a jd-parse.json envelope when one is passed.
@@ -870,7 +884,7 @@ def _tag(
         tip_html = (
             "<span class='tag-tip'>"
             f"<span class='{meta_class}'>{_esc(heading)}</span>"
-            f"{_esc(body)}</span>"
+            f"{_esc(_scrub_contact(body))}</span>"
         )
     tabindex = " tabindex='0'" if tip_html else ""
     return (

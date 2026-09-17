@@ -814,6 +814,7 @@ def test_html_board_jd_panel_renders_groups_languages_and_escaping(tmp_path: Pat
         "Reference number: 260901004\n"
         'Duties: run <script>alert("x")</script> analysis with Python & Stata.\n'
         "Contact: hr@polyu.example for details or phone 2766 1234.\n"
+        "Applicants are invited to contact Prof. Jane Doe at telephone number 2766 5678.\n"
         "Posting date: 2026-08-25\n"
     )
     service.generate_screening_board_html(
@@ -843,9 +844,12 @@ def test_html_board_jd_panel_renders_groups_languages_and_escaping(tmp_path: Pat
     assert "&lt;script&gt;" in text
     assert "<script>alert" not in text
     assert "<script" not in text
-    # Emails and phone numbers are scrubbed before rendering.
+    # Emails, phone numbers and the named contact are scrubbed before rendering.
     assert "hr@polyu.example" not in text
     assert "2766 1234" not in text
+    assert "Jane Doe" not in text
+    assert "2766 5678" not in text
+    assert "[name removed]" in text
     # The new panel introduces no scripts and no external references.
     assert "href='http" not in text
     assert "src='http" not in text
