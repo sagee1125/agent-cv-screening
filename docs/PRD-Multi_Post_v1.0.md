@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Multi_Post-v1.0
 feature_name: Multi-Post JAS Advertisements
-version: 1.1.0
+version: 1.2.0
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -31,7 +31,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Multi-Post JAS Advertisements
-**Version:** 1.1.0 (MVP)
+**Version:** 1.2.0 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** HR recruiters screening a JAS `refno` through the WorkBuddy chat
@@ -46,6 +46,7 @@ affected_modules:
 | ------- | ---------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | 1.0.0   | 2026-09-17 | HR Screening Product Owner | Initial PRD: one `refno` may advertise several posts; per-post JD, scoring, report.                                             |
 | 1.1.0   | 2026-09-17 | HR Screening Product Owner | Add FR-12 (`check_updates` reports per-post changes); carry `post` into the collector manifest; extend the module-impact table. |
+| 1.2.0   | 2026-09-17 | HR Screening Product Owner | Record the prerequisite fix as resolved (§8); correct the test baseline to 517 (§9); add §13 Implementation Handover. |
 
 ---
 
@@ -355,6 +356,14 @@ cover **every** post's JD digest, not a single digest.
 
 ## 8. Prerequisite Defect (blocking)
 
+> **Status: RESOLVED** in commit `0923542` (2026-09-17). **Do not re-fix it.** The measured evidence below is
+> kept as the record of why the fix was required and as the regression target. What shipped:
+> `_header_label(cell)` now reads `text or link_text` (`records.py:237`) and is used by
+> `_candidate_column_indexes` (`records.py:302`); `mock.py` emits link-wrapped headers behind a
+> `multi_post=` fixture flag; three regression tests were added to `backend/tests/unit/test_jas_import.py`.
+> **The `post` key is deliberately NOT in the column map yet** — it lands with FR-2 (§13, step 1), because the
+> map and the `JASCandidate.post` field must change together.
+
 **The candidate column map never works on real pages, so multi-post cannot be implemented on top of it.**
 
 `jas_import/records.py:_candidate_column_indexes` is designed to map columns by header label and fall back to
@@ -378,12 +387,13 @@ material; legacy index 13 is the **contact telephone** column, which is read int
 
 Effect: a multi-post refno downloads **zero CVs** today, and the run degrades into "no candidates".
 
-The fix is one line — read the label from `text or link_text` — plus two follow-ups:
+The fix — applied in `0923542` — was one line, reading the label from `text or link_text`, plus two
+follow-ups, both now satisfied:
 
-1. `jas_import/mock.py` must wrap its header labels in `<a>` the way the real page does. The existing
-   regression test passes only because the fixture emits bare `<th>Label</th>`; the fixture therefore
+1. `jas_import/mock.py` had to wrap its header labels in `<a>` the way the real page does. The existing
+   regression test passed only because the fixture emitted bare `<th>Label</th>`; the fixture therefore
    exercised a code path production never takes.
-2. The resolved map for a multi-post page must be asserted in a test:
+2. The resolved map for a multi-post page had to be asserted in a test:
    `{appno: 1, record_detail: 3, status: 4, cv: 14, supp: 15}`, with the single-post map unchanged at
    `{appno: 1, record_detail: 2, status: 3, cv: 13, supp: 14}`.
 
@@ -405,7 +415,16 @@ there is no contaminated history to reconcile.
 | Regression           | The single-post path is unchanged: same scores, same file names, same report shape.                                                                                                                                                                                  |
 | Cache                | Adding one applicant to post B does not invalidate post A's parsed, scored or per-applicant artifacts.                                                                                                                                                               |
 
-Baseline before this work: `venv/Scripts/python.exe -m pytest backend/tests -q` → 502 passed, 1 skipped.
+Baseline at the start of the multi-post work (HEAD `1e8e499`, before the prerequisite fix): **514 passed,
+1 skipped**. Current baseline at PRD v1.2.0 (HEAD `90b09e5`, prerequisite fix applied): **517 passed,
+1 skipped** — measured on 2026-09-17; the three added tests are the two column-map assertions and the fixture
+guard. An earlier revision of this PRD quoted 502, which was stale. Redirect pytest's output to a file before
+grepping it: the temporary-directory cleanup prints a trailing `SystemExit: 1` that hides the summary line.
+
+```bash
+venv/Scripts/python.exe -m pytest backend/tests -q > "$LOCALAPPDATA/Temp/pytest.txt" 2>&1
+grep -E "passed|failed|error" "$LOCALAPPDATA/Temp/pytest.txt" | tail -3
+```
 
 ---
 
@@ -451,7 +470,111 @@ Baseline before this work: `venv/Scripts/python.exe -m pytest backend/tests -q` 
 
 ---
 
-## 13. Sign-off
+## 13. Implementation Handover
+
+This section is written for an engineer or agent picking the work up with no prior context. Sections 1–12
+state **what** to build; this one states **how to work in this repository safely**. It repeats no page facts —
+those are in Section 2.
+
+### 13.1 Implementation order
+
+Take the steps in this order. Each is independently testable, and the later steps assume the earlier ones.
+
+| # | Step | Lands in |
+| - | ---- | -------- |
+| 1 | Add `post` to the column map **and** `JASCandidate.post` **in the same change**, so a mapped key always has a field to land in. The verified multi-post map is `{appno: 1, record_detail: 3, status: 4, cv: 14, supp: 15, post: 2}`. | `jas_import/records.py` |
+| 2 | Expose the multi-post flag from the three signals (FR-1); carry the post into the parsed candidate reference (FR-2). | `jas_import/records.py`, `jas_import/skill.py` |
+| 3 | Restructure `job_payload_from_html` from one flat candidate list into a posts structure, keeping the single-post output shape byte-identical. | `jas_import/skill.py` |
+| 4 | Base ⊕ delta derivation with provenance (FR-4). | `jd-parser` |
+| 5 | Per-post scoring groups (FR-5); add the post dimension to the cache keys (Section 6). | `pipeline/scripts/run_pipeline.py`, `screening_core` |
+| 6 | One `<details>` per post in the board (FR-6). | `report-gen/src/report_gen/html_board.py` |
+| 7 | Per-post grill, grouped by base name, stopping once (FR-9). | `screening_core/jd_overrides.py`, `run_jas_screening.py` |
+| 8 | Per-post update checking (FR-12) and the multi-post reply text (FR-11). | `jas-import/scripts/check_updates.py`, `AGENTS.md`, the `hr-cv-screening` skill |
+
+Step 3 is the one that can break the single-post path. Run the regression suite after it before continuing.
+
+### 13.2 The real entry point is a wrapper chain, not `run_pipeline.py`
+
+The HR-facing entry point is several scripts deep. **Verify behaviour through the chain, never by calling
+`run_pipeline.py` directly** — a direct call bypasses the host envelope and will report success for a run the
+product cannot actually deliver.
+
+```
+host-envelope/scripts/run_workbuddy_tool.py    screen_refno
+  ├─ folder target  →  jas-import/scripts/run_jas_import.py <folder>
+  └─ refno / URL    →  webridge-collect/scripts/run_webridge_collect.py <refno> --driver webbridge
+                         └─ jas-import/scripts/run_jas_import.py           (forwards argv verbatim)
+                              └─ jas-import/scripts/run_jas_screening.py   (auto-enables --resume, line 340)
+                                   └─ pipeline/scripts/run_pipeline.py
+```
+
+Two consequences, each of which has already shipped a defect here once:
+
+- **New statuses and keys must be whitelisted.** Any new run status or missing-input key — for example the
+  needs-confirmation state in FR-7 — must be added to the host envelope's `ALLOWED_STATUS`,
+  `ALLOWED_ERROR_CODES` and `ALLOWED_MISSING` lists. Without that, `project_host_return` collapses the
+  question into a generic `error` and HR never sees it.
+- **Never read a result out of the output directory without gating on the current run's status.** A run that
+  stops early (`need_input`, `conditions_pending`, `error`) writes **no** manifest, so the *previous* run's
+  manifest is still on disk. Projecting it reports stale reports as this run's result and hides the question
+  the run stopped to ask. `run_workbuddy_tool.py` gates on `status in ("success", "partial_success")` — keep
+  that gate on any new code path that reads the output directory.
+
+### 13.3 `--resume` will make your code changes look like no-ops
+
+`run_jas_screening.py:340` turns `--resume` on automatically on any second run of the same job folder. The
+resume decision is keyed on **inputs** (JD bytes, CV bytes, the conditions file) and never on **code**. So
+after editing scoring logic in `engine.py`, `taxonomy.py` or similar, re-running the same refno reuses the
+cached `score-*.json` and the change appears to do nothing.
+
+When a change must be observable, **move — never delete** — the cached artifacts aside first:
+
+| Move these | Effect |
+| ---------- | ------ |
+| `detail-*.json`, `rows.json`, `board-row-*.json`, `report-fingerprints.json` | forces a re-score |
+| also `jd-parse.json`, `jd-context.txt` | forces a JD re-parse |
+| also `extracted-*.json` | forces a full re-parse (slowest) |
+
+Move them to `_pipeline/_backup-<timestamp>/`. A full re-parse is **not** score-neutral, so never promise HR
+that a re-screen reproduces earlier numbers. Bumping `SCHEMA_VERSION` or `config_hash` does **not** invalidate
+the cache.
+
+### 13.4 Fixtures already available
+
+- `jas_import/mock.py` generates both page shapes. `mock_records_html(refno, multi_post=True)` returns the
+  HTML; `generate_mock_jas_dir(target_dir, multi_post=True)` writes a complete offline job folder
+  (`records.html` + `cvs/`). Both default to `multi_post=False`, so existing callers are unchanged. Use the
+  multi-post fixture for the integration row of the Section 9 test plan rather than building a new one.
+- An offline folder can drive the whole chain without a browser:
+  `run_jas_import.py <folder> --output-dir <tmp>`.
+- The demo records pages are the agreed stand-in for the real `records.php`. Appendix A re-runs the page
+  checks; re-verify against the real pages when they become available.
+
+### 13.5 Invariants that must not break
+
+1. **The single-post path stays byte-identical** — same scores, same file names, same report shape. It is the
+   control proving the post dimension did not leak.
+2. **One refno → one Desktop folder**, `Desktop/workbuddy-cv-screen/<refno>/`. Never one folder per post.
+3. **No cross-post ranking**, and no wording implying scores are comparable across posts.
+4. **No names, emails, phones or salaries** in any artifact, log or manifest. Identity is `refno` / `appno`.
+5. **Never load report contents into the model context.**
+6. **Never re-run the HR conditions command unchanged** — it stops at the same question again and HR sees a
+   loop. Never rename, move or delete `_pipeline/jd-overrides.yaml` to get past the gate: that silently
+   discards HR's conditions. Stored conditions are the grill's default answer, never a substitute for asking,
+   and `check_updates` is the only flow that does not grill.
+7. **Move cached artifacts, never delete them.**
+8. **Do not run `git stash`, `git gc` or `git repack` in this repository** — an interrupted repack has
+   destroyed objects here before. Do not push unless asked.
+
+### 13.6 Operational context that does not live in this repository
+
+Some working rules live in the assistant's local memory under `.workbuddy-ai/memory/`, which is **git-ignored**
+and therefore does not travel with the repository. Everything relevant to this feature is restated in §13.5 so
+this document stands alone; anything else must be handed over in conversation, not assumed.
+
+---
+
+## 14. Sign-off
 
 | Role          | Name                       | Status |
 | ------------- | -------------------------- | ------ |
@@ -462,27 +585,33 @@ Baseline before this work: `venv/Scripts/python.exe -m pytest backend/tests -q` 
 
 ## Appendix A — How to re-verify the page facts
 
-Structural checks only; none of these print applicant data.
+Structural checks only; none of these print applicant data. Note that on Windows the temp directory is
+`$LOCALAPPDATA/Temp` — `/tmp` does not exist there and a write to it fails.
 
 ```bash
 # Fetch the raw records pages (demo)
-curl -sL "https://jes-web-demo.vercel.app/records.html?refno=260917001" -o /tmp/rec.html
+TMP="${LOCALAPPDATA:-/tmp}"; [ "$TMP" = "/tmp" ] || TMP="$TMP/Temp"
+REC="$TMP/rec.html"
+curl -sL "https://jes-web-demo.vercel.app/records.html?refno=260917001" -o "$REC"
 
 # The flag is NOT an attribute
-grep -c 'data-multi-post' /tmp/rec.html          # -> 0
-grep -o 'multi-post[a-z-]*' /tmp/rec.html        # -> multi-post-table, multi-post-value
+grep -c 'data-multi-post' "$REC"          # -> 0
+grep -o 'multi-post[a-z-]*' "$REC"        # -> multi-post-table, multi-post-value
 
 # Table class and the JD key/value row
-grep -o '<table[^>]*job-detail-table[^>]*>' /tmp/rec.html
-grep -o 'Multi-post</td>[^<]*<td[^>]*>[A-Za-z]*' /tmp/rec.html
+grep -o '<table[^>]*job-detail-table[^>]*>' "$REC"
+grep -o 'Multi-post</td>[^<]*<td[^>]*>[A-Za-z]*' "$REC"
 ```
 
 ```python
-# Resolve the column map from the page itself
-import sys; sys.path.insert(0, ".codex/skills/jas-import/src")
+# Resolve the column map from the page itself (same file the shell block above fetched)
+import os, sys
+sys.path.insert(0, ".codex/skills/jas-import/src")
 from jas_import import records as R
 
-html = open("/tmp/rec.html", encoding="utf-8", errors="replace").read()
+local = os.environ.get("LOCALAPPDATA")
+rec = os.path.join(local, "Temp", "rec.html") if local else "/tmp/rec.html"
+html = open(rec, encoding="utf-8", errors="replace").read()
 table = R._find_table(R.parse_tables(html), "job-detail-table")
 print(R._candidate_column_indexes(table))   # multi-post -> record_detail 3, status 4, cv 14, supp 15
 ```
