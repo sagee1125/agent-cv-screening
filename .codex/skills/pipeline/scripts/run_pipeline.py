@@ -793,7 +793,9 @@ def _run_legacy_engine(
         if _score_legacy_candidate(args, cand, config_out, out_dir, failures):
             rows.append(_legacy_row(cand))
     unassigned = _rank_rows(rows, multi_post=jd_sources.multi_post)
-    reports = _generate_reports(args, out_dir, rows, failures, jd_sources=jd_sources)
+    reports = _generate_reports(
+        args, out_dir, rows, failures, jd_sources=jd_sources, unassigned=unassigned
+    )
     return _build_manifest(
         args,
         out_dir,
@@ -887,7 +889,9 @@ def _run_matching_engine(
         if row is not None:
             rows.append(row)
     unassigned = _rank_rows(rows, multi_post=jd_sources.multi_post)
-    reports = _generate_reports(args, out_dir, rows, failures, jd_sources=jd_sources)
+    reports = _generate_reports(
+        args, out_dir, rows, failures, jd_sources=jd_sources, unassigned=unassigned
+    )
     return _build_manifest(
         args,
         out_dir,
@@ -1031,6 +1035,7 @@ def _generate_reports(
     *,
     jd_sources: JdSources | None = None,
     jd_text: str | None = None,
+    unassigned: list[dict] | None = None,
 ) -> dict:
     """Generate per-candidate HTML/PDF and ranking overview (unless skipped)."""
     reports: dict = {}
@@ -1090,6 +1095,10 @@ def _generate_reports(
         return reports
     resume_links = _load_resume_links(out_dir)
     comparison_rows = [_board_row(row, resume_links) for row in rows]
+    # An applicant whose post could not be read is ranked nowhere, so the board must carry it in
+    # its needs-confirmation block instead of dropping it (FR-7). They are appended after the
+    # ranked rows, so every ranked row keeps its position and its matching board-row file.
+    comparison_rows += [_board_row(row, resume_links) for row in (unassigned or [])]
     html_out = report_dir / RANKING_OVERVIEW_HTML
     # JD content feeds the board panel, so its digest must invalidate the cached board.
     jd_digest, jd_text_arg, jd_json_arg = _report_jd_inputs(out_dir, jd_sources, jd_text)
@@ -1101,7 +1110,26 @@ def _generate_reports(
         jd_digest=jd_digest,
     )
     reuse_board = previous.get("board") == board_fp and html_out.is_file()
-    if reuse_board:
+    # A multi-post board is told about every post through post-jds.json. Rendering without it
+    # would publish one ordered list across posts, which FR-5 forbids, so the run stops instead
+    # of quietly shipping a merged ranking.
+    post_jds_path = out_dir / POST_JDS_NAME
+    board_blocked = jd_sources is not None and jd_sources.multi_post and not post_jds_path.is_file()
+    if board_blocked:
+        _record_failure(
+            args,
+            failures,
+            Failure(
+                source=str(html_out),
+                stage="report-gen",
+                attempts=0,
+                error_message=(
+                    "multi-post run has no post-jds.json, so the per-post board cannot be built; "
+                    "refusing to merge every post's ranking into one list"
+                ),
+            ),
+        )
+    elif reuse_board:
         reports["ranking_overview_html"] = str(html_out)
         reports["screening_board_html"] = str(html_out)
     else:
@@ -1124,6 +1152,10 @@ def _generate_reports(
             html_cmd += ["--jd-file", jd_text_arg]
         if jd_json_arg:
             html_cmd += ["--jd-json", jd_json_arg]
+        # A multi-post board carries one section per post, so it needs each post's own effective
+        # JD and delta, not just the shared base the panel above shows (FR-6.3).
+        if jd_sources is not None and jd_sources.multi_post:
+            html_cmd += ["--post-jds", str(post_jds_path)]
         attempts, error = _run_with_retries(html_cmd, args.max_retries)
         if error:
             _record_failure(

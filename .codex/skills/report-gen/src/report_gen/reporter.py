@@ -393,6 +393,7 @@ class ReporterService:
         workbook.save(str(file_path))
 
     # Writes a browser HTML board with ranking and SVG radar charts (no personal names).
+    # A multi-post run passes post_jds, which renders one collapsible section per post (FR-6.3).
     def generate_screening_board_html(
         self,
         output_path: str,
@@ -403,6 +404,7 @@ class ReporterService:
         refno: str | None = None,
         jd_text: str | None = None,
         jd_parsed: dict | None = None,
+        post_jds: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         from report_gen.html_board import write_screening_board
 
@@ -414,6 +416,7 @@ class ReporterService:
             refno=refno,
             jd_text=jd_text,
             jd_parsed=jd_parsed,
+            post_jds=post_jds,
         )
 
     # Writes one candidate HTML match page (application-no. filename).

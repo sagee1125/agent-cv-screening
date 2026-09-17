@@ -25,6 +25,7 @@ from report_gen.skill import (
     generate_comparison_report_skill,
     generate_screening_board_skill,
 )
+from screening_core.posts import base_name
 
 
 # Load a JSON file (BOM-tolerant) into a dict or list.
@@ -41,6 +42,38 @@ def _read_jd_parsed(path: str | None) -> dict | None:
         return None
     inner = payload.get("structured_data")
     return inner if isinstance(inner, dict) else payload
+
+
+# Load the pipeline's post-jds.json into {post base name: {jd_text, jd_parsed, delta}} so the board
+# can render one section per post (FR-6.3). Keyed by base name because full-time and part-time
+# variants of one post share a single effective JD (FR-4).
+def _read_post_jds(path: str | None) -> dict[str, dict] | None:
+    if not path:
+        return None
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return None
+    entries = payload.get("posts")
+    if not isinstance(entries, list):
+        return None
+    by_post: dict[str, dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("post") or "").strip()
+        if not label:
+            continue
+        text_path = entry.get("jd_text")
+        text = None
+        if isinstance(text_path, str) and Path(text_path).is_file():
+            text = Path(text_path).read_text(encoding="utf-8-sig")
+        jd_json = entry.get("jd_json")
+        by_post[base_name(label)] = {
+            "jd_text": text,
+            "jd_parsed": _read_jd_parsed(jd_json if isinstance(jd_json, str) else None),
+            "delta": [str(item) for item in (entry.get("delta") or []) if str(item).strip()],
+        }
+    return by_post or None
 
 
 # Generate a one-page PDF report for one scored candidate (optionally with matching detail).
@@ -95,6 +128,8 @@ def _run_board(args: argparse.Namespace) -> int:
             raise ValueError("--rows must contain a JSON array of candidate rows")
         jd_text = Path(args.jd_file).read_text(encoding="utf-8-sig") if args.jd_file else None
         jd_parsed = _read_jd_parsed(args.jd_json)
+        # A multi-post run hands over post-jds.json; the board then renders one section per post.
+        post_jds = _read_post_jds(args.post_jds)
         result = generate_screening_board_skill(
             position_name=args.position,
             rows=rows,
@@ -102,6 +137,7 @@ def _run_board(args: argparse.Namespace) -> int:
             refno=args.refno,
             jd_text=jd_text,
             jd_parsed=jd_parsed,
+            post_jds=post_jds,
         )
     except Exception as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -165,6 +201,7 @@ def _build_parser() -> argparse.ArgumentParser:
     board_parser.add_argument("--refno", default=None, help="Optional job reference number shown in the heading.")
     board_parser.add_argument("--jd-file", default=None, help="Optional raw JD text file shown in the board panel.")
     board_parser.add_argument("--jd-json", default=None, help="Optional parsed JD JSON (jd-parser output); structured_data is unwrapped.")
+    board_parser.add_argument("--post-jds", default=None, help="Optional post-jds.json from a multi-post run; renders one collapsible section per post.")
     board_parser.add_argument("--output", required=True, help="Path to write the HTML file.")
     board_parser.set_defaults(func=_run_board)
 

@@ -10,6 +10,7 @@ from typing import Any
 
 from screening_core.candidate_id import format_candidate_label  # noqa: F401  (kept for API compatibility)
 from screening_core.hr_output import candidate_match_stem, safe_http_url
+from screening_core.posts import base_name, group_by_post
 
 _DIMENSION_LABELS = {
     "skill_match": "Skill Match",
@@ -183,6 +184,39 @@ _PAGE_CSS_BASE = """
     .hr-mark { display: inline-block; padding: 0 5px; border-radius: 6px; background: #fee2e2;
                color: #b91c1c; font-size: .68rem; font-weight: 700; letter-spacing: .05em;
                vertical-align: middle; }
+
+    /* Multi-post board: one collapsible section per post. Native details/summary, so the
+       report needs no JavaScript. */
+    .post-section { background: #fff; border-radius: 16px; margin-top: 24px;
+                    box-shadow: 0 1px 3px rgba(15,23,42,.08); overflow: hidden; }
+    .post-section > summary { cursor: pointer; padding: 16px 18px; display: flex;
+                              gap: 14px; align-items: baseline; flex-wrap: wrap;
+                              list-style: none; }
+    .post-section > summary::-webkit-details-marker { display: none; }
+    .post-section > summary::before { content: "\\25B8"; color: #2563eb; font-weight: 700; }
+    .post-section[open] > summary::before { content: "\\25BE"; }
+    .post-section > summary:hover { background: #f8fafc; }
+    .post-section > summary:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+    .post-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
+    /* The post an applicant was scored against, restated on a forwarded match page (FR-8). */
+    .post-applied { display: inline-block; padding: 2px 10px; border-radius: 999px;
+                    background: #ede9fe; color: #6d28d9; font-weight: 600; }
+    .post-count, .post-top { font-size: .88rem; font-weight: 500; color: #64748b; }
+    .post-top { color: #1d4ed8; font-weight: 600; }
+    .post-body { padding: 0 18px 20px; }
+    .post-body .jd-panel { margin-top: 0; }
+    .post-delta-label { font-weight: 700; color: #0f172a; font-size: .9rem; margin: 14px 0 0; }
+    .post-delta { margin: 8px 0 0; padding-left: 1.1rem; }
+    .post-delta li { margin-bottom: 6px; font-size: .9rem; line-height: 1.5; color: #334155; }
+    .post-shared { margin: 8px 0 0; font-size: .9rem; line-height: 1.5; color: #334155; }
+    /* Print must carry every post, not only the section HR happened to have expanded. Chrome
+       hides a closed details body through ::details-content, older engines hide its children;
+       both overrides are declared because an unknown selector is simply ignored. */
+    @media print {
+        .post-section > summary::before { content: ""; }
+        .post-section:not([open])::details-content { content-visibility: visible; }
+        .post-section:not([open]) > .post-body { display: block; }
+    }
 """
 
 _TOOLTIP_SHOW_RULES = "\n".join(
@@ -1042,21 +1076,14 @@ def _jd_panel(jd_text: str | None, jd_parsed: dict | None, *, compact: bool = Fa
     )
 
 
-# Write a standalone HTML file HR can open; it never includes personal names.
-def write_screening_board(
-    output_path: str,
-    *,
-    position_name: str,
-    rows: list[dict[str, Any]],
-    report_date: datetime | None = None,
-    refno: str | None = None,
-    jd_text: str | None = None,
-    jd_parsed: dict | None = None,
-) -> Path:
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    stamped = (report_date or datetime.utcnow()).strftime("%Y-%m-%d")
-    ranked = sorted(rows, key=lambda row: int(row.get("rank") or 0) or 10**6)
+# Order rows by the rank the pipeline assigned. Ranking is done per post group upstream, so
+# this only sorts; it never merges post groups into one ordering (FR-5).
+def _ranked(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda row: int(row.get("rank") or 0) or 10**6)
+
+
+# Build one ranking table. Used for the whole board and for each post section.
+def _ranking_table(ranked: list[dict[str, Any]]) -> str:
     table_rows = []
     for row in ranked:
         appno = str(row.get("appno") or row.get("rank") or "unknown")
@@ -1070,13 +1097,156 @@ def write_screening_board(
             f"<td>{_resume_cell(row)}</td>"
             "</tr>"
         )
+    return (
+        "<table>"
+        "<thead><tr><th>Rank</th><th>Application No.</th><th>Score</th><th>Tier</th>"
+        "<th>Resume</th></tr></thead>"
+        f"<tbody>{''.join(table_rows)}</tbody></table>"
+    )
+
+
+# Build the applicant cards for one set of rows.
+def _cards(ranked: list[dict[str, Any]]) -> str:
     cards = "".join(_card(row) for row in ranked) or "<p class='muted'>No scored candidates.</p>"
-    advisory = _low_band_advisory(ranked)
+    return f"<div class='grid'>{cards}</div>"
+
+
+# Rows whose post could not be read are listed for HR, never dropped and never guessed at (FR-7).
+# An unplaced row has no JD to be scored against, so it is deliberately absent from every ranking.
+def _needs_confirmation(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    items = []
+    for row in rows:
+        appno = _esc(row.get("appno") or "unknown")
+        raw = str(row.get("post") or "").strip()
+        detail = f"post value on the records page: {_esc(raw)}" if raw else "no post value on the records page"
+        items.append(f"<li>Application No. {appno} — {detail}</li>")
+    return (
+        "<section class='note' aria-label='Needs HR confirmation'>"
+        "<h2>Needs HR confirmation</h2>"
+        "<p>These applicants are not ranked: the records page did not state which post they "
+        "applied for, and guessing would score them against the wrong job description. Confirm "
+        "their post and re-run.</p>"
+        f"<ul>{''.join(items)}</ul>"
+        "</section>"
+    )
+
+
+# One post's JD panel: the requirements it adds over the shared base, then the parsed
+# requirements of its own effective JD (FR-6.3, FR-4). JD-derived text is contact-scrubbed.
+def _post_jd_panel(label: str, delta: list[str], jd_parsed: dict | None) -> str:
+    parsed = _jd_structured(jd_parsed)
+    groups_html = _parsed_groups(parsed)
+    delta_html = ""
+    if delta:
+        items = "".join(f"<li>{_esc(_scrub_contact(sentence))}</li>" for sentence in delta)
+        delta_html = (
+            "<p class='post-delta-label'>Requirements specific to this post</p>"
+            f"<ul class='post-delta'>{items}</ul>"
+        )
+    if not delta_html and not groups_html:
+        # A post whose requirements are all shared has no delta, so its effective JD is the base
+        # JD itself (FR-4). The shared panel at the top of the page already lists exactly those
+        # requirements, so the section says so instead of repeating the whole tag set per post.
+        return (
+            f"<section class='jd-panel' aria-label='Requirements for {_esc(label)}'>"
+            "<h2>Requirements for this post</h2>"
+            "<p class='post-shared'>This post adds no requirements of its own. It is assessed "
+            "against the shared requirements listed in the panel at the top of this page.</p>"
+            "</section>"
+        )
+    if not groups_html:
+        groups_html = "<p class='jd-empty'>No parsed skills yet.</p>"
+    return (
+        f"<section class='jd-panel' aria-label='Requirements for {_esc(label)}'>"
+        "<h2>Requirements for this post</h2>"
+        f"{_conditions_line(parsed)}{delta_html}"
+        f"<div class='tag-groups'>{groups_html}</div>"
+        "</section>"
+    )
+
+
+# One collapsible post section: a header stating the post, how many applied for it and its top
+# score, then that post's own JD panel, ranking table and applicant cards (FR-6.3). The section
+# ranks its own applicants only, so a score here is comparable within the post, not across posts.
+def _post_section(
+    label: str,
+    rows: list[dict[str, Any]],
+    *,
+    jd_parsed: dict | None,
+    delta: list[str],
+    expanded: bool,
+) -> str:
+    ranked = _ranked(rows)
+    scores = [score for score in (_score(row.get("total_score")) for row in ranked) if score is not None]
+    top_html = f"Top score {max(scores):.2f}" if scores else "No score"
+    count = len(ranked)
+    plural = "" if count == 1 else "s"
+    open_attr = " open" if expanded else ""
+    body = (
+        f"{_post_jd_panel(label, delta, jd_parsed)}"
+        f"{_ranking_table(ranked)}"
+        f"{_low_band_advisory(ranked)}"
+        f"{_cards(ranked)}"
+    )
+    return (
+        f"<details class='post-section'{open_attr}>"
+        f"<summary><span class='post-title'>{_esc(label)}</span>"
+        f"<span class='post-count'>{count} applicant{plural}</span>"
+        f"<span class='post-top'>{top_html}</span></summary>"
+        f"<div class='post-body'>{body}</div>"
+        "</details>"
+    )
+
+
+# Write a standalone HTML file HR can open; it never includes personal names.
+def write_screening_board(
+    output_path: str,
+    *,
+    position_name: str,
+    rows: list[dict[str, Any]],
+    report_date: datetime | None = None,
+    refno: str | None = None,
+    jd_text: str | None = None,
+    jd_parsed: dict | None = None,
+    post_jds: dict[str, dict[str, Any]] | None = None,
+) -> Path:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamped = (report_date or datetime.utcnow()).strftime("%Y-%m-%d")
+    ranked = _ranked(rows)
     heading = _esc(position_name)
     sub = _esc(refno) if refno else ""
+    # The shared panel keeps the complete advertisement text with the shared parsed tags, so HR
+    # can still read the advertisement exactly as it was posted (FR-6.2).
     jd_panel = _jd_panel(jd_text, jd_parsed)
     # The job reference belongs in the page title, so the lede repeats only position and date.
     title_suffix = f" - Ref. No.: {sub}" if sub else ""
+    # Multi-post: one collapsible section per post, ordered as the post universe is ordered.
+    # Ranking and the low-band advisory stay inside a post, because scores are comparable
+    # within a post and not across posts (FR-6.3, FR-11).
+    grouped = group_by_post(rows, multi_post=bool(post_jds))
+    if grouped.groups:
+        sections = []
+        for index, group in enumerate(grouped.groups):
+            spec = (post_jds or {}).get(base_name(group.label)) or {}
+            sections.append(
+                _post_section(
+                    group.label,
+                    group.rows,
+                    jd_parsed=spec.get("jd_parsed"),
+                    delta=list(spec.get("delta") or []),
+                    expanded=index == 0,
+                )
+            )
+        body = "".join(sections) + _needs_confirmation(grouped.unassigned)
+    elif grouped.multi_post:
+        # A multi-post page on which no applicant's post could be read has no section to show.
+        # Saying so beats an empty board that looks like a silent drop (FR-7).
+        body = _needs_confirmation(grouped.unassigned)
+    else:
+        body = f"{_ranking_table(ranked)}{_low_band_advisory(ranked)}{_cards(ranked)}"
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1089,12 +1259,7 @@ def write_screening_board(
   <h1>Ranking overview{title_suffix}</h1>
   <p class="lede">{heading} · {stamped} · labels are application No. only</p>
   {jd_panel}
-  <table>
-    <thead><tr><th>Rank</th><th>Application No.</th><th>Score</th><th>Tier</th><th>Resume</th></tr></thead>
-    <tbody>{''.join(table_rows)}</tbody>
-  </table>
-  {advisory}
-  <div class="grid">{cards}</div>
+  {body}
 </body>
 </html>
 """
@@ -1120,6 +1285,10 @@ def write_candidate_match_html(
     # A match page can be forwarded on its own, so restate the job refno in the lede.
     refno = str(row.get("refno") or "").strip()
     refno_html = f" · <span class='refno'>Ref. No.: {_esc(refno)}</span>" if refno else ""
+    # An applicant belongs to exactly one post, and the JD panel above is that post's
+    # effective JD, so the page must say which post it was scored against (FR-8).
+    post = str(row.get("post") or "").strip()
+    post_html = f" · <span class='post-applied'>Post applied for: {_esc(post)}</span>" if post else ""
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1129,7 +1298,7 @@ def write_candidate_match_html(
   <style>{_PAGE_CSS}</style>
 </head>
 <body>
-  <p class="lede"><a href="ranking-overview.html">Back to ranking overview</a> · {_esc(position_name)}{refno_html} · {stamped}</p>
+  <p class="lede"><a href="ranking-overview.html">Back to ranking overview</a> · {_esc(position_name)}{refno_html}{post_html} · {stamped}</p>
   {jd_panel}
   {_card(row, layout="detail")}
 </body>

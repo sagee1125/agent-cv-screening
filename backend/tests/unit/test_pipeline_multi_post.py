@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -128,3 +129,124 @@ def test_post_labels_dedupes_case_insensitively() -> None:
 
     assert module._post_labels(_Args()) == ["Senior Fellow", "Junior Fellow"]
     assert module._post_map(_Args()) == {"1": "Senior Fellow", "2": "senior fellow", "3": "Junior Fellow"}
+
+
+# A board command needs a stand-in args namespace, a row, and a report folder (PRD step 6).
+def _report_args(report_dir: Path) -> Any:
+    import argparse
+
+    return argparse.Namespace(
+        skip_reports=False,
+        position="Research Assistant",
+        engine="legacy",
+        refno="260901004",
+        max_retries=0,
+        fail_fast=False,
+        report_dir=str(report_dir),
+    )
+
+
+# One candidate row plus the cached score files a board render reads.
+def _report_row(tmp_path: Path) -> dict:
+    extracted = tmp_path / "extracted-123456.json"
+    extracted.write_text('{"structured_data": {}}', encoding="utf-8")
+    score = tmp_path / "score-123456.json"
+    score.write_text('{"total_score": 80}', encoding="utf-8")
+    return {
+        "rank": 1,
+        "refno": "260901004",
+        "appno": "123456",
+        "post": "Senior Project Fellow (Full-time)",
+        "display_label": "260901004/123456",
+        "total_score": 80,
+        "tier": "Tier 2",
+        "_extracted": extracted,
+        "_score": score,
+        "_source": "123456.pdf",
+    }
+
+
+# A multi-post run must hand the board its post-jds.json, or the board cannot section by post.
+def test_generate_reports_passes_post_jds_to_the_board(tmp_path: Path, monkeypatch: Any) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "pipeline"
+    out_dir.mkdir()
+    (out_dir / "post-jds.json").write_text('{"posts": []}', encoding="utf-8")
+    commands: list[list[str]] = []
+
+    # Record every board command instead of shelling out to the skill CLIs.
+    def fake_retries(cmd: list[str], _max_retries: int) -> tuple[int, None]:
+        commands.append(list(cmd))
+        if cmd[2] == "board":
+            output = Path(cmd[cmd.index("--output") + 1])
+            output.write_text("<html></html>", encoding="utf-8")
+        else:
+            output = Path(cmd[cmd.index("--output") + 1])
+            output.write_bytes(b"%PDF-fake" if output.suffix == ".pdf" else b"<html></html>")
+        return 1, None
+
+    monkeypatch.setattr(module, "_run_with_retries", fake_retries)
+    sources = module.JdSources(default=out_dir / "jd-parse.json", multi_post=True)
+    module._generate_reports(
+        _report_args(tmp_path / "reports"), out_dir, [_report_row(tmp_path)], [], jd_sources=sources
+    )
+    board = next(cmd for cmd in commands if cmd[2] == "board")
+    assert board[board.index("--post-jds") + 1] == str(out_dir / "post-jds.json")
+
+
+# A multi-post run without post-jds.json must not fall back to one merged ranking (FR-5).
+def test_generate_reports_refuses_a_multi_post_board_without_post_jds(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "pipeline"
+    out_dir.mkdir()
+    commands: list[list[str]] = []
+
+    # Record every command so the test can prove no board was rendered.
+    def fake_retries(cmd: list[str], _max_retries: int) -> tuple[int, None]:
+        commands.append(list(cmd))
+        output = Path(cmd[cmd.index("--output") + 1])
+        output.write_bytes(b"%PDF-fake" if output.suffix == ".pdf" else b"<html></html>")
+        return 1, None
+
+    monkeypatch.setattr(module, "_run_with_retries", fake_retries)
+    sources = module.JdSources(default=out_dir / "jd-parse.json", multi_post=True)
+    failures: list = []
+    reports = module._generate_reports(
+        _report_args(tmp_path / "reports"), out_dir, [_report_row(tmp_path)], failures, jd_sources=sources
+    )
+    assert "board" not in [cmd[2] for cmd in commands]
+    assert "ranking_overview_html" not in reports
+    assert len(failures) == 1
+    assert "post-jds.json" in failures[0].error_message
+
+
+# An applicant whose post could not be read still reaches the board, so FR-7 can list it.
+def test_generate_reports_hands_unplaced_rows_to_the_board(tmp_path: Path, monkeypatch: Any) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "pipeline"
+    out_dir.mkdir()
+    (out_dir / "post-jds.json").write_text('{"posts": []}', encoding="utf-8")
+
+    # Write the report files the board command is expected to produce.
+    def fake_retries(cmd: list[str], _max_retries: int) -> tuple[int, None]:
+        output = Path(cmd[cmd.index("--output") + 1])
+        output.write_bytes(b"%PDF-fake" if output.suffix == ".pdf" else b"<html></html>")
+        return 1, None
+
+    monkeypatch.setattr(module, "_run_with_retries", fake_retries)
+    sources = module.JdSources(default=out_dir / "jd-parse.json", multi_post=True)
+    ranked = _report_row(tmp_path)
+    unplaced = dict(ranked, appno="999999", post="", rank=None)
+    module._generate_reports(
+        _report_args(tmp_path / "reports"),
+        out_dir,
+        [ranked],
+        [],
+        jd_sources=sources,
+        unassigned=[unplaced],
+    )
+    board_rows = json.loads((out_dir / "rows.json").read_text(encoding="utf-8"))
+    assert [row["appno"] for row in board_rows] == ["123456", "999999"]
+    assert board_rows[1]["post"] == ""
