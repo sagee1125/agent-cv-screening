@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Multi_Post-v1.0
 feature_name: Multi-Post JAS Advertisements
-version: 1.2.0
+version: 1.2.1
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -31,7 +31,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Multi-Post JAS Advertisements
-**Version:** 1.2.0 (MVP)
+**Version:** 1.2.1 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** HR recruiters screening a JAS `refno` through the WorkBuddy chat
@@ -47,6 +47,7 @@ affected_modules:
 | 1.0.0   | 2026-09-17 | HR Screening Product Owner | Initial PRD: one `refno` may advertise several posts; per-post JD, scoring, report.                                             |
 | 1.1.0   | 2026-09-17 | HR Screening Product Owner | Add FR-12 (`check_updates` reports per-post changes); carry `post` into the collector manifest; extend the module-impact table. |
 | 1.2.0   | 2026-09-17 | HR Screening Product Owner | Record the prerequisite fix as resolved (§8); correct the test baseline to 517 (§9); add §13 Implementation Handover. |
+| 1.2.1   | 2026-09-17 | HR Screening Product Owner | Withdraw FR-6.4: the records page has no post list, so a zero-applicant post cannot be shown. Add the measurement to §2.4 and scope the universe in FR-3. |
 
 ---
 
@@ -143,6 +144,11 @@ accept any one of the three signals as "multi-post", and treat a page with none 
 - **Table lookup is substring-based** (`class_token in classes`), so the extra `multi-post-table` class does
   not break table discovery, and the JD key/value table is unaffected by the extra column.
 - **The list page carries no multi-post signal** and its column set is unchanged.
+- **The records page carries no post list.** Measured on 260917001: zero `<select>` and zero `<option>`
+  elements. `Post title` is a cross-product string (`Senior Project Fellow / Postdoctoral Fellow
+  (Full-time/Part-time)`) that cannot be split back into the four labels applicants see. The only source of
+  the post universe is therefore the `Post applied for` column, which means a post nobody applied for is
+  invisible — the reason FR-6.4 was withdrawn in v1.2.1.
 - **`appno` is not guaranteed to differ from `refno`.** One measured multi-post page contains an application
   whose number equals the refno it was screened under. Do not rely on the two differing.
 
@@ -231,6 +237,10 @@ comparing case-insensitively; the label shown to HR is the raw value. Cross-chec
 `Post title` and record any disagreement — an applicant whose post matches nothing in the universe must **not**
 be guessed at (see FR-7).
 
+The universe is derived from applicants only, so it is exactly the set of posts that received at least one
+application. A post nobody applied for is invisible on the records page and is therefore **out of scope**, not
+rendered as an empty section — see FR-6 and the v1.2.1 change-log entry.
+
 ### FR-4 — Derive one effective JD per post
 
 Split the single advertisement into a base JD plus one delta per post:
@@ -259,21 +269,34 @@ One `ranking-overview.html` per refno, containing:
 3. One collapsible section per post, ordered as the post universe is ordered. Each section header states the
    post label, the number of applicants, and the top score; the body contains that post's JD panel (its delta
    plus the merged parsed requirements) and that post's own ranking table and applicant cards.
-4. A post with zero applicants is still shown, with an explicit empty state — HR must be able to see that a
-   post exists and received nothing.
-5. The first section may default to expanded; every other section defaults to collapsed.
-6. Ranking tables inside a section are ranked within that section only.
+4. The first section may default to expanded; every other section defaults to collapsed.
+5. Ranking tables inside a section are ranked within that section only.
 
 Collapsible sections must use native HTML `<details>` / `<summary>` so the report needs no JavaScript and
 prints correctly.
 
-### FR-7 — Applicant whose post matches nothing
+**No empty-post section.** An earlier revision of this requirement demanded that a post with zero applicants
+still be shown with an empty state. v1.2.1 removes it, because it is not implementable: the records page
+carries no post list at all (measured on the live pages — zero `<select>` and zero `<option>` elements), and
+`Post title` is a cross-product string that cannot be split back into the full-time / part-time labels
+applicants actually see (§2.5). A post nobody applied for therefore leaves **no trace** on the page. The post
+universe is exactly the distinct `Post applied for` values (FR-3), so every rendered section has at least one
+applicant, and the report never claims to know about a post it cannot see.
 
-The run must **finish** the other applicants and place the unmatched row in a clearly labelled
-"needs HR confirmation" block, carrying the application number and the raw unmatched string. The run must never
-silently drop the row and never guess which post it belongs to. If a new run status is introduced for this, it
-must be registered in the host envelope's `ALLOWED_STATUS` / `ALLOWED_ERROR_CODES` / `ALLOWED_MISSING` lists, or
-the host will collapse it into a generic error.
+### FR-7 — Applicant whose post cannot be determined
+
+Because the post universe is derived from the column values themselves (FR-3), a **non-empty** post value
+always matches the universe by construction. The reachable failure is a **blank or missing** `Post applied for`
+value on a multi-post page: that applicant cannot be placed in any post group.
+
+The run must **finish** the other applicants and place such a row in a clearly labelled "needs HR confirmation"
+block, carrying the application number and the raw (possibly empty) value. The run must never silently drop the
+row and never guess which post it belongs to. If a new run status is introduced for this, it must be registered
+in the host envelope's `ALLOWED_STATUS` / `ALLOWED_ERROR_CODES` / `ALLOWED_MISSING` lists, or the host will
+collapse it into a generic error.
+
+Separately, when a post value is not mentioned anywhere in the advertisement's `Post title`, that is recorded as
+a cross-check disagreement (FR-3) and surfaced to HR. That is a warning, not a block.
 
 ### FR-8 — Per-candidate report
 
@@ -340,7 +363,7 @@ cover **every** post's JD digest, not a single digest.
 | Module                                             | Change                                                                                                                           |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `jas_import/records.py`                            | Read the `Post applied for` column; expose the multi-post flag; the column map must read link-wrapped header labels (Section 8). |
-| `jas_import/skill.py`                              | `job_payload_from_html` returns a post list with per-post applicant references instead of one flat list.                         |
+| `jas_import/skill.py`                              | Carry `post` on every candidate reference, and the multi-post flag plus signals on the job. The flat candidate list is **kept**: a nested per-post structure buys nothing once FR-6.4 is withdrawn, and it would make the single-post and multi-post payloads diverge. |
 | `jas_import/mock.py`                               | Fixture headers must mirror the real page (labels inside `<a>`), plus a multi-post fixture shape.                                |
 | `jas_import/scripts/run_jas_screening.py`          | Group applicants by post; carry the post into the pipeline call and the run state.                                               |
 | `jd-parser`                                        | Split the advertisement into base + per-post deltas with provenance.                                                             |
@@ -409,7 +432,7 @@ there is no contaminated history to reconcile.
 | Unit — `records.py`  | Header labels wrapped in `<a>` resolve the same map as bare labels; multi-post map shifts by one; a multi-post page yields appno, status, cv_url and record_detail_url for **every** row; the `Post applied for` value is never mistaken for the record-detail cell. |
 | Unit — fixture guard | The mock records page keeps link-wrapped headers, so the suite cannot silently return to testing a path production never takes.                                                                                                                                      |
 | Unit — JD split      | Base plus delta reconstruction; bullets naming a post land in that post's delta; unnamed bullets stay shared; full-time and part-time variants inherit the same bullets; provenance points at the source sentence.                                                   |
-| Unit — grouping      | Post universe from the column values; an unmatched post produces the needs-confirmation block and never a guess; a post with zero applicants is still rendered.                                                                                                      |
+| Unit — grouping      | Post universe from the column values, in first-appearance order; a blank post value on a multi-post page produces the needs-confirmation block and never a guess; the universe holds exactly the posts that received applications (a post with zero applicants is out of scope — see FR-6). |
 | Unit — report        | One `<details>` per post; the shared panel carries the unedited advertisement; section order follows the post universe; no cross-post table.                                                                                                                         |
 | Integration          | A multi-post fixture runs the full wrapper chain and produces one report with the expected per-post counts.                                                                                                                                                          |
 | Regression           | The single-post path is unchanged: same scores, same file names, same report shape.                                                                                                                                                                                  |
@@ -484,14 +507,17 @@ Take the steps in this order. Each is independently testable, and the later step
 | - | ---- | -------- |
 | 1 | Add `post` to the column map **and** `JASCandidate.post` **in the same change**, so a mapped key always has a field to land in. The verified multi-post map is `{appno: 1, record_detail: 3, status: 4, cv: 14, supp: 15, post: 2}`. | `jas_import/records.py` |
 | 2 | Expose the multi-post flag from the three signals (FR-1); carry the post into the parsed candidate reference (FR-2). | `jas_import/records.py`, `jas_import/skill.py` |
-| 3 | Restructure `job_payload_from_html` from one flat candidate list into a posts structure, keeping the single-post output shape byte-identical. | `jas_import/skill.py` |
+| 3 | Build the ordered post universe from the candidate references, plus the grouping helper that the pipeline and the report both use. An applicant with a **missing** post value on a multi-post page goes to the needs-confirmation block (FR-7); never a guess. | `screening_core` (shared helper) |
 | 4 | Base ⊕ delta derivation with provenance (FR-4). | `jd-parser` |
 | 5 | Per-post scoring groups (FR-5); add the post dimension to the cache keys (Section 6). | `pipeline/scripts/run_pipeline.py`, `screening_core` |
 | 6 | One `<details>` per post in the board (FR-6). | `report-gen/src/report_gen/html_board.py` |
 | 7 | Per-post grill, grouped by base name, stopping once (FR-9). | `screening_core/jd_overrides.py`, `run_jas_screening.py` |
 | 8 | Per-post update checking (FR-12) and the multi-post reply text (FR-11). | `jas-import/scripts/check_updates.py`, `AGENTS.md`, the `hr-cv-screening` skill |
 
-Step 3 is the one that can break the single-post path. Run the regression suite after it before continuing.
+Step 3 no longer restructures the payload. With FR-6.4 withdrawn (v1.2.1) the flat candidate list already
+carries everything the pipeline needs, so `job_payload_from_html` only gained `post` on each candidate and the
+multi-post flag on the job — which keeps the single-post payload shape identical apart from the added keys.
+The single-post regression risk therefore moved to step 5.
 
 ### 13.2 The real entry point is a wrapper chain, not `run_pipeline.py`
 

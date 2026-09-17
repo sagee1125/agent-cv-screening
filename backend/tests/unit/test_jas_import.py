@@ -157,6 +157,8 @@ def test_candidate_column_map_uses_link_wrapped_headers() -> None:
     assert single["status"] == 3
     assert single["cv"] == 13
     assert single["supp"] == 14
+    # A single-post page has no "Post applied for" column, so the key must stay unmapped.
+    assert "post" not in single
 
     multi = column_map(mock_records_html(multi_post=True))
     assert multi["appno"] == 1
@@ -164,6 +166,63 @@ def test_candidate_column_map_uses_link_wrapped_headers() -> None:
     assert multi["status"] == 4
     assert multi["cv"] == 14
     assert multi["supp"] == 15
+    assert multi["post"] == 2
+
+
+# The post an applicant applied for is captured on a multi-post page, and stays None on a
+# single-post page, where the column does not exist at all.
+def test_parse_job_html_captures_post_applied_for() -> None:
+    from jas_import.mock import mock_records_html
+
+    multi = parse_job_html(mock_records_html(multi_post=True))
+    posts = [candidate.post for candidate in multi.candidates]
+    assert all(posts), posts
+    assert len(set(posts)) == 2
+
+    single = parse_job_html(mock_records_html())
+    assert [candidate.post for candidate in single.candidates] == [None] * len(single.candidates)
+
+
+# Detection accepts any one of the three signals and reports which of them were actually seen (FR-1).
+def test_multi_post_detection_reports_every_signal() -> None:
+    from jas_import.mock import mock_records_html
+
+    multi = parse_job_html(mock_records_html(multi_post=True))
+    assert multi.multi_post is True
+    assert multi.multi_post_signals == {"table_class": True, "post_header": True, "jd_field": True}
+
+    single = parse_job_html(mock_records_html())
+    assert single.multi_post is False
+    assert single.multi_post_signals == {"table_class": False, "post_header": False, "jd_field": False}
+
+
+# Each signal is independently sufficient: a page carrying only one of them is still multi-post.
+def test_multi_post_detection_accepts_a_single_signal() -> None:
+    from jas_import.records import multi_post_signals
+
+    none = multi_post_signals(None, {"appno": 1}, [("Multi-post", "No")])
+    assert none == {"table_class": False, "post_header": False, "jd_field": False}
+
+    assert multi_post_signals(None, {"appno": 1, "post": 2}, [])["post_header"] is True
+    assert multi_post_signals({"attrs": {"class": "listTable multi-post-table"}}, {}, [])["table_class"] is True
+    assert multi_post_signals(None, {}, [("Multi-post", "Yes")])["jd_field"] is True
+    # A single-post page states "Multi-post: No" explicitly, which must not read as multi-post.
+    assert multi_post_signals(None, {}, [("Multi-post", "No")])["jd_field"] is False
+
+
+# The post dimension survives into the pipeline payload, and the detection is recorded for auditing.
+def test_job_payload_carries_post_and_detection() -> None:
+    from jas_import.mock import mock_records_html
+    from jas_import.skill import job_payload_from_html
+
+    payload = job_payload_from_html(mock_records_html(multi_post=True))
+    assert payload["job"]["multi_post"] is True
+    assert payload["job"]["multi_post_signals"]["post_header"] is True
+    assert all(item["post"] for item in payload["candidates"])
+
+    single = job_payload_from_html(mock_records_html())
+    assert single["job"]["multi_post"] is False
+    assert all(item["post"] is None for item in single["candidates"])
 
 
 # Guard the fixture: once the mock headers stop being link-wrapped, the test above stops exercising
@@ -230,7 +289,16 @@ def test_parse_job_skill_drops_candidate_pii() -> None:
     assert len(payload["candidates"]) == 1
 
     candidate = payload["candidates"][0]
-    assert set(candidate.keys()) == {"appno", "status", "cv_url", "supp_url", "record_detail_url"}
+    assert set(candidate.keys()) == {
+        "appno",
+        "status",
+        "cv_url",
+        "supp_url",
+        "record_detail_url",
+        "post",
+    }
+    # This fixture is a single-post advertisement, so no post was applied for.
+    assert candidate["post"] is None
 
     raw_json = json.dumps(payload, ensure_ascii=False)
     assert "chan@example.com" not in raw_json

@@ -62,6 +62,7 @@ def _candidate_to_item(candidate: JASCandidate) -> dict[str, Any]:
         "cv_url": candidate.cv_url,
         "supp_url": candidate.supp_url,
         "record_detail_url": candidate.record_detail_url,
+        "post": candidate.post,
     }
 
 
@@ -82,6 +83,9 @@ def job_payload_from_html(html: str, *, base_url: str | None = None) -> dict[str
             "project_title": detail.project_title,
             "posting_date": detail.posting_date,
             "list_type": detail.list_type,
+            # Auditable record of the multi-post detection (FR-1).
+            "multi_post": detail.multi_post,
+            "multi_post_signals": detail.multi_post_signals,
         },
         "jd_text": build_jd_text(detail),
         "candidates": [_candidate_to_item(candidate) for candidate in detail.candidates],

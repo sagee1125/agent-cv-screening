@@ -37,6 +37,8 @@ class JASCandidate:
     cv_url: str | None
     supp_url: str | None
     record_detail_url: str | None
+    # The "Post applied for" value; None on a single-post advertisement, which has no such column.
+    post: str | None = None
 
 
 @dataclass
@@ -53,6 +55,9 @@ class JASJobDetail:
     list_type: str
     fields: list[tuple[str, str]]
     candidates: list[JASCandidate]
+    # True when any of the three multi-post signals is present; signals records which ones were seen.
+    multi_post: bool = False
+    multi_post_signals: dict[str, bool] = field(default_factory=dict)
 
 
 class _Cell:
@@ -318,6 +323,10 @@ def _candidate_column_indexes(table: dict[str, Any] | None) -> dict[str, int]:
                     key = "cv"
                 elif label in ("supplementary", "other supplementary information"):
                     key = "supp"
+                elif label == "post applied for":
+                    # Only a multi-post advertisement carries this column, so its presence is
+                    # both the post mapping and one of the three multi-post signals.
+                    key = "post"
                 if key:
                     indexes[key] = index
             break
@@ -326,21 +335,24 @@ def _candidate_column_indexes(table: dict[str, Any] | None) -> dict[str, int]:
 
 # Convert one candidate table row into a minimal non-PII candidate reference.
 def _candidate_from_row(row: list[dict[str, Any]], origin: str, indexes: dict[str, int]) -> JASCandidate:
-    # Returns a cell at a mapped index when the row is wide enough.
+    # Returns a cell at a mapped index when the row is wide enough. The map is looked up
+    # leniently because "post" is only mapped when the page actually carries the column.
     def cell(key: str) -> dict[str, Any] | None:
-        index = indexes[key]
-        return row[index] if index < len(row) else None
+        index = indexes.get(key)
+        return row[index] if index is not None and index < len(row) else None
 
     appno_cell = cell("appno")
     detail_cell = cell("record_detail")
     status_cell = cell("status")
     cv_cell = cell("cv")
     supp_cell = cell("supp")
+    post_cell = cell("post")
     appno = _text(appno_cell) if appno_cell else ""
     record_detail_url = _first_link_url(detail_cell, origin) if detail_cell else None
     status = _current_status(status_cell) if status_cell else None
     cv_url = _first_link_url(cv_cell, origin) if cv_cell else None
     supp_url = _first_link_url(supp_cell, origin) if supp_cell else None
+    post = _text(post_cell).strip() if post_cell else ""
     if not appno:
         appno = _appno_from_url(cv_url or record_detail_url)
     return JASCandidate(
@@ -349,6 +361,7 @@ def _candidate_from_row(row: list[dict[str, Any]], origin: str, indexes: dict[st
         cv_url=cv_url,
         supp_url=supp_url,
         record_detail_url=record_detail_url,
+        post=post or None,
     )
 
 
@@ -379,6 +392,24 @@ def parse_list_html(html: str, *, base_url: str | None = None) -> list[JASJobRow
             )
         )
     return items
+
+
+# Report which of the three independent multi-post signals a records page carries (FR-1).
+def multi_post_signals(
+    candidate_table: dict[str, Any] | None,
+    column_indexes: dict[str, int],
+    jd_fields: list[tuple[str, str]],
+) -> dict[str, bool]:
+    """Return the three signal flags; any one of them being true means multi-post."""
+    classes = (candidate_table or {}).get("attrs", {}).get("class", "") or ""
+    return {
+        "table_class": "multi-post-table" in classes,
+        "post_header": "post" in column_indexes,
+        "jd_field": any(
+            label.casefold() == "multi-post" and value.strip().casefold() == "yes"
+            for label, value in jd_fields
+        ),
+    }
 
 
 # Parse the JAS records job-detail HTML into JD text and candidate references.
@@ -413,6 +444,7 @@ def parse_job_html(html: str, *, base_url: str | None = None) -> JASJobDetail:
         for row in candidate_rows
         if (candidate := _candidate_from_row(row, origin, column_indexes)).appno
     ]
+    signals = multi_post_signals(candidate_table, column_indexes, jd_fields)
     return JASJobDetail(
         refno=value("Reference number") or refno_from_rows(candidate_rows),
         job_group=value("Job group"),
@@ -424,6 +456,8 @@ def parse_job_html(html: str, *, base_url: str | None = None) -> JASJobDetail:
         list_type=value("List in external/internal"),
         fields=jd_fields,
         candidates=candidates,
+        multi_post=any(signals.values()),
+        multi_post_signals=signals,
     )
 
 
@@ -442,6 +476,7 @@ __all__ = [
     "JASJobDetail",
     "JASJobRow",
     "build_jd_text",
+    "multi_post_signals",
     "parse_job_html",
     "parse_list_html",
     "parse_tables",
