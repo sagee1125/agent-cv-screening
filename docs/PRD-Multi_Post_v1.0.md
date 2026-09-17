@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Multi_Post-v1.0
 feature_name: Multi-Post JAS Advertisements
-version: 1.2.1
+version: 1.2.2
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -31,7 +31,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Multi-Post JAS Advertisements
-**Version:** 1.2.1 (MVP)
+**Version:** 1.2.2 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** HR recruiters screening a JAS `refno` through the WorkBuddy chat
@@ -48,6 +48,7 @@ affected_modules:
 | 1.1.0   | 2026-09-17 | HR Screening Product Owner | Add FR-12 (`check_updates` reports per-post changes); carry `post` into the collector manifest; extend the module-impact table. |
 | 1.2.0   | 2026-09-17 | HR Screening Product Owner | Record the prerequisite fix as resolved (§8); correct the test baseline to 517 (§9); add §13 Implementation Handover. |
 | 1.2.1   | 2026-09-17 | HR Screening Product Owner | Withdraw FR-6.4: the records page has no post list, so a zero-applicant post cannot be shown. Add the measurement to §2.4 and scope the universe in FR-3. |
+| 1.2.2   | 2026-09-17 | HR Screening Product Owner | FR-6: redact the named contact from the rendered JD panel and correct the "no trace" wording, which the advertisement text contradicts. Record `unclaimed` as the cross-check. |
 
 ---
 
@@ -149,6 +150,10 @@ accept any one of the three signals as "multi-post", and treat a page with none 
   (Full-time/Part-time)`) that cannot be split back into the four labels applicants see. The only source of
   the post universe is therefore the `Post applied for` column, which means a post nobody applied for is
   invisible — the reason FR-6.4 was withdrawn in v1.2.1.
+- **Every advertisement ends with a named contact block.** Both live multi-post `Description` values close
+  with a sentence naming a member of staff and giving a telephone number, and one of them also a fax number.
+  The advertisement also names every post it describes, so the advertisement text *can* mention a post that
+  received no applications — see the v1.2.2 correction under FR-6.
 - **`appno` is not guaranteed to differ from `refno`.** One measured multi-post page contains an application
   whose number equals the refno it was screened under. Do not rely on the two differing.
 
@@ -264,8 +269,9 @@ post's JD. Scores from different post groups must never be merged into a single 
 One `ranking-overview.html` per refno, containing:
 
 1. A page heading whose lede uses the advertisement's `Post title`, plus the refno and the report date.
-2. A shared JD panel showing the **complete original advertisement text, unedited** (auditable), while its
-   parsed tag groups list the shared requirements only.
+2. A shared JD panel showing the **complete original advertisement text**, with its parsed tag groups listing
+   the shared requirements only. The text is reproduced as the advertisement states it, except that the
+   named contact's personal details are replaced by placeholders — see "Contact details are redacted" below.
 3. One collapsible section per post, ordered as the post universe is ordered. Each section header states the
    post label, the number of applicants, and the top score; the body contains that post's JD panel (its delta
    plus the merged parsed requirements) and that post's own ranking table and applicant cards.
@@ -275,13 +281,33 @@ One `ranking-overview.html` per refno, containing:
 Collapsible sections must use native HTML `<details>` / `<summary>` so the report needs no JavaScript and
 prints correctly.
 
+**Contact details are redacted.** The advertisement's closing paragraph names a member of staff and gives a
+telephone, fax or email address (measured on both live multi-post advertisements). That block is
+advertisement logistics, not a requirement, and the project rule is that no personal name, phone number or
+email address appears in a report. The panel therefore renders it with the contact's name and numbers
+replaced by `[name removed]`, `[phone removed]` and `[email removed]`. Redaction happens **at render time
+only**: the raw advertisement stays unmodified in `_pipeline` for audit, and because it never touches the
+parsed JD it cannot affect scores or the cache. `_scrub_contact` in
+`report-gen/src/report_gen/html_board.py` applies the rule to every JD-derived string the report emits,
+including requirement tooltips. It is deliberately narrow — a titled name after "contact", or an untitled
+name immediately followed by the contact details — so an ordinary requirement sentence cannot lose a
+capitalised word.
+
 **No empty-post section.** An earlier revision of this requirement demanded that a post with zero applicants
 still be shown with an empty state. v1.2.1 removes it, because it is not implementable: the records page
 carries no post list at all (measured on the live pages — zero `<select>` and zero `<option>` elements), and
 `Post title` is a cross-product string that cannot be split back into the full-time / part-time labels
-applicants actually see (§2.5). A post nobody applied for therefore leaves **no trace** on the page. The post
-universe is exactly the distinct `Post applied for` values (FR-3), so every rendered section has at least one
-applicant, and the report never claims to know about a post it cannot see.
+applicants actually see (§2.5). A post nobody applied for therefore leaves **no trace in the records page**,
+which is the only input that can confirm a post was ever selectable. The post universe is exactly the
+distinct `Post applied for` values (FR-3), so every rendered section has at least one applicant, and the
+report never claims to know about a post it cannot see.
+
+> **Correction (v1.2.2).** v1.2.1 justified this by saying a post nobody applied for "leaves no trace on the
+> page". That is too strong. The **advertisement text** can name a post that received no applications — the
+> live advertisements name every post they describe. The decision stands, because the advertisement cannot
+> confirm such a post was selectable and the records page cannot confirm it either, but the trace does exist
+> and is now recorded: `PostSplit.unclaimed` reports a post the advertisement names that the post universe
+> does not contain.
 
 ### FR-7 — Applicant whose post cannot be determined
 
@@ -433,7 +459,7 @@ there is no contaminated history to reconcile.
 | Unit — fixture guard | The mock records page keeps link-wrapped headers, so the suite cannot silently return to testing a path production never takes.                                                                                                                                      |
 | Unit — JD split      | Base plus delta reconstruction; bullets naming a post land in that post's delta; unnamed bullets stay shared; full-time and part-time variants inherit the same bullets; provenance points at the source sentence.                                                   |
 | Unit — grouping      | Post universe from the column values, in first-appearance order; a blank post value on a multi-post page produces the needs-confirmation block and never a guess; the universe holds exactly the posts that received applications (a post with zero applicants is out of scope — see FR-6). |
-| Unit — report        | One `<details>` per post; the shared panel carries the unedited advertisement; section order follows the post universe; no cross-post table.                                                                                                                         |
+| Unit — report        | One `<details>` per post; the shared panel carries the advertisement text with the named contact redacted and the raw text left unmodified in `_pipeline`; section order follows the post universe; no cross-post table.                                            |
 | Integration          | A multi-post fixture runs the full wrapper chain and produces one report with the expected per-post counts.                                                                                                                                                          |
 | Regression           | The single-post path is unchanged: same scores, same file names, same report shape.                                                                                                                                                                                  |
 | Cache                | Adding one applicant to post B does not invalidate post A's parsed, scored or per-applicant artifacts.                                                                                                                                                               |
@@ -467,7 +493,10 @@ grep -E "passed|failed|error" "$LOCALAPPDATA/Temp/pytest.txt" | tail -3
 ## 11. Non-Functional Requirements
 
 - **Privacy:** no names, emails, phones or salaries in any HTML, PDF, manifest or log. Identity remains
-  `refno` / `appno`. Report contents are never loaded into the model context.
+  `refno` / `appno`. Report contents are never loaded into the model context. The advertisement's own contact
+  block reaches the report inside the JD text, so it is redacted at render time (FR-6). This was a
+  pre-existing leak, not one this feature introduced: phone numbers were already replaced, the named contact
+  was not.
 - **Determinism:** the same inputs yield the same scores; post derivation must be reproducible and auditable.
 - **No new dependencies:** native `<details>` for the report; no JavaScript added.
 - **Backwards compatibility:** the single-post path and the existing file names must not change.
@@ -476,8 +505,8 @@ grep -E "passed|failed|error" "$LOCALAPPDATA/Temp/pytest.txt" | tail -3
 
 ## 12. Open Questions and Deferred Items
 
-1. **Shared JD panel content.** This PRD specifies the full unedited advertisement text with shared-only parsed
-   tags. If HR finds the post-specific bullets confusing inside the "shared" panel, revisit.
+1. **Shared JD panel content.** This PRD specifies the advertisement text with the named contact redacted and
+   shared-only parsed tags. If HR finds the post-specific bullets confusing inside the "shared" panel, revisit.
 2. **Non-blocking, pre-existing:** the offline-folder path maps CV files back to application numbers by
    **file name** (`_appno_by_cv_filename`). Measured demo CV file names are distinct per applicant and contain
    no application number. If the same person's two applications ever upload an identically named file, only one
