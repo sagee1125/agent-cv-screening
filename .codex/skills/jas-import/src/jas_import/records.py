@@ -233,6 +233,11 @@ def _text_block(cell: dict[str, Any]) -> str:
     return cell.get("text_block") or ""
 
 
+# Read a table header label; real JAS pages wrap every label inside a sortable link.
+def _header_label(cell: dict[str, Any]) -> str:
+    return (_text(cell) or cell.get("link_text") or "").casefold()
+
+
 # Extract a query parameter value from an absolute or relative URL.
 def _query_value(url: str, key: str) -> str | None:
     try:
@@ -301,7 +306,7 @@ def _candidate_column_indexes(table: dict[str, Any] | None) -> dict[str, int]:
     for row in table["rows"]:
         if row and all(cell["tag"] == "th" for cell in row):
             for index, cell in enumerate(row):
-                label = _text(cell).casefold()
+                label = _header_label(cell)
                 key = None
                 if label == "application no.":
                     key = "appno"

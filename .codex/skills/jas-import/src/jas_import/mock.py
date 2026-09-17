@@ -11,6 +11,7 @@ _MOCK_PROFILES = (
     {
         "appno": "123456",
         "status": "S",
+        "post": "Project Associate",
         "title": "Mr",
         "surname": "CHAN",
         "given": "Tai Man",
@@ -51,6 +52,7 @@ _MOCK_PROFILES = (
     {
         "appno": "654321",
         "status": "TBC",
+        "post": "Project Assistant",
         "title": "Ms",
         "surname": "LEE",
         "given": "Wai Yan",
@@ -85,9 +87,9 @@ _MOCK_PROFILES = (
     },
 )
 
-# The 39 JAS candidate-table column headers (kept in real page order).
-def _headers() -> list[str]:
-    return [
+# The JAS candidate-table column headers (39 single-post, 40 multi-post), in real page order.
+def _headers(*, multi_post: bool = False) -> list[str]:
+    headers = [
         "No.", "Application no.", "Online job application form summary (printable version)",
         "Status", "Title", "Surname", "Given name", "Name in Chinese",
         "HKID card / Passport no. (first 4 digits)", "Former PolyU staff / Serving PolyU staff",
@@ -108,6 +110,10 @@ def _headers() -> list[str]:
         "I learned of this vacancy from", "Referrer's name", "Application date",
         "HR internal remark", "HR internal document",
     ]
+    if multi_post:
+        # A multi-post advertisement inserts "Post applied for" right after "Application no.".
+        headers.insert(2, "Post applied for")
+    return headers
 
 
 # Wrap one value as a JAS data cell.
@@ -144,8 +150,8 @@ def _cv_cell(refno: str, appno: str) -> str:
     )
 
 
-# Render one candidate as a full 39-cell JAS table row.
-def _candidate_row(refno: str, no: str, profile: dict) -> str:
+# Render one candidate as a full JAS table row (39 cells, or 40 on a multi-post page).
+def _candidate_row(refno: str, no: str, profile: dict, *, multi_post: bool = False) -> str:
     values = [
         no,
         profile["appno"],
@@ -187,12 +193,15 @@ def _candidate_row(refno: str, no: str, profile: dict) -> str:
         "",
         "",
     ]
-    assert len(values) == 39, len(values)
+    if multi_post:
+        # The extra column sits directly after "Application no." and shifts every later cell by one.
+        values.insert(2, profile.get("post", ""))
+    assert len(values) == (40 if multi_post else 39), len(values)
     return "<tr>\n" + "\n".join("  " + _cell(value) for value in values) + "\n</tr>"
 
 
 # Build the JD rows of the Job advertisement information table.
-def _jd_rows(refno: str) -> list[tuple[str, str]]:
+def _jd_rows(refno: str, *, multi_post: bool = False) -> list[tuple[str, str]]:
     description = """
 <p style="text-align: justify;">The appointee will be required to:</p>
 <p style="text-align: justify;">(a) assist in the design and implementation of data governance and data management frameworks;</p>
@@ -207,7 +216,7 @@ def _jd_rows(refno: str) -> list[tuple[str, str]]:
 <p style="text-align: justify;">(d) good command of written and spoken English and Chinese;</p>
 <p style="text-align: justify;">(e) good communication and interpersonal skills.</p>
 """
-    return [
+    rows = [
         ("Reference number", refno),
         ("Job group", "Research / Project Posts"),
         ("Unit", "Institute for Higher Education Research and Development"),
@@ -221,18 +230,33 @@ def _jd_rows(refno: str) -> list[tuple[str, str]]:
         ("Posting date", "2026-08-01"),
         ("List in external/internal", "Internal Advertisement"),
     ]
+    if multi_post:
+        # A multi-post advertisement states the cross-product post title and carries an explicit flag.
+        rows = [
+            ("Post title", "Project Associate / Project Assistant") if label == "Post title" else (label, value)
+            for label, value in rows
+        ]
+        rows.insert(4, ("Multi-post", "Yes"))
+    return rows
 
 
 # Build the full mock records.php job-detail HTML page.
-def mock_records_html(refno: str = MOCK_REFNO) -> str:
+def mock_records_html(refno: str = MOCK_REFNO, *, multi_post: bool = False) -> str:
+    # Real pages wrap every header label inside a sortable link; mirror that, or the fixture stops
+    # exercising the header-driven column map that production actually uses.
     header_html = "<tr>\n" + "\n".join(
-        f'  <th class="f-header">{header}</th>' for header in _headers()
+        f'  <th class="f-header"><a href="#" aria-label="Sort by {header}" data-n="{index}">{header}</a></th>'
+        for index, header in enumerate(_headers(multi_post=multi_post))
     ) + "\n</tr>"
-    rows = "\n".join(_candidate_row(refno, str(i), profile) for i, profile in enumerate(_MOCK_PROFILES, start=1))
+    rows = "\n".join(
+        _candidate_row(refno, str(i), profile, multi_post=multi_post)
+        for i, profile in enumerate(_MOCK_PROFILES, start=1)
+    )
     jd_html = "\n".join(
         f"<tr>\n  <td class=\"f-header\">{label}</td>\n  <td class=\"f-data-1\">{value}</td>\n</tr>"
-        for label, value in _jd_rows(refno)
+        for label, value in _jd_rows(refno, multi_post=multi_post)
     )
+    table_class = "listTable job-detail-table multi-post-table" if multi_post else "listTable job-detail-table"
     return f"""<!DOCTYPE html>
 <html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <title>Job Application Records</title>
@@ -245,7 +269,7 @@ def mock_records_html(refno: str = MOCK_REFNO) -> str:
 <div id="middle-list">
 <p>Number of applications: 02</p>
 <p>Status<br>T: TBC<br>P: Potential<br>S: Shortlisted<br>N: Not Appointable<br></p>
-<table id="f-list" class="listTable job-detail-table">
+<table id="f-list" class="{table_class}">
 <thead>
 {header_html}
 </thead>
@@ -328,12 +352,14 @@ def _write_cv_pdf(path: Path, profile: dict) -> None:
 
 
 # Generate the full mock JAS folder (list.html, records.html, cvs/, README.txt).
-def generate_mock_jas_dir(target_dir: str | Path, *, refno: str = MOCK_REFNO) -> Path:
+def generate_mock_jas_dir(
+    target_dir: str | Path, *, refno: str = MOCK_REFNO, multi_post: bool = False
+) -> Path:
     root = Path(target_dir)
     cvs_dir = root / "cvs"
     cvs_dir.mkdir(parents=True, exist_ok=True)
     (root / "list.html").write_text(mock_list_html(refno), encoding="utf-8")
-    (root / "records.html").write_text(mock_records_html(refno), encoding="utf-8")
+    (root / "records.html").write_text(mock_records_html(refno, multi_post=multi_post), encoding="utf-8")
     for profile in _MOCK_PROFILES:
         _write_cv_pdf(cvs_dir / f"{profile['appno']}.pdf", profile)
     (root / "README.txt").write_text(

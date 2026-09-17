@@ -138,6 +138,59 @@ def test_parse_job_html_maps_shifted_candidate_columns_by_header() -> None:
     assert candidate.cv_url and "id=123456" in candidate.cv_url
 
 
+# Real JAS pages wrap every candidate-table header label inside a sortable link. The column map
+# must read that link text, otherwise it silently falls back to hardcoded positions -- and those
+# shift by one on a multi-post advertisement, which inserts "Post applied for" after "Application no.".
+def test_candidate_column_map_uses_link_wrapped_headers() -> None:
+    from jas_import.mock import mock_records_html
+    from jas_import.records import _candidate_column_indexes, _find_table, parse_tables
+
+    # Resolve the candidate column map straight from a rendered records page.
+    def column_map(html: str) -> dict[str, int]:
+        table = _find_table(parse_tables(html), "job-detail-table")
+        assert table is not None
+        return _candidate_column_indexes(table)
+
+    single = column_map(mock_records_html())
+    assert single["appno"] == 1
+    assert single["record_detail"] == 2
+    assert single["status"] == 3
+    assert single["cv"] == 13
+    assert single["supp"] == 14
+
+    multi = column_map(mock_records_html(multi_post=True))
+    assert multi["appno"] == 1
+    assert multi["record_detail"] == 3
+    assert multi["status"] == 4
+    assert multi["cv"] == 14
+    assert multi["supp"] == 15
+
+
+# Guard the fixture: once the mock headers stop being link-wrapped, the test above stops exercising
+# the header-driven path and would pass while production stays broken.
+def test_mock_records_headers_are_link_wrapped() -> None:
+    from jas_import.mock import mock_records_html
+
+    html = mock_records_html()
+    assert '<th class="f-header"><a ' in html
+    assert '<th class="f-header">Application no.</th>' not in html
+
+
+# Every candidate on a multi-post page must still yield a full reference: application no., HR status,
+# the CV link and the record-detail link. Before the column-map fix, all but the application no. were lost.
+def test_parse_job_html_extracts_candidates_on_multi_post_page() -> None:
+    from jas_import.mock import mock_records_html
+
+    detail = parse_job_html(mock_records_html(multi_post=True), base_url="https://jobs.polyu.edu.hk")
+    assert len(detail.candidates) == 2
+    for candidate in detail.candidates:
+        assert candidate.appno
+        assert candidate.status
+        assert candidate.cv_url and "t=cv" in candidate.cv_url
+        assert candidate.record_detail_url and "record_detail.php" in candidate.record_detail_url
+    assert dict(detail.fields)["Multi-post"] == "Yes"
+
+
 # Candidate rows without an application number or linked ID are omitted.
 def test_parse_job_html_skips_candidate_without_appno() -> None:
     no_appno = JOB_HTML.replace(
