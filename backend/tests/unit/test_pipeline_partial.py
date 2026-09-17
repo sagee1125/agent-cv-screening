@@ -468,7 +468,11 @@ def test_pipeline_forwards_jd_inputs_to_board_and_match_reports(tmp_path, monkey
     }
     failures: list = []
     first = module._generate_reports(
-        args, out_dir, [dict(row)], failures, jd_source=jd_source, jd_text=jd_text
+        args,
+        out_dir,
+        [dict(row)],
+        failures,
+        jd_sources=module.JdSources(default=jd_source, text=jd_text),
     )
     board_cmd = next(cmd for cmd in commands if cmd[2] == "board")
     assert _flag(board_cmd, "--jd-file") == str(out_dir / "jd.txt")
@@ -479,7 +483,11 @@ def test_pipeline_forwards_jd_inputs_to_board_and_match_reports(tmp_path, monkey
 
     # The same JD bytes let the second run reuse the board (no extra board call).
     second = module._generate_reports(
-        args, out_dir, [dict(row)], failures, jd_source=jd_source, jd_text=jd_text
+        args,
+        out_dir,
+        [dict(row)],
+        failures,
+        jd_sources=module.JdSources(default=jd_source, text=jd_text),
     )
     board_calls = [cmd for cmd in commands if cmd[2] == "board"]
     assert len(board_calls) == 1

@@ -303,7 +303,7 @@ def test_pipeline_cleans_downloaded_cv_after_failure(tmp_path, monkeypatch, caps
         return True, {"etag": None, "last_modified": None}
 
     monkeypatch.setattr(module, "download_to_if_changed", fake_download_to)
-    monkeypatch.setattr(module, "_resolve_jd_source", lambda args, out_dir: (_ for _ in ()).throw(RuntimeError("stop")))
+    monkeypatch.setattr(module, "_resolve_jd_sources", lambda args, out_dir: (_ for _ in ()).throw(RuntimeError("stop")))
     exit_code, _out, err = _run_module(
         module,
         [

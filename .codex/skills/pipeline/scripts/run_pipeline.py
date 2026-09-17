@@ -33,6 +33,7 @@ from datetime import date
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+from jd_parser.post_split import PostSplit, split_advertisement
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
 from screening_core.board_tooltip import public_radar_dimensions
 from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem, safe_http_url
@@ -51,6 +52,15 @@ from screening_core.jd_overrides import (
     write_final_jd,
 )
 from screening_core.job_state import load_job_state, save_job_state
+from screening_core.post_jds import (
+    BASE_JD_TEXT_NAME,
+    POST_JDS_NAME,
+    base_names_of,
+    post_artifacts,
+    post_jd_payload,
+    post_slug,
+)
+from screening_core.posts import base_name, group_by_post, post_key, post_of
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
     candidate_report_fingerprint,
@@ -188,6 +198,17 @@ def _clear_score_artifacts(out_dir: Path) -> None:
     (out_dir / "jd-final.json").unlink(missing_ok=True)
 
 
+# Delete the per-post effective JDs and their scoring configs so a changed post is rebuilt.
+# Only a multi-post run writes these, so this is a no-op on a single-post job.
+def _clear_post_jd_artifacts(out_dir: Path) -> None:
+    """Remove every per-post JD artifact and per-post scoring config."""
+    for pattern in ("jd-post-*.json", "jd-post-*.txt", "config-*.json"):
+        for path in out_dir.glob(pattern):
+            path.unlink(missing_ok=True)
+    (out_dir / POST_JDS_NAME).unlink(missing_ok=True)
+    (out_dir / BASE_JD_TEXT_NAME).unlink(missing_ok=True)
+
+
 # Snapshot JD + CV bytes so --resume does not reuse stale parse/score JSON.
 def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
     """Hash the JD files, HR conditions and CV/extracted files for resume invalidation."""
@@ -205,6 +226,7 @@ def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
         cv_hashes=cv_hashes,
         overrides_path=out_dir / OVERRIDES_FILENAME,
         apply_overrides=bool(getattr(args, "_conditions_confirmed", False)),
+        posts=_post_map(args),
     )
 
 
@@ -223,6 +245,7 @@ def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
         args._inputs_unchanged = False
         (out_dir / "jd-parse.json").unlink(missing_ok=True)
         (out_dir / "config.json").unlink(missing_ok=True)
+        _clear_post_jd_artifacts(out_dir)
         return
     if overrides_changed(prior, payload):
         # HR edited the conditions: the parsed JD still stands, only the scores are stale.
@@ -257,6 +280,101 @@ def _unique_slug(source: str, used: set[str]) -> str:
         n += 1
     used.add(slug)
     return slug
+
+
+# Parse the repeatable --cv-post "<appno>=<post label>" flags into an appno -> post map.
+# The application number never contains "=", so the first "=" always splits the pair and a
+# post label may contain spaces, parentheses and slashes.
+def _post_map(args: argparse.Namespace) -> dict[str, str]:
+    """Return the appno -> post label map supplied by the caller, empty for a single-post job."""
+    posts: dict[str, str] = {}
+    for entry in getattr(args, "cv_post", None) or []:
+        appno, separator, label = str(entry).partition("=")
+        if not separator:
+            raise RuntimeError(f"--cv-post expects <appno>=<post label>, got {entry!r}")
+        appno = appno.strip()
+        label = label.strip()
+        if appno and label:
+            posts[appno] = label
+    return posts
+
+
+# Read one candidate's post from the map, or None when the job is single-post.
+def _post_for_appno(args: argparse.Namespace, appno: str | None) -> str | None:
+    if not appno:
+        return None
+    return _post_map(args).get(str(appno)) or None
+
+
+# The post universe of this run: the distinct post labels in first-appearance order (FR-3).
+# Empty for a single-post job, which is how every caller detects "no post dimension".
+def _post_labels(args: argparse.Namespace) -> list[str]:
+    """Return the distinct post labels supplied by the caller, in first-appearance order."""
+    labels: list[str] = []
+    for label in _post_map(args).values():
+        if label and not any(post_key(label) == post_key(seen) for seen in labels):
+            labels.append(label)
+    return labels
+
+
+# The JD each post group is scored against, plus the advertisement the run started from.
+# A plain class rather than a dataclass: these CLI modules are loaded by the test suite with
+# importlib without registering them in sys.modules, which makes dataclasses fail to resolve
+# their own string annotations. Every other skill CLI here uses a plain class for the same reason.
+class JdSources:
+    """Resolve which parsed JD one applicant is scored against (FR-5).
+
+    For a single-post job `by_post` is empty and `for_post` always returns `default`, which is
+    exactly the one JD this pipeline has always used. A multi-post job fills `by_post` with one
+    effective JD per base name, so full-time and part-time variants of one post share a JD.
+    """
+
+    def __init__(
+        self,
+        default: Path,
+        text: str | None = None,
+        split: PostSplit | None = None,
+        base_names: list[str] | None = None,
+        by_post: dict[str, Path] | None = None,
+        multi_post: bool = False,
+    ) -> None:
+        """Record the run's JD text, the shared base JD and one effective JD per post."""
+        self.default = default
+        self.text = text
+        self.split = split
+        self.base_names = list(base_names or [])
+        self.by_post = dict(by_post or {})
+        # Driven by the post universe, never by whether any post turned out to have its own
+        # delta: an advertisement whose requirements are all shared still has a post dimension,
+        # so it still ranks per post and still renders one section per post (FR-5, FR-6).
+        self._multi_post = bool(multi_post)
+
+    @property
+    def multi_post(self) -> bool:
+        """True when this run has a post dimension."""
+        return self._multi_post
+
+    def for_post(self, label: str | None) -> Path:
+        """The JD one applicant is scored against: their own post's, else the run default."""
+        if not label:
+            return self.default
+        return self.by_post.get(base_name(label), self.default)
+
+    def config_name(self, label: str | None) -> str:
+        """The legacy scoring config file name for one applicant's post."""
+        if not label:
+            return "config.json"
+        return f"config-{post_slug(base_name(label))}.json"
+
+    @property
+    def jd_paths(self) -> list[Path]:
+        """Every JD this run scores against, base first, then one per post."""
+        ordered = [self.default, *self.by_post.values()]
+        seen: list[Path] = []
+        for path in ordered:
+            if path not in seen:
+                seen.append(path)
+        return seen
 
 
 def _radar_dim_score(dims: dict, dimension_id: str) -> float:
@@ -309,10 +427,102 @@ def _collect_need_input(args: argparse.Namespace) -> None:
         raise NeedInputError(missing, questions)
 
 
-def _resolve_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Path, str | None]:
-    """Return (jd JSON path for build-config/match, optional JD text for CV context)."""
-    jd_path, jd_text = _resolve_raw_jd_source(args, out_dir)
-    return _apply_jd_overrides(args, out_dir, jd_path), jd_text
+def _resolve_jd_sources(args: argparse.Namespace, out_dir: Path) -> JdSources:
+    """Return the parsed JD each post is scored against, plus the JD text for CV context.
+
+    A single-post job returns exactly one JD, so every downstream stage behaves as it always
+    has. A multi-post job splits the advertisement once (FR-4) and parses the shared base plus
+    one effective JD per post, so each post group can be scored against its own JD (FR-5).
+    """
+    labels = _post_labels(args)
+    if not labels:
+        jd_path, jd_text = _resolve_raw_jd_source(args, out_dir)
+        return JdSources(default=_apply_jd_overrides(args, out_dir, jd_path), text=jd_text)
+
+    jd_text, _existing = _raw_jd_text(args, out_dir)
+    if not jd_text:
+        raise RuntimeError(
+            "a multi-post run needs the advertisement as text to split it by post; "
+            "provide --jd-file or --jd-url"
+        )
+    split = split_advertisement(jd_text, labels)
+    names = base_names_of(labels)
+    # jd-parse.json becomes the base JD: the advertisement with every post-specific unit removed,
+    # so the shared JD panel and the shared parsed tags are shared by construction (FR-6).
+    base_path = _parse_jd_text(
+        args, split.base_text, out_dir / "jd-parse.json", out_dir / BASE_JD_TEXT_NAME
+    )
+    by_post = _build_post_jds(args, out_dir, split, names)
+    return JdSources(
+        default=_apply_jd_overrides(args, out_dir, base_path),
+        text=jd_text,
+        split=split,
+        base_names=names,
+        by_post=by_post,
+        multi_post=True,
+    )
+
+
+# Build one effective JD per post and record each delta's provenance in post-jds.json (FR-4).
+# A post whose requirements are all shared has no delta, so its effective JD is the base JD
+# itself and no second parse is written for it.
+def _build_post_jds(
+    args: argparse.Namespace, out_dir: Path, split: PostSplit, names: list[str]
+) -> dict[str, Path]:
+    """Return {post base name: effective JD JSON path} and write post-jds.json."""
+    entries: list[dict] = []
+    by_post: dict[str, Path] = {}
+    for name in names:
+        delta = split.delta_for(name)
+        if not delta:
+            entries.append({"post": name, "slug": post_slug(name), "jd_json": None, "delta": []})
+            continue
+        text_path, json_path = post_artifacts(out_dir, name)
+        _parse_jd_text(args, split.effective_text(name), json_path, text_path)
+        by_post[name] = json_path
+        entries.append(
+            {
+                "post": name,
+                "slug": post_slug(name),
+                "jd_json": str(json_path),
+                "jd_text": str(text_path),
+                # The exact advertisement sentences this post's JD adds over the base (FR-4).
+                "delta": delta,
+            }
+        )
+    payload = post_jd_payload(
+        base_jd_json=str(out_dir / "jd-parse.json"),
+        base_text=split.base_text,
+        posts=entries,
+        mentioned=split.mentioned,
+        unclaimed=split.unclaimed,
+    )
+    (out_dir / POST_JDS_NAME).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return by_post
+
+
+# Parse JD text with the jd-parser skill into a JSON file, reusing it under --resume.
+# The text is always written next to the JSON so a split decision can be audited afterwards.
+def _parse_jd_text(
+    args: argparse.Namespace, jd_text: str, out_path: Path, text_path: Path
+) -> Path:
+    """Return the parsed JD JSON path, running the jd-parser only when it is not cached."""
+    text_path.write_text(jd_text, encoding="utf-8")
+    if args.resume and _is_usable_json(out_path):
+        return out_path
+    _run(
+        [
+            PYTHON,
+            str(_skill_script("jd-parser", "run_jd_parse.py")),
+            "--jd-file",
+            str(text_path),
+            "--output",
+            str(out_path),
+        ]
+    )
+    return out_path
 
 
 # Fold HR-supplied conditions onto the parsed JD so scores use the agreed conditions.
@@ -356,47 +566,54 @@ def _merge_jd_overrides(args: argparse.Namespace, out_dir: Path, jd_parse_path: 
     return final_path or jd_parse_path
 
 
-def _resolve_raw_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Path, str | None]:
-    """Return (parsed JD JSON path, optional JD text) before HR conditions are merged."""
+# Read the advertisement text of the configured JD source without parsing it.
+# A multi-post run must split the advertisement before it parses anything (FR-4), so text
+# extraction is separated from parsing. `existing` is the already-parsed JD path when the
+# source arrives pre-parsed (--polyu-ref / --jd-json), else None.
+def _raw_jd_text(args: argparse.Namespace, out_dir: Path) -> tuple[str | None, Path | None]:
+    """Return (advertisement text, already-parsed JD path or None) for the configured source."""
     if args.polyu_ref:
         polyu_out = out_dir / "polyu-parsed.json"
-        if args.resume and _is_usable_json(polyu_out):
-            data = _load_json(polyu_out)
-            return polyu_out, data.get("jd_text")
-        cmd = [
-            PYTHON,
-            str(_skill_script("polyu-import", "run_polyu_import.py")),
-            "fetch-and-parse",
-            "--output",
-            str(polyu_out),
-            "--external-ref",
-            args.polyu_ref,
-        ]
-        if args.polyu_detail_url:
-            cmd += ["--detail-url", args.polyu_detail_url]
-        _run(cmd)
-        data = _load_json(polyu_out)
-        return polyu_out, data.get("jd_text")
+        if not (args.resume and _is_usable_json(polyu_out)):
+            cmd = [
+                PYTHON,
+                str(_skill_script("polyu-import", "run_polyu_import.py")),
+                "fetch-and-parse",
+                "--output",
+                str(polyu_out),
+                "--external-ref",
+                args.polyu_ref,
+            ]
+            if args.polyu_detail_url:
+                cmd += ["--detail-url", args.polyu_detail_url]
+            _run(cmd)
+        return _load_json(polyu_out).get("jd_text"), polyu_out
     if args.jd_json:
         jd_path = Path(args.jd_json)
-        data = _load_json(jd_path)
-        return jd_path, data.get("jd_text")
+        return _load_json(jd_path).get("jd_text"), jd_path
     if args.jd_file:
-        jd_text = Path(args.jd_file).read_text(encoding="utf-8-sig")
-        jd_parse_out = out_dir / "jd-parse.json"
-        if not (args.resume and _is_usable_json(jd_parse_out)):
-            _run(
-                [
-                    PYTHON,
-                    str(_skill_script("jd-parser", "run_jd_parse.py")),
-                    "--jd-file",
-                    str(Path(args.jd_file)),
-                    "--output",
-                    str(jd_parse_out),
-                ]
-            )
-        return jd_parse_out, jd_text
+        return Path(args.jd_file).read_text(encoding="utf-8-sig"), None
     raise RuntimeError("no JD source: provide --jd-file, --jd-json, or --polyu-ref/--polyu-detail-url")
+
+
+def _resolve_raw_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Path, str | None]:
+    """Return (parsed JD JSON path, optional JD text) before HR conditions are merged."""
+    jd_text, existing = _raw_jd_text(args, out_dir)
+    if existing is not None:
+        return existing, jd_text
+    jd_parse_out = out_dir / "jd-parse.json"
+    if not (args.resume and _is_usable_json(jd_parse_out)):
+        _run(
+            [
+                PYTHON,
+                str(_skill_script("jd-parser", "run_jd_parse.py")),
+                "--jd-file",
+                str(Path(args.jd_file)),
+                "--output",
+                str(jd_parse_out),
+            ]
+        )
+    return jd_parse_out, jd_text
 
 
 def _parse_candidates(
@@ -453,6 +670,8 @@ def _with_identity(args: argparse.Namespace, extracted: Path, source: str, slug:
         "refno": refno,
         "appno": appno,
         "display_label": format_candidate_label(refno, appno),
+        # None on a single-post job, which has no post column to read (FR-2).
+        "post": _post_for_appno(args, appno),
     }
 
 
@@ -497,6 +716,8 @@ def _legacy_row(cand: dict) -> dict:
         "refno": cand.get("refno"),
         "appno": cand.get("appno"),
         "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
+        # None on a single-post job, which has no post column to read (FR-2).
+        "post": cand.get("post"),
         "total_score": score.get("total_score", 0),
         "tier": score.get("tier", ""),
         "skill_match": dims.get("skill_match", 0),
@@ -511,16 +732,31 @@ def _legacy_row(cand: dict) -> dict:
     }
 
 
-def _run_legacy_engine(
-    args: argparse.Namespace,
-    out_dir: Path,
-    jd_source: Path,
-    candidates: list[dict],
-    failures: list[Failure],
-    jd_text: str | None = None,
-) -> int:
-    """Run build-config + score + rank + reports with the legacy ScorerService."""
-    config_out = out_dir / "config.json"
+# Rank the run's rows without ever merging post groups into one ordered list (FR-5).
+# A single-post job keeps one ranking over every row, which is what it has always done.
+# Returns the rows that belong to no post so the caller can ask HR instead of guessing (FR-7).
+def _rank_rows(rows: list[dict], *, multi_post: bool) -> list[dict]:
+    """Rank within each post group in place and return the rows that belong to no post."""
+    if not multi_post:
+        rows.sort(key=lambda r: r["total_score"], reverse=True)
+        for rank, row in enumerate(rows, start=1):
+            row["rank"] = rank
+        return []
+    grouping = group_by_post(rows, multi_post=True)
+    ranked: list[dict] = []
+    for group in grouping.groups:
+        group.rows.sort(key=lambda r: r["total_score"], reverse=True)
+        for rank, row in enumerate(group.rows, start=1):
+            row["rank"] = rank
+        ranked.extend(group.rows)
+    rows[:] = ranked
+    return grouping.unassigned
+
+
+# Build (or reuse) the legacy scoring config for one JD. A multi-post run gets one per post.
+def _legacy_config(args: argparse.Namespace, out_dir: Path, jd_path: Path, name: str) -> Path:
+    """Return the scoring config for one JD, building it with the scorer when not cached."""
+    config_out = out_dir / name
     if not (args.resume and _is_usable_json(config_out)):
         _run(
             [
@@ -528,20 +764,47 @@ def _run_legacy_engine(
                 str(_skill_script("scorer", "run_score.py")),
                 "build-config",
                 "--jd-structured",
-                str(jd_source),
+                str(jd_path),
                 "--output",
                 str(config_out),
             ]
         )
+    return config_out
+
+
+def _run_legacy_engine(
+    args: argparse.Namespace,
+    out_dir: Path,
+    jd_sources: JdSources,
+    candidates: list[dict],
+    failures: list[Failure],
+) -> int:
+    """Run build-config + score + rank + reports with the legacy ScorerService."""
+    # One config per JD: the single JD of a single-post job, or one per post (FR-5).
+    configs: dict[str, Path] = {}
     rows: list[dict] = []
     for cand in candidates:
+        label = post_of(cand) if jd_sources.multi_post else None
+        name = jd_sources.config_name(label)
+        config_out = configs.get(name)
+        if config_out is None:
+            config_out = _legacy_config(args, out_dir, jd_sources.for_post(label), name)
+            configs[name] = config_out
         if _score_legacy_candidate(args, cand, config_out, out_dir, failures):
             rows.append(_legacy_row(cand))
-    rows.sort(key=lambda r: r["total_score"], reverse=True)
-    for rank, row in enumerate(rows, start=1):
-        row["rank"] = rank
-    reports = _generate_reports(args, out_dir, rows, failures, jd_source=jd_source, jd_text=jd_text)
-    return _build_manifest(args, out_dir, jd_source, config_out, rows, reports, failures, engine="legacy")
+    unassigned = _rank_rows(rows, multi_post=jd_sources.multi_post)
+    reports = _generate_reports(args, out_dir, rows, failures, jd_sources=jd_sources)
+    return _build_manifest(
+        args,
+        out_dir,
+        jd_sources,
+        configs.get("config.json"),
+        rows,
+        reports,
+        failures,
+        engine="legacy",
+        unassigned=unassigned,
+    )
 
 
 def _match_candidate(
@@ -590,6 +853,8 @@ def _match_candidate(
         "refno": cand.get("refno"),
         "appno": cand.get("appno"),
         "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
+        # None on a single-post job, which has no post column to read (FR-2).
+        "post": cand.get("post"),
         "total_score": float(detail.get("match_score", 0)),
         "tier": detail.get("fit_band") or "",
         "skill_match": _radar_dim_score(dims, "core_skill_match"),
@@ -606,23 +871,34 @@ def _match_candidate(
 def _run_matching_engine(
     args: argparse.Namespace,
     out_dir: Path,
-    jd_source: Path,
+    jd_sources: JdSources,
     candidates: list[dict],
     failures: list[Failure],
-    jd_text: str | None = None,
 ) -> int:
     """Run the matching engine per candidate and render modal-style radar/interview PDFs."""
     reference_date = args.reference_date or date.today().isoformat()
     rows: list[dict] = []
     for cand in candidates:
-        row = _match_candidate(args, cand, jd_source, reference_date, out_dir, failures)
+        # Each applicant is matched against their own post's effective JD (FR-5).
+        label = post_of(cand) if jd_sources.multi_post else None
+        row = _match_candidate(
+            args, cand, jd_sources.for_post(label), reference_date, out_dir, failures
+        )
         if row is not None:
             rows.append(row)
-    rows.sort(key=lambda r: r["total_score"], reverse=True)
-    for rank, row in enumerate(rows, start=1):
-        row["rank"] = rank
-    reports = _generate_reports(args, out_dir, rows, failures, jd_source=jd_source, jd_text=jd_text)
-    return _build_manifest(args, out_dir, jd_source, None, rows, reports, failures, engine="matching")
+    unassigned = _rank_rows(rows, multi_post=jd_sources.multi_post)
+    reports = _generate_reports(args, out_dir, rows, failures, jd_sources=jd_sources)
+    return _build_manifest(
+        args,
+        out_dir,
+        jd_sources,
+        None,
+        rows,
+        reports,
+        failures,
+        engine="matching",
+        unassigned=unassigned,
+    )
 
 
 # Loads the optional appno -> online resume URL map written by the collector.
@@ -702,7 +978,7 @@ def _report_dir(args: argparse.Namespace, out_dir: Path) -> Path:
     return path
 
 
-# Stable fingerprint for one candidate's PDF/HTML inputs (score JSON + rank).
+# Stable fingerprint for one candidate's PDF/HTML inputs (score JSON + rank + post).
 def _row_report_fingerprint(args: argparse.Namespace, row: dict) -> str:
     return candidate_report_fingerprint(
         engine=getattr(args, "engine", None),
@@ -712,13 +988,16 @@ def _row_report_fingerprint(args: argparse.Namespace, row: dict) -> str:
         rank=row.get("rank"),
         total_score=row.get("total_score"),
         tier=row.get("tier"),
+        # An applicant moved to another post is scored against another JD, so their page
+        # must be rebuilt even when the score happens to be identical (PRD Section 6).
+        post=row.get("post"),
         artifact_paths=[row.get("_detail"), row.get("_score"), row.get("_extracted")],
     )
 
 
 # Resolve report-gen JD inputs and a digest that invalidates the board when JD content changes.
 def _report_jd_inputs(
-    out_dir: Path, jd_source: Path | None, jd_text: str | None
+    out_dir: Path, jd_sources: JdSources | None, jd_text: str | None
 ) -> tuple[str | None, str | None, str | None]:
     """Return (jd digest, raw JD text path arg, parsed JD JSON path arg)."""
     text_path: Path | None = None
@@ -730,12 +1009,16 @@ def _report_jd_inputs(
             candidate = out_dir / "jd.txt"
             candidate.write_text(jd_text, encoding="utf-8")
         text_path = candidate
-    json_path = jd_source if jd_source is not None and Path(jd_source).is_file() else None
+    # The board carries every post's JD panel, so its digest must cover every post's JD, not a
+    # single one (PRD Section 6). A single-post run has exactly one path here, which reproduces
+    # the digest this function has always produced.
+    json_paths = [path for path in jd_sources.jd_paths if path.is_file()] if jd_sources else []
+    json_path = jd_sources.default if jd_sources and jd_sources.default.is_file() else None
     digest_parts: list[str] = []
     if text_path is not None:
         digest_parts.append(f"text:{sha256_file(text_path)}")
-    if json_path is not None:
-        digest_parts.append(f"json:{sha256_file(json_path)}")
+    for path in sorted(json_paths, key=str):
+        digest_parts.append(f"json:{sha256_file(path)}")
     jd_digest = sha256_text("|".join(digest_parts)) if digest_parts else None
     return jd_digest, str(text_path) if text_path else None, str(json_path) if json_path else None
 
@@ -746,13 +1029,14 @@ def _generate_reports(
     rows: list[dict],
     failures: list[Failure],
     *,
-    jd_source: Path | None = None,
+    jd_sources: JdSources | None = None,
     jd_text: str | None = None,
 ) -> dict:
     """Generate per-candidate HTML/PDF and ranking overview (unless skipped)."""
     reports: dict = {}
     if args.skip_reports:
         return reports
+    jd_text = jd_sources.text if jd_sources is not None else jd_text
     report_dir = _report_dir(args, out_dir)
     previous = load_fingerprints(out_dir)
     previous_candidates = previous.get("candidates") if isinstance(previous.get("candidates"), dict) else {}
@@ -808,7 +1092,7 @@ def _generate_reports(
     comparison_rows = [_board_row(row, resume_links) for row in rows]
     html_out = report_dir / RANKING_OVERVIEW_HTML
     # JD content feeds the board panel, so its digest must invalidate the cached board.
-    jd_digest, jd_text_arg, jd_json_arg = _report_jd_inputs(out_dir, jd_source, jd_text)
+    jd_digest, jd_text_arg, jd_json_arg = _report_jd_inputs(out_dir, jd_sources, jd_text)
     board_fp = board_report_fingerprint(
         position=args.position,
         refno=getattr(args, "refno", None),
@@ -868,8 +1152,13 @@ def _generate_reports(
             "--output",
             str(match_html),
         ]
-        if jd_json_arg:
-            match_cmd += ["--jd-json", jd_json_arg]
+        # Each candidate page shows that applicant's own effective JD, not the shared base (FR-8).
+        own_jd = None
+        if jd_sources is not None and jd_sources.multi_post:
+            own_jd = jd_sources.for_post(row.get("post"))
+        own_jd_arg = str(own_jd) if own_jd is not None and own_jd.is_file() else jd_json_arg
+        if own_jd_arg:
+            match_cmd += ["--jd-json", own_jd_arg]
         attempts, error = _run_with_retries(match_cmd, args.max_retries)
         if error:
             _record_failure(
@@ -889,15 +1178,42 @@ def _generate_reports(
     return reports
 
 
+# Summarise the post dimension for the manifest: one entry per post with its applicant count
+# and top score, plus the rows that could not be placed (FR-7).
+def _post_summary(rows: list[dict], unassigned: list[dict]) -> dict:
+    """Return the manifest's post dimension: per-post counts plus needs-confirmation rows."""
+    grouping = group_by_post(rows, multi_post=True)
+    posts = []
+    for group in grouping.groups:
+        scores = [r.get("total_score") for r in group.rows if isinstance(r.get("total_score"), (int, float))]
+        posts.append(
+            {
+                "post": group.label,
+                "applicants": len(group.rows),
+                "top_score": max(scores) if scores else None,
+            }
+        )
+    needs_confirmation = [
+        {
+            "appno": row.get("appno"),
+            # The raw value is carried through so HR can see exactly what the page said.
+            "post": post_of(row),
+        }
+        for row in unassigned
+    ]
+    return {"posts": posts, "needs_confirmation": needs_confirmation}
+
+
 def _build_manifest(
     args: argparse.Namespace,
     out_dir: Path,
-    jd_source: Path,
+    jd_sources: JdSources,
     config_out: Path | None,
     rows: list[dict],
     reports: dict,
     failures: list[Failure],
     engine: str,
+    unassigned: list[dict] | None = None,
 ) -> int:
     """Print the pipeline result manifest to stdout and write manifest.json."""
     if rows and not failures:
@@ -917,6 +1233,8 @@ def _build_manifest(
                 "refno": row.get("refno"),
                 "appno": row.get("appno"),
                 "display_label": row.get("display_label"),
+                # None on a single-post job (FR-2).
+                "post": row.get("post"),
                 "source": row["_source"],
                 "total_score": row["total_score"],
                 "tier": row["tier"],
@@ -931,15 +1249,18 @@ def _build_manifest(
         "engine": engine,
         "refno": args.refno,
         "output_dir": str(out_dir),
-        "jd_source": str(jd_source),
+        "jd_source": str(jd_sources.default),
         "jd_overrides": getattr(args, "_jd_overrides", None),
         "config_json": str(config_out) if config_out else None,
+        "multi_post": jd_sources.multi_post,
         "candidates": manifest_rows,
         "failures": [item.to_dict() for item in failures],
         "ask": None,
         "reports": reports,
         "inputs_unchanged": bool((reports or {}).get("inputs_unchanged")),
     }
+    if jd_sources.multi_post:
+        manifest.update(_post_summary(rows, unassigned or []))
     _persist_fingerprints(out_dir, args)
     text = json.dumps(manifest, ensure_ascii=False, indent=2)
     (out_dir / "manifest.json").write_text(text + "\n", encoding="utf-8")
@@ -1037,11 +1358,11 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     _sync_resume_with_inputs(args, out_dir)
     try:
         failures: list[Failure] = []
-        jd_source, jd_text = _resolve_jd_source(args, out_dir)
-        candidates = _parse_candidates(args, out_dir, jd_text, failures)
+        jd_sources = _resolve_jd_sources(args, out_dir)
+        candidates = _parse_candidates(args, out_dir, jd_sources.text, failures)
         if args.engine == "matching":
-            return _run_matching_engine(args, out_dir, jd_source, candidates, failures, jd_text=jd_text)
-        return _run_legacy_engine(args, out_dir, jd_source, candidates, failures, jd_text=jd_text)
+            return _run_matching_engine(args, out_dir, jd_sources, candidates, failures)
+        return _run_legacy_engine(args, out_dir, jd_sources, candidates, failures)
     finally:
         if getattr(args, "cleanup_cvs", False):
             for path in downloaded_cvs:
@@ -1071,6 +1392,15 @@ def main() -> int:
     parser.add_argument("--engine", choices=("legacy", "matching"), default="legacy", help="Scoring engine: legacy scorer (default) or matching engine with radar/interview detail.")
     parser.add_argument("--reference-date", default=None, help="Reference date YYYY-MM-DD used by the matching engine (default: today).")
     parser.add_argument("--cv", action="append", default=[], metavar="FILE", help="CV PDF to parse and score; repeatable.")
+    parser.add_argument(
+        "--cv-post",
+        action="append",
+        default=[],
+        metavar="APPNO=POST",
+        help="Post one applicant applied for, as <appno>=<post label>; repeatable. Supplying these makes "
+        "the run multi-post: applicants are grouped by post and each group is scored against the JD of "
+        "its own post. Omit entirely for a single-post job, which is unchanged.",
+    )
     parser.add_argument("--cv-url", action="append", default=[], metavar="URL", help="JAS CV file URL to download (repeatable).")
     parser.add_argument("--extracted", action="append", default=[], metavar="FILE", help="Existing extracted candidate JSON; skips cv-parser; repeatable.")
     parser.add_argument("--trust-extracted", action="store_true", help="Allow --extracted profiles from outside --output-dir (trusted, pre-masked data only).")

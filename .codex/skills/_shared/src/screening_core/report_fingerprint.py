@@ -11,7 +11,9 @@ from typing import Any
 #     and the candidate match page shows an always-visible dimension breakdown (F1.3-F1.6).
 # v5: ranking board carries a JD description + parsed-requirements panel keyed to a JD digest.
 # v6: interview prompts carry template_id + allowlisted variables and highlight skill names.
-REPORT_FINGERPRINT_VERSION = "hr-report-v6"
+# v7: the candidate page is keyed on the post applied for, so a multi-post advertisement
+#     rebuilds an applicant's page when they move post (PRD-Multi_Post Section 6).
+REPORT_FINGERPRINT_VERSION = "hr-report-v7"
 INPUT_FINGERPRINT_VERSION = "hr-input-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"
 
@@ -46,6 +48,7 @@ def candidate_report_fingerprint(
     total_score: object,
     tier: str | None,
     artifact_paths: list[Path | str | None],
+    post: str | None = None,
 ) -> str:
     chunks = [
         REPORT_FINGERPRINT_VERSION,
@@ -56,6 +59,9 @@ def candidate_report_fingerprint(
         str(rank or ""),
         str(total_score or ""),
         str(tier or ""),
+        # An applicant moved to another post is scored against another JD, so their page is
+        # stale even when the score is unchanged. Empty for a single-post job.
+        str(post or ""),
     ]
     for path in artifact_paths:
         chunks.append(sha256_file(path))
@@ -72,6 +78,7 @@ def input_run_payload(
     cv_hashes: dict[str, str],
     overrides_path: Path | str | None = None,
     apply_overrides: bool = False,
+    posts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     jd_chunks = [sha256_file(path) for path in jd_paths if path]
     return {
@@ -86,15 +93,25 @@ def input_run_payload(
         # run must not reuse scores that were computed with conditions applied.
         "overrides_applied": bool(apply_overrides),
         "cvs": dict(sorted(cv_hashes.items())),
+        # Which post each applicant was scored against. An applicant re-assigned to another
+        # post is scored against a different JD even though the advertisement and the CV are
+        # unchanged, so this has to take part in invalidation (PRD Section 6). Absent for a
+        # single-post run, where the two sides compare equal and nothing is invalidated.
+        "posts": dict(sorted((posts or {}).items())),
     }
 
 
-# True when JD text or scoring engine changed and cached parse/score JSON must not be reused.
+# True when JD text, scoring engine or the post assignment changed and cached parse/score
+# JSON must not be reused.
 def jd_inputs_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
     prior = previous or {}
     if not prior.get("jd"):
         return False
-    return prior.get("jd") != current.get("jd") or prior.get("engine") != current.get("engine")
+    return (
+        prior.get("jd") != current.get("jd")
+        or prior.get("engine") != current.get("engine")
+        or prior.get("posts", {}) != current.get("posts", {})
+    )
 
 
 # True when HR-supplied conditions changed and cached scores must be recomputed.

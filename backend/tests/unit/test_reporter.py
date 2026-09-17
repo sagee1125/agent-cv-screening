@@ -505,7 +505,9 @@ def test_html_candidate_match_page_dimension_panel(tmp_path: Path) -> None:
 def test_report_fingerprint_version_bumped_for_skill_markup() -> None:
     from screening_core.report_fingerprint import REPORT_FINGERPRINT_VERSION
 
-    assert REPORT_FINGERPRINT_VERSION == "hr-report-v6"
+    # v7 added the post applied for to the candidate fingerprint, so every cached candidate
+    # page and board from an earlier version must be rebuilt once (PRD-Multi_Post Section 6).
+    assert REPORT_FINGERPRINT_VERSION == "hr-report-v7"
 
 
 # F1.2: Core/Experience tooltip cards preview Evidence-axis sub-metrics (Option B aid).

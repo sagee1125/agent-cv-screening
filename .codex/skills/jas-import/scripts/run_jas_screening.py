@@ -220,6 +220,19 @@ def _stage_cvs_by_appno(work_dir: Path, cvs: list[tuple[str, Path]]) -> list[tup
     return staged
 
 
+# Pair each staged CV's application number with the post that applicant applied for.
+# Returns [] for a single-post job (no post values on the page), so the pipeline is called
+# exactly as before there. An applicant whose post value is blank is left out on purpose:
+# the pipeline then reports it for HR confirmation instead of guessing (FR-7).
+def _cv_posts(job: dict, staged: list[tuple[str, Path]]) -> list[tuple[str, str]]:
+    post_by_appno = {
+        str(candidate.get("appno")): str(candidate.get("post") or "").strip()
+        for candidate in job.get("candidates") or []
+        if isinstance(candidate, dict) and candidate.get("appno")
+    }
+    return [(appno, post) for appno, _ in staged if (post := post_by_appno.get(appno, ""))]
+
+
 # Builds the pipeline command for one JAS job folder.
 def _pipeline_cmd(
     jd_text_path: Path,
@@ -234,6 +247,7 @@ def _pipeline_cmd(
     refno: str | None = None,
     report_dir: Path | None = None,
     conditions: str | None = None,
+    cv_posts: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     cmd = [
         PYTHON,
@@ -261,6 +275,10 @@ def _pipeline_cmd(
         cmd.append("--resume")
     if fail_fast:
         cmd.append("--fail-fast")
+    # Supplying any post makes the run multi-post: applicants are grouped by post and each
+    # group is scored against the JD of its own post (FR-5).
+    for appno, post in cv_posts or []:
+        cmd += ["--cv-post", f"{appno}={post}"]
     for path in cv_paths:
         cmd += ["--cv", str(path)]
     return cmd
@@ -368,6 +386,7 @@ def _run_screening(
         refno=refno,
         report_dir=job_dir,
         conditions=getattr(args, "conditions", None),
+        cv_posts=_cv_posts(job, staged),
     )
     exit_code, payload = _run_pipeline(cmd)
     # Persist run history + CV hashes so later runs can skip unchanged downloads.
