@@ -472,6 +472,59 @@ def test_project_multi_post_carries_the_post_dimension() -> None:
     ]
 
 
+# A four-post advertisement keeps the full-time and part-time variants apart and restarts ranks per
+# post, so nothing in the envelope invites a comparison between posts (FR-4, FR-5, FR-11).
+def test_project_four_post_keeps_variants_apart_and_ranks_per_post() -> None:
+    # The real 260917001 shape: SPF/PDF x Full-time/Part-time, four posts, four applicant counts.
+    groups = [
+        ("Senior Project Fellow (Full-time)", "260917011", "260917012", 65.68),
+        ("Senior Project Fellow (Part-time)", "260917009", "260917010", 71.07),
+        ("Postdoctoral Fellow (Full-time)", "260917007", "260917006", 70.07),
+        ("Postdoctoral Fellow (Part-time)", "260917004", "260917003", 65.76),
+    ]
+    candidates = []
+    for post, top_appno, second_appno, top_score in groups:
+        candidates.append(
+            {"rank": 1, "appno": top_appno, "total_score": top_score, "tier": "medium", "post": post}
+        )
+        candidates.append(
+            {
+                "rank": 2,
+                "appno": second_appno,
+                "total_score": top_score - 10.0,
+                "tier": "medium",
+                "post": post,
+            }
+        )
+
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260917001",
+            "engine": "matching",
+            "candidates": candidates,
+            "posts": [
+                {"post": post, "applicants": 2, "top_appno": top_appno, "top_score": top_score}
+                for post, top_appno, _, top_score in groups
+            ],
+            "needs_confirmation": [],
+        },
+        jas_session="granted",
+    )
+
+    assert validate_envelope(envelope) == []
+    # FT and PT share a base name, but they are two posts on the page and stay two groups here.
+    assert envelope["posts"]["groups"] == [
+        {"post": post, "applicants": 2, "top_appno": top_appno, "top_score": top_score}
+        for post, top_appno, _, top_score in groups
+    ]
+    assert envelope["posts"]["needs_confirmation"] == []
+    # Every post's ranking starts at 1, so the list never reads as one ranking across posts.
+    assert [row["rank"] for row in envelope["ranking"]] == [1, 2, 1, 2, 1, 2, 1, 2]
+    assert envelope["candidate_count"] == 8
+
+
 # A failed applicant has no pipeline row, so their post comes from the records page.
 def test_project_failed_applicant_keeps_its_post() -> None:
     envelope = project_host_return(
