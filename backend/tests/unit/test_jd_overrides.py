@@ -631,3 +631,41 @@ def test_describe_overrides_propagates_an_unreadable_file(tmp_path) -> None:
 
     with pytest.raises(OverridesUnreadableError):
         describe_overrides(tmp_path)
+
+
+# "none" is the parser's sentinel for "no degree level detected", not a degree. A JD that states no
+# education requirement must render no line at all, never a false "Education: none" that reads as a
+# requirement in its own right.
+def test_education_sentinel_is_not_rendered_as_a_requirement() -> None:
+    from report_gen.html_board import _parsed_groups
+
+    html = _parsed_groups(
+        {
+            "education_requirement": {
+                "minimum_degree": "none",
+                "field_of_study": None,
+                "is_mandatory": False,
+            }
+        }
+    )
+
+    assert "Education:" not in html
+
+
+# A field of study with no stated degree level still renders: the sentinel drops the level, not the
+# whole line, and the word "none" never reaches HR.
+def test_education_line_keeps_the_field_when_the_degree_is_unstated() -> None:
+    from report_gen.html_board import _parsed_groups
+
+    html = _parsed_groups(
+        {
+            "education_requirement": {
+                "minimum_degree": "none",
+                "field_of_study": "computer science, software engineering",
+                "is_mandatory": False,
+            }
+        }
+    )
+
+    assert "Education:</span> computer science, software engineering" in html
+    assert "none" not in html.split("Education:</span>", 1)[1]

@@ -982,12 +982,22 @@ def _language_pills(items: Any) -> list[str]:
     return pills
 
 
+# Values the parsers emit to mean "not stated". They are sentinels rather than requirement text,
+# so they are never rendered: a JD stating no education requirement gets no line, not a false
+# "Education: none" that reads as a requirement of its own.
+_ABSENT_SENTINELS = frozenset({"", "none", "unknown", "n/a"})
+
+
 # Render the education requirement as one line when the parsed JD states one.
 def _education_line(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
     degree = str(value.get("minimum_degree") or "").strip()
+    if degree.casefold() in _ABSENT_SENTINELS:
+        degree = ""
     field = str(value.get("field_of_study") or "").strip()
+    if field.casefold() in _ABSENT_SENTINELS:
+        field = ""
     if not degree and not field:
         return ""
     bits = [bit for bit in (degree, field) if bit]
@@ -1007,7 +1017,7 @@ def _visa_line(value: Any) -> str:
         return ""
     region = str(value.get("target_region") or "").strip()
     requirement_type = str(value.get("requirement_type") or "").strip().lower()
-    if requirement_type in ("", "unknown", "none", "n/a"):
+    if requirement_type in _ABSENT_SENTINELS:
         requirement_type = ""
     bits: list[str] = []
     if region:
