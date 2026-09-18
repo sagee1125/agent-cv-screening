@@ -50,6 +50,9 @@ TOP_KEYS = frozenset(
         "has_changes",
         "first_check",
         "changes",
+        # The post dimension: per-post applicant counts and the applicants whose post the page
+        # did not state. Both the screen and the update check report it (FR-7, FR-11, FR-12).
+        "posts",
     }
 )
 RANKING_KEYS = frozenset(
@@ -64,6 +67,9 @@ RANKING_KEYS = frozenset(
         "eligible",
         "parse_failed",
         "failure_stage",
+        # Which post this row's rank is relative to. A rank is only meaningful inside its post,
+        # so the conversation cannot read the ranking correctly without it (FR-5, FR-11).
+        "post",
     }
 )
 DENY_KEYS = frozenset(

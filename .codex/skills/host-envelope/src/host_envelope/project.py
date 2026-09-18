@@ -47,6 +47,7 @@ def rejected_envelope(tool: str, message: str) -> dict[str, Any]:
         "has_changes": None,
         "first_check": None,
         "changes": None,
+        "posts": None,
     }
 
 
@@ -301,6 +302,7 @@ def _ranking_row(
     row: dict[str, Any] | None,
     parse_failed: bool,
     failure_stage: str | None,
+    post: str | None = None,
 ) -> dict[str, Any]:
     status = hr_status if hr_status in ALLOWED_HR_STATUS else None
     stage = failure_stage if failure_stage in ALLOWED_FAILURE_STAGES else None
@@ -320,6 +322,10 @@ def _ranking_row(
             tier = str(band) if band else None
         if isinstance(row.get("eligible"), bool):
             eligible = row["eligible"]
+    # None on a single-post job, so the single-post row shape only gained a null key (FR-2).
+    post_label = sanitize_text(post, 80) if post else None
+    if post_label and looks_like_forbidden_payload(post_label):
+        post_label = None
     return {
         "rank": rank,
         "appno": appno[:32],
@@ -331,6 +337,7 @@ def _ranking_row(
         "eligible": eligible,
         "parse_failed": parse_failed,
         "failure_stage": stage,
+        "post": post_label,
     }
 
 
@@ -343,6 +350,13 @@ def _project_ranking(
 ) -> tuple[list[dict[str, Any]], int]:
     status_by_appno = {
         str(item.get("appno")): item.get("status")
+        for item in (jas.get("candidates") or [])
+        if isinstance(item, dict) and item.get("appno")
+    }
+    # A failed applicant has no pipeline row to read a post from, so the post is resolved from
+    # the records page instead: it is known before any CV is parsed (FR-2).
+    post_by_appno = {
+        str(item.get("appno")): item.get("post")
         for item in (jas.get("candidates") or [])
         if isinstance(item, dict) and item.get("appno")
     }
@@ -362,6 +376,7 @@ def _project_ranking(
                 row=row,
                 parse_failed=False,
                 failure_stage=None,
+                post=row.get("post") or post_by_appno.get(appno),
             )
         )
     failed_count = 0
@@ -386,6 +401,7 @@ def _project_ranking(
                 row=None,
                 parse_failed=True,
                 failure_stage=str(item.get("stage") or "") or None,
+                post=post_by_appno.get(appno),
             )
         )
     for extra in jas.get("download_failures") or []:
@@ -405,9 +421,102 @@ def _project_ranking(
                 row=None,
                 parse_failed=True,
                 failure_stage="download",
+                post=post_by_appno.get(appno),
             )
         )
     return ranking[:200], failed_count
+
+
+# Sanitizes one post label, dropping it when it would trip the forbidden-payload scan. A post
+# label comes from the advertisement, so it is the one free-text string this projection carries.
+def _safe_post_label(value: Any) -> str | None:
+    label = sanitize_text(value, 80)
+    if not label or looks_like_forbidden_payload(label):
+        return None
+    return label
+
+
+# Projects the post dimension for the host: one entry per post with its applicant count and its
+# top applicant, plus the applicants whose post the page never stated (FR-7, FR-11, FR-12).
+#
+# The ranking list stays flat, so the counts and each post's best applicant are stated here rather
+# than left for the conversation to derive from it. That keeps a per-post summary available without
+# ever inviting a comparison between posts, whose scores are not comparable (FR-5).
+def _project_posts(groups_raw: Any, needs_raw: Any) -> dict[str, Any] | None:
+    groups: list[dict[str, Any]] = []
+    for item in list(groups_raw or [])[:24]:
+        if not isinstance(item, dict):
+            continue
+        label = _safe_post_label(item.get("post"))
+        if not label:
+            continue
+        applicants = item.get("applicants")
+        score = item.get("top_score")
+        # _safe_appno answers "unknown" for an absent value, which must not be shown as an appno.
+        top_appno = _safe_appno(str(item.get("top_appno") or ""))
+        if not top_appno or top_appno == "unknown":
+            top_appno = None
+        groups.append(
+            {
+                "post": label,
+                "applicants": applicants if isinstance(applicants, int) and not isinstance(applicants, bool) else None,
+                "top_appno": top_appno,
+                "top_score": float(score)
+                if isinstance(score, (int, float)) and not isinstance(score, bool)
+                else None,
+            }
+        )
+    needs: list[dict[str, Any]] = []
+    for item in list(needs_raw or [])[:200]:
+        if not isinstance(item, dict):
+            continue
+        appno = _safe_appno(str(item.get("appno") or ""))
+        if not appno or appno == "unknown":
+            continue
+        # The raw value is kept because it is exactly what HR has to rule on: an unreadable post
+        # must be shown as it appeared, never replaced by a guess (FR-7).
+        needs.append({"appno": appno, "post": _safe_post_label(item.get("post"))})
+    if not groups and not needs:
+        return None
+    return {"groups": groups, "needs_confirmation": needs}
+
+
+# Projects a {appno: post} map, dropping entries whose application no. or label cannot be shown.
+def _project_post_map(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for appno, value in list(raw.items())[:200]:
+        key = _safe_appno(str(appno))
+        label = _safe_post_label(value)
+        if not key or key == "unknown" or not label:
+            continue
+        out[key] = label
+    return out
+
+
+# Projects the applicants whose post changed, which is the change HR most needs to see (FR-12).
+def _project_post_changed(raw: Any) -> dict[str, dict[str, str | None]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, str | None]] = {}
+    for appno, value in list(raw.items())[:200]:
+        key = _safe_appno(str(appno))
+        if not key or key == "unknown" or not isinstance(value, dict):
+            continue
+        before = _safe_post_label(value.get("from"))
+        after = _safe_post_label(value.get("to"))
+        if before is None and after is None:
+            continue
+        out[key] = {"from": before, "to": after}
+    return out
+
+
+# Projects a list of post labels, dropping any that cannot be shown.
+def _project_post_labels(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [label for label in (_safe_post_label(value) for value in raw[:24]) if label]
 
 
 # Turns report paths into booleans/counts so filesystem paths stay off the model.
@@ -476,6 +585,13 @@ def _project_check_updates(payload: dict[str, Any], jas_session: str | None, coo
             str(k): str(v) if isinstance(v, str) else str(v.get("to", "")) if isinstance(v, dict) else ""
             for k, v in (raw_changes.get("status_changed") or {}).items()
         } if isinstance(raw_changes.get("status_changed"), dict) else {},
+        # The post dimension (FR-12). A re-assignment leaves the applicant count and every status
+        # unchanged, so without these keys it would be reported as no change at all.
+        "added_posts": _project_post_map(raw_changes.get("added_posts")),
+        "removed_posts": _project_post_map(raw_changes.get("removed_posts")),
+        "post_changed": _project_post_changed(raw_changes.get("post_changed")),
+        "posts_appeared": _project_post_labels(raw_changes.get("posts_appeared")),
+        "posts_disappeared": _project_post_labels(raw_changes.get("posts_disappeared")),
     }
     session = jas_session if jas_session in ALLOWED_SESSION else None
     auth = None
@@ -502,6 +618,10 @@ def _project_check_updates(payload: dict[str, Any], jas_session: str | None, coo
         "has_changes": payload.get("has_changes"),
         "first_check": payload.get("first_check"),
         "changes": changes if status != "error" else None,
+        # A multi-post page reports its per-post applicant counts here (FR-11, FR-12).
+        "posts": _project_posts(payload.get("posts"), payload.get("needs_confirmation"))
+        if status != "error"
+        else None,
     }
     errors = validate_envelope(envelope)
     if errors or _payload_is_dirty(envelope):
@@ -551,6 +671,7 @@ def project_host_return(
             "has_changes": None,
             "first_check": None,
             "changes": None,
+            "posts": None,
         }
         if session != "granted":
             envelope["status"] = "need_input"
@@ -610,6 +731,8 @@ def project_host_return(
         "has_changes": None,
         "first_check": None,
         "changes": None,
+        # A multi-post run reports its per-post counts here; None on a single-post job (FR-11).
+        "posts": _project_posts(skill.get("posts"), skill.get("needs_confirmation")),
     }
     errors = validate_envelope(envelope)
     if errors or _payload_is_dirty(envelope):

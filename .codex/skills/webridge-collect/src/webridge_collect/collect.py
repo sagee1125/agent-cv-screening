@@ -13,6 +13,7 @@ from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import refno_from_url
 from screening_core.hr_output import safe_pack_id
 from screening_core.input_policy import validate_reference
+from screening_core.posts import post_counts
 
 from webridge_collect.client import WebBridgeClient
 
@@ -183,11 +184,21 @@ def collect_job(
         "driver": driver,
         "refno": job.get("refno", ""),
         "post_title": (job.get("job") or {}).get("post_title", ""),
-        "candidates": [{"appno": c.get("appno"), "status": c.get("status")} for c in job.get("candidates", [])],
+        # The post applied for travels with each candidate (PRD Section 6); it is None on a
+        # single-post page, so the collector's own folder stays one folder per refno.
+        "candidates": [
+            {"appno": c.get("appno"), "status": c.get("status"), "post": c.get("post")}
+            for c in job.get("candidates", [])
+        ],
         "cv_downloaded": sorted(cvs),
         "candidates_without_cv": sorted(known - set(cvs)),
         "download_failures": failures,
     }
+    # The post list with per-post applicant counts, only when the page states a post (Section 6).
+    posts = post_counts(job.get("candidates"))
+    if posts:
+        manifest["multi_post"] = bool((job.get("job") or {}).get("multi_post"))
+        manifest["posts"] = posts
     if driver == "webbridge" and human_flow is not None:
         manifest["human_flow"] = human_flow
     (folder / MANIFEST_NAME).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

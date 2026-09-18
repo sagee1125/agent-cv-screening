@@ -30,7 +30,37 @@ This is the exact behaviour HR expects when they say "screen the CVs" / 「請�
    success the collector opens `ranking-overview.html` and closes the WebBridge tabs, so HR
    is left with the report. Then give HR a short text summary (counts, top candidate
    `appno`s, where the Desktop folder is) in their language. Do **not** load the report
-   HTML/PDF into the chat model — point HR to the Desktop folder instead.
+   HTML/PDF into the chat model — point HR to the Desktop folder instead. On a multi-post
+   job the summary is **per post** — see "Multi-post jobs" below.
+
+### Multi-post jobs
+
+One advertisement can cover several posts, and HR applies to a specific one. The envelope then
+carries `posts.groups` (one entry per post: `post`, `applicants`, `top_appno`, `top_score`) and
+every ranking row carries `post`. The report is one section per post.
+
+The summary must be **per post**, and it must say that scores are comparable within a post and
+not across posts — each applicant was scored against the JD of the post they applied for, so a
+cross-post comparison would be meaningless:
+
+> Screening is finished. This job has more than one post, so the report has one section per
+> post — open each section for that post's own ranking. Applicants are not compared across
+> posts: a score only means something inside the post it was assessed against.
+>
+> - <post> — <n> applicants, top application no. <appno>
+> - <post> — <n> applicants, top application no. <appno>
+>
+> On your Desktop, open the folder workbuddy-cv-screen, then the folder named with this job
+> reference number, then open ranking-overview.html. Each PDF is named with the application
+> number. Reports do not list personal privacy data.
+
+Render it in Traditional Chinese when HR wrote in Chinese; keep the post labels exactly as the
+advertisement states them (they are proper names from the ad, not text to translate).
+
+If `posts.needs_confirmation` is not empty, HR must settle those applicants before trusting the
+sections: their post could not be read from the page, so they are **not** ranked anywhere. Name
+their `appno`s, quote the raw value the page gave, and ask which post each one applied for.
+Never place them by guessing.
 
 ### Skill contract source
 
@@ -121,5 +151,7 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
 5. Reports go to `Desktop/workbuddy-cv-screen/<refno>/` (not the WorkBuddy session folder). Files: `ranking-overview.html`, `<appno>.html`, `<appno>.pdf`.
 6. Never put candidate names, emails, phones, or salaries in HTML/PDF. Identity is `refno/appno` only.
 7. Tell HR where the Desktop folder is, in the same language they used. Do not load those files into the chat model.
-   Do not ask HR to name Python scripts.
+   Do not ask HR to name Python scripts. On a multi-post job, give the counts and top `appno`s
+   **per post** and say that scores are comparable within a post, not across posts (FR-11) —
+   the exact wording is in "Multi-post jobs" above.
 

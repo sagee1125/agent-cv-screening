@@ -42,17 +42,62 @@ def save_job_state(state_dir: str | Path, refno: str, state: dict[str, Any]) -> 
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# Builds a comparable snapshot (JD hash + candidate status map) from a job payload.
+# Builds a comparable snapshot (JD hash + candidate status map + per-candidate post) from a job payload.
 def current_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     candidates = {
         str(c.get("appno")): c.get("status")
         for c in job.get("candidates", [])
         if c.get("appno")
     }
-    return {"jd": sha256_text(str(job.get("jd_text") or "")), "candidates": candidates}
+    snapshot: dict[str, Any] = {"jd": sha256_text(str(job.get("jd_text") or "")), "candidates": candidates}
+    # The post dimension is recorded only when the page states one, so a single-post snapshot keeps
+    # exactly its previous shape and no stored state has to be migrated (FR-12).
+    posts = {
+        str(c.get("appno")): str(c.get("post"))
+        for c in job.get("candidates", [])
+        if c.get("appno") and c.get("post")
+    }
+    if posts:
+        snapshot["posts"] = posts
+    return snapshot
 
 
-# Diffs two snapshots into a compact change summary.
+# Diffs the post dimension: a new applicant in post X, an applicant whose post changed, and a post
+# that appeared or disappeared (FR-12).
+#
+# A re-assignment leaves the applicant count and every status untouched, so without these keys it
+# would be reported as no change at all - which is exactly the change HR most needs to see. A post
+# is visible here exactly when it has an applicant on the page, because the records page is all this
+# check reads; a post listed in the advertisement with no applicant is not something it can see.
+def _diff_posts(
+    previous: Any,
+    current: Any,
+    added: list[str],
+    removed: list[str],
+    *,
+    has_baseline: bool,
+) -> dict[str, Any]:
+    prev_posts = previous if isinstance(previous, dict) else {}
+    curr_posts = current if isinstance(current, dict) else {}
+    post_changed = {
+        appno: {"from": prev_posts.get(appno), "to": curr_posts[appno]}
+        for appno in curr_posts
+        if appno in prev_posts and prev_posts.get(appno) != curr_posts[appno]
+    }
+    prev_labels = {str(value) for value in prev_posts.values() if value}
+    curr_labels = {str(value) for value in curr_posts.values() if value}
+    return {
+        # Which post each new / withdrawn applicant is in, so "3 new applicants" becomes
+        # "2 new in Research Assistant, 1 new in Research Associate".
+        "added_posts": {appno: str(curr_posts[appno]) for appno in added if curr_posts.get(appno)},
+        "removed_posts": {appno: str(prev_posts[appno]) for appno in removed if prev_posts.get(appno)},
+        "post_changed": post_changed,
+        "posts_appeared": sorted(curr_labels - prev_labels) if has_baseline else [],
+        "posts_disappeared": sorted(prev_labels - curr_labels) if has_baseline else [],
+    }
+
+
+# Diffs two snapshots into a compact change summary, including the post dimension (FR-12).
 def diff_snapshots(previous: dict[str, Any] | None, current: dict[str, Any]) -> dict[str, Any]:
     prev = previous or {}
     prev_cands = prev.get("candidates") or {}
@@ -65,7 +110,21 @@ def diff_snapshots(previous: dict[str, Any] | None, current: dict[str, Any]) -> 
         if appno in prev_cands and prev_cands.get(appno) != curr_cands.get(appno)
     }
     jd_changed = bool(prev.get("jd") and prev.get("jd") != current.get("jd"))
-    return {"jd_changed": jd_changed, "added": added, "removed": removed, "status_changed": status_changed}
+    return {
+        "jd_changed": jd_changed,
+        "added": added,
+        "removed": removed,
+        "status_changed": status_changed,
+        # has_baseline is read from the snapshot, not from the posts map: an absent key is what
+        # tells us the baseline predates the post dimension.
+        **_diff_posts(
+            prev.get("posts"),
+            current.get("posts"),
+            added,
+            removed,
+            has_baseline="posts" in prev,
+        ),
+    }
 
 
 # True when a change summary contains any difference.
@@ -75,6 +134,12 @@ def has_changes(changes: dict[str, Any]) -> bool:
         or changes.get("added")
         or changes.get("removed")
         or changes.get("status_changed")
+        # A re-assignment changes nothing else, so the post dimension has to count as a change.
+        # added_posts / removed_posts are not listed: they are non-empty only when added /
+        # removed already are, and those are checked above (FR-12).
+        or changes.get("post_changed")
+        or changes.get("posts_appeared")
+        or changes.get("posts_disappeared")
     )
 
 

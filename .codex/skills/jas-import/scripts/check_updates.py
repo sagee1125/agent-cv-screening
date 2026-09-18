@@ -16,6 +16,7 @@ from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.demo_mode import apply_demo_defaults
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
+from screening_core.posts import post_counts, post_of
 from screening_core.job_state import (
     current_snapshot,
     diff_snapshots,
@@ -91,6 +92,23 @@ def _fetch_job(
             allowed_hosts=allowed_hosts,
         )
     )
+
+
+# Summarise the post dimension of the records page: one entry per post with its applicant count,
+# plus the applicants whose post a multi-post page did not state (FR-7, FR-11, FR-12).
+#
+# The counts are stated here rather than left for the conversation to derive from the flat change
+# lists, so a per-post summary is available without inviting a comparison between posts.
+def _post_summary(job: dict) -> tuple[list[dict], list[dict]]:
+    candidates = job.get("candidates", [])
+    multi_post = bool((job.get("job") or {}).get("multi_post"))
+    needs_confirmation = [
+        # An unreadable post on a multi-post page is HR's call, never a guess (FR-7).
+        {"appno": str(candidate["appno"]), "post": None}
+        for candidate in candidates
+        if isinstance(candidate, dict) and candidate.get("appno") and multi_post and not post_of(candidate)
+    ]
+    return post_counts(candidates), needs_confirmation
 
 
 # Build the argparse CLI for the update checker.
@@ -221,6 +239,8 @@ def main() -> int:
             at=checked_at,
         )
 
+    # The post dimension, so a change is reported per post and not only as a count (FR-12).
+    posts, needs_confirmation = _post_summary(job)
     payload = {
         "status": "success",
         "tool": "check_updates",
@@ -232,6 +252,8 @@ def main() -> int:
         "has_changes": changed,
         "last_check_at": (previous or {}).get("at"),
         "changes": changes,
+        "posts": posts,
+        "needs_confirmation": needs_confirmation,
     }
     # The check is answered and nothing is left to look at, so drop the tab this check
     # opened. Failures return earlier and keep the page open for HR to inspect.

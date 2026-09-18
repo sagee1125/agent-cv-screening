@@ -213,6 +213,55 @@ def test_run_jas_screening_runs_pipeline(tmp_path, monkeypatch, capsys) -> None:
     assert manifest["candidates_without_cv"] == []
 
 
+# A multi-post JAS manifest carries the post per candidate and the per-post counts (PRD Section 6).
+# The post per candidate is what lets a failed applicant still be reported with their post.
+def test_build_manifest_carries_the_post_dimension(tmp_path) -> None:
+    cv = tmp_path / "cvs" / "111111.pdf"
+    cv.parent.mkdir(parents=True, exist_ok=True)
+    cv.write_bytes(b"%PDF")
+    job = {
+        "refno": "260907003",
+        "jd_text": "Post title: Research Associate / Research Assistant",
+        "job": {"post_title": "Research Associate / Research Assistant", "multi_post": True},
+        "candidates": [
+            {"appno": "111111", "status": "S", "post": "Research Assistant"},
+            {"appno": "222222", "status": "P", "post": "Research Associate"},
+            {"appno": "333333", "status": "N", "post": "Research Assistant"},
+        ],
+    }
+
+    manifest = module._build_manifest(job, [("111111", cv)])
+
+    assert manifest["multi_post"] is True
+    assert manifest["posts"] == [
+        {"post": "Research Assistant", "applicants": 2},
+        {"post": "Research Associate", "applicants": 1},
+    ]
+    assert manifest["candidates"][0]["post"] == "Research Assistant"
+    # The two applicants whose CV is not staged still have a post in the manifest.
+    assert manifest["candidates_without_cv"] == ["222222", "333333"]
+
+
+# A single-post manifest gains the null post key and nothing else.
+def test_build_manifest_single_post_has_no_post_list(tmp_path) -> None:
+    cv = tmp_path / "cvs" / "123456.pdf"
+    cv.parent.mkdir(parents=True, exist_ok=True)
+    cv.write_bytes(b"%PDF")
+    job = {
+        "refno": "190001010",
+        "jd_text": "Post title: Project Associate",
+        "job": {"post_title": "Project Associate"},
+        "candidates": [{"appno": "123456", "status": "S", "post": None}],
+    }
+
+    manifest = module._build_manifest(job, [("123456", cv)])
+
+    assert "posts" not in manifest
+    assert "multi_post" not in manifest
+    assert manifest["candidates"][0]["post"] is None
+    assert manifest["candidates"][0]["status"] == "S"
+
+
 # WorkBuddy --output-dir data/jas_out --skip-reports still writes the Desktop HR pack.
 def test_internal_output_dir_and_skip_reports_redirect_to_desktop(tmp_path, monkeypatch, capsys) -> None:
     jas_dir = tmp_path / "job"

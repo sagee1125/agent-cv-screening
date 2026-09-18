@@ -3,6 +3,7 @@ from screening_core.posts import (
     base_name,
     group_by_post,
     mentioned_in_post_title,
+    post_counts,
     post_key,
     post_of,
 )
@@ -83,3 +84,27 @@ def test_group_by_post_separates_rows_with_no_post() -> None:
 def test_post_universe_is_derived_from_applicants_only() -> None:
     grouping = group_by_post([{"appno": "1", "post": "Research Assistant"}], multi_post=True)
     assert grouping.labels == ["Research Assistant"]
+
+
+# The post list counts applicants per post, keyed exactly as the board's groups are keyed, so the
+# counts always agree with the sections HR reads (PRD Section 6, FR-11).
+def test_post_counts_reports_per_post_totals() -> None:
+    rows = [
+        {"appno": "1", "post": "Research Associate"},
+        {"appno": "2", "post": "Research Assistant"},
+        {"appno": "3", "post": "research associate"},
+        {"appno": "4", "post": "   "},
+        {"appno": "5"},
+    ]
+    assert post_counts(rows) == [
+        {"post": "Research Associate", "applicants": 2},
+        {"post": "Research Assistant", "applicants": 1},
+    ]
+
+
+# A single-post page yields no post list at all, so nothing downstream gains an empty dimension.
+def test_post_counts_is_empty_without_a_post() -> None:
+    assert post_counts([]) == []
+    assert post_counts(None) == []
+    assert post_counts([{"appno": "1", "post": None}]) == []
+    assert post_counts([{"appno": "1", "post": "  "}]) == []

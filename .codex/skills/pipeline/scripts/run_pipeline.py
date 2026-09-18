@@ -1263,18 +1263,26 @@ def _generate_reports(
     return reports
 
 
-# Summarise the post dimension for the manifest: one entry per post with its applicant count
-# and top score, plus the rows that could not be placed (FR-7).
+# Summarise the post dimension for the manifest: one entry per post with its applicant count,
+# its top applicant and score, plus the rows that could not be placed (FR-7, FR-11).
 def _post_summary(rows: list[dict], unassigned: list[dict]) -> dict:
     """Return the manifest's post dimension: per-post counts plus needs-confirmation rows."""
     grouping = group_by_post(rows, multi_post=True)
     posts = []
     for group in grouping.groups:
         scores = [r.get("total_score") for r in group.rows if isinstance(r.get("total_score"), (int, float))]
+        # The top of the post, never the top of the run: a rank is only meaningful inside its own
+        # post, so the reply names each post's best applicant without comparing posts (FR-5).
+        ranked = sorted(
+            group.rows,
+            key=lambda r: r.get("rank") if isinstance(r.get("rank"), int) else len(group.rows) + 1,
+        )
+        best = next((r for r in ranked if isinstance(r.get("total_score"), (int, float))), None)
         posts.append(
             {
                 "post": group.label,
                 "applicants": len(group.rows),
+                "top_appno": best.get("appno") if best else None,
                 "top_score": max(scores) if scores else None,
             }
         )

@@ -41,6 +41,7 @@ from screening_core.hr_output import (
 )
 from screening_core.job_state import load_job_state, record_screen_run, save_job_state, score_snapshot
 from screening_core.demo_mode import apply_demo_defaults
+from screening_core.posts import post_counts
 from screening_core.report_fingerprint import FINGERPRINTS_NAME
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
@@ -323,9 +324,18 @@ def _build_manifest(
     download_failures: list[dict] | None = None,
 ) -> dict:
     status_by_appno = {candidate["appno"]: candidate.get("status") for candidate in job.get("candidates", [])}
+    post_by_appno = {candidate["appno"]: candidate.get("post") for candidate in job.get("candidates", [])}
     known_appnos = {candidate["appno"] for candidate in job.get("candidates", [])}
     entries = [
-        {"appno": appno, "status": status_by_appno.get(appno), "cv_path": str(path)}
+        # None on a single-post job, so a mapped key always has a field to land in (FR-2). The
+        # post is recorded here because an applicant whose CV failed to parse has no pipeline row
+        # to read it from, and the envelope still has to name their post.
+        {
+            "appno": appno,
+            "status": status_by_appno.get(appno),
+            "post": post_by_appno.get(appno),
+            "cv_path": str(path),
+        }
         for appno, path in cvs
     ]
     missing_cv = sorted(known_appnos - {appno for appno, _ in cvs})
@@ -336,6 +346,17 @@ def _build_manifest(
         "candidates": entries,
         "candidates_without_cv": missing_cv,
     }
+    # The post list with per-post applicant counts (PRD Section 6), present only when the records
+    # page states a post: a single-post job keeps exactly its previous manifest shape.
+    #
+    # Counted over the page's candidates, not over `entries`: this manifest describes the JAS page,
+    # so its counts must answer "how many applied for each post", which is why an applicant listed
+    # in candidates_without_cv is still counted here. The pipeline manifest counts what it actually
+    # scored, and the two are deliberately different questions.
+    posts = post_counts(job.get("candidates"))
+    if posts:
+        manifest["multi_post"] = bool((job.get("job") or {}).get("multi_post"))
+        manifest["posts"] = posts
     if download_failures:
         manifest["download_failures"] = download_failures
     return manifest

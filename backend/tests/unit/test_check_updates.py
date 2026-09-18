@@ -430,3 +430,162 @@ def test_check_wrong_job_reports_not_found(tmp_path, monkeypatch, capsys) -> Non
     assert payload["status"] == "error"
     assert payload["error_code"] == "not_found"
     assert "260806012" in payload["error_message"]
+
+
+def _multi_post_payload(posts: dict) -> dict:
+    """Build a multi-post JAS payload from an ordered {appno: post} mapping."""
+    payload = _job_payload()
+    payload["job"] = {**payload["job"], "multi_post": True}
+    payload["candidates"] = [
+        {"appno": appno, "status": "S", "cv_url": None, "post": post}
+        for appno, post in posts.items()
+    ]
+    return payload
+
+
+# Runs two consecutive checks against the given payloads and returns the second payload.
+def _second_check(payloads: list, tmp_path, monkeypatch, capsys, module) -> dict:
+    """Run the check twice over the given payloads and return the second run's payload."""
+    calls = {"n": 0}
+
+    async def fake_fetch(url, cookie_file=None, base_url=None, allowed_hosts=None):
+        payload = payloads[min(calls["n"], len(payloads) - 1)]
+        calls["n"] += 1
+        return payload
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    state_dir = str(tmp_path / "state")
+    _run(module, ["260818001", "--state-dir", state_dir], monkeypatch, capsys)
+    exit_code, out, _ = _run(module, ["260818001", "--state-dir", state_dir], monkeypatch, capsys)
+    assert exit_code == 0
+    return json.loads(out)
+
+
+# A re-assignment is reported as a change in the post dimension, not as no change at all (FR-12).
+def test_check_reports_a_post_re_assignment(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    payload = _second_check(
+        [
+            _multi_post_payload({"123456": "Research Assistant", "654321": "Research Associate"}),
+            _multi_post_payload({"123456": "Research Associate", "654321": "Research Associate"}),
+        ],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        module,
+    )
+    # The roster, the applicant count and every status are identical, so only the post
+    # dimension can carry this change.
+    assert payload["changes"]["added"] == [] and payload["changes"]["removed"] == []
+    assert payload["changes"]["status_changed"] == {}
+    assert payload["changes"]["jd_changed"] is False
+    assert payload["has_changes"] is True
+    assert payload["changes"]["post_changed"] == {
+        "123456": {"from": "Research Assistant", "to": "Research Associate"}
+    }
+
+
+# The check reports per-post counts and which post each new applicant is in (FR-11, FR-12).
+def test_check_reports_per_post_counts_and_new_applicants(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    payload = _second_check(
+        [
+            _multi_post_payload({"123456": "Research Assistant"}),
+            _multi_post_payload({"123456": "Research Assistant", "999888": "Research Associate"}),
+        ],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        module,
+    )
+    assert payload["posts"] == [
+        {"post": "Research Assistant", "applicants": 1},
+        {"post": "Research Associate", "applicants": 1},
+    ]
+    assert payload["changes"]["added"] == ["999888"]
+    assert payload["changes"]["added_posts"] == {"999888": "Research Associate"}
+
+
+# A post left with no applicant is reported as having disappeared (FR-12).
+def test_check_reports_a_post_disappearing(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    payload = _second_check(
+        [
+            _multi_post_payload({"123456": "Research Assistant", "654321": "Research Associate"}),
+            _multi_post_payload({"123456": "Research Assistant"}),
+        ],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        module,
+    )
+    assert payload["changes"]["removed"] == ["654321"]
+    assert payload["changes"]["removed_posts"] == {"654321": "Research Associate"}
+    assert payload["changes"]["posts_disappeared"] == ["Research Associate"]
+    assert payload["changes"]["posts_appeared"] == []
+
+
+# A multi-post page that never stated a row's post asks HR to rule on it (FR-7).
+def test_check_reports_an_unreadable_post_for_confirmation(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    payload = _second_check(
+        [
+            _multi_post_payload({"123456": "Research Assistant", "654321": None}),
+            _multi_post_payload({"123456": "Research Assistant", "654321": None}),
+        ],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        module,
+    )
+    assert payload["needs_confirmation"] == [{"appno": "654321", "post": None}]
+    assert payload["posts"] == [{"post": "Research Assistant", "applicants": 1}]
+
+
+# A single-post page reports no post dimension at all, so nothing changes for it.
+def test_check_single_post_page_has_no_post_dimension(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    payload = _second_check(
+        [_job_payload(), _job_payload()], tmp_path, monkeypatch, capsys, module
+    )
+    assert payload["posts"] == []
+    assert payload["needs_confirmation"] == []
+    assert payload["has_changes"] is False
+
+
+# A baseline stored before the post dimension existed must not read as every post appearing.
+def test_check_without_a_post_baseline_reports_no_appearance(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    from screening_core.job_state import current_snapshot, save_job_state
+
+    state_dir = tmp_path / "state"
+    job = _multi_post_payload({"123456": "Research Assistant", "654321": "Research Associate"})
+    # Reproduce a state file written before this change: the same snapshot, minus the post key.
+    baseline = current_snapshot(job)
+    baseline.pop("posts")
+    save_job_state(
+        state_dir,
+        "260818001",
+        {
+            "schema_version": "job-state-v1",
+            "refno": "260818001",
+            "last_check": {"at": "2026-09-01T10:00:00+08:00", **baseline},
+            "history": [],
+        },
+    )
+
+    async def fake_fetch(url, cookie_file=None, base_url=None, allowed_hosts=None):
+        return job
+
+    monkeypatch.setattr(module, "fetch_job_payload", fake_fetch)
+    exit_code, out, _ = _run(module, ["260818001", "--state-dir", str(state_dir)], monkeypatch, capsys)
+    assert exit_code == 0
+    payload = json.loads(out)
+    assert payload["changes"]["posts_appeared"] == []
+    assert payload["changes"]["posts_disappeared"] == []
+    # The counts are still reported, but nothing is claimed to have changed.
+    assert payload["posts"] == [
+        {"post": "Research Assistant", "applicants": 1},
+        {"post": "Research Associate", "applicants": 1},
+    ]
+    assert payload["has_changes"] is False

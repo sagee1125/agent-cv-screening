@@ -399,3 +399,148 @@ def test_project_conditions_pending_without_post_deltas_is_unchanged() -> None:
 
     assert envelope["ask"]["conditions"]["must_skills"] == ["Python"]
     assert "post_deltas" not in envelope["ask"]
+
+
+# A multi-post screen envelope states each post's count and top applicant, and each row's post.
+def test_project_multi_post_carries_the_post_dimension() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260907003",
+            "engine": "matching",
+            "candidates": [
+                {
+                    "rank": 1,
+                    "appno": "111111",
+                    "total_score": 73.23,
+                    "tier": "medium",
+                    "post": "Research Assistant",
+                },
+                {
+                    "rank": 1,
+                    "appno": "222222",
+                    "total_score": 68.0,
+                    "tier": "medium",
+                    "post": "Research Associate",
+                },
+            ],
+            "posts": [
+                {"post": "Research Assistant", "applicants": 3, "top_appno": "111111", "top_score": 73.23},
+                {"post": "Research Associate", "applicants": 2, "top_appno": "222222", "top_score": 68.0},
+            ],
+            "needs_confirmation": [{"appno": "333333", "post": "Reserch Assistant"}],
+        },
+        jas_session="granted",
+    )
+
+    assert validate_envelope(envelope) == []
+    assert envelope["status"] == "success"
+    # Both rows carry rank 1, because a rank is only meaningful inside its own post (FR-5).
+    assert [row["rank"] for row in envelope["ranking"]] == [1, 1]
+    assert [row["post"] for row in envelope["ranking"]] == [
+        "Research Assistant",
+        "Research Associate",
+    ]
+    assert envelope["posts"]["groups"] == [
+        {"post": "Research Assistant", "applicants": 3, "top_appno": "111111", "top_score": 73.23},
+        {"post": "Research Associate", "applicants": 2, "top_appno": "222222", "top_score": 68.0},
+    ]
+    # The unreadable post reaches HR as it appeared on the page, never replaced by a guess (FR-7).
+    assert envelope["posts"]["needs_confirmation"] == [
+        {"appno": "333333", "post": "Reserch Assistant"}
+    ]
+
+
+# A failed applicant has no pipeline row, so their post comes from the records page.
+def test_project_failed_applicant_keeps_its_post() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "partial_success",
+            "refno": "260907003",
+            "failures": [{"appno": "111111", "stage": "cv-parse"}],
+        },
+        jas_manifest={
+            "refno": "260907003",
+            "candidates": [{"appno": "111111", "status": "S", "post": "Research Assistant"}],
+        },
+        jas_session="granted",
+    )
+
+    assert validate_envelope(envelope) == []
+    assert envelope["ranking"][0]["parse_failed"] is True
+    assert envelope["ranking"][0]["post"] == "Research Assistant"
+
+
+# A single-post screen envelope keeps the post dimension null and the row shape it always had.
+def test_project_single_post_has_no_post_dimension() -> None:
+    payload = json.loads(EXAMPLE_STDOUT.read_text(encoding="utf-8"))
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload=payload,
+        jas_manifest=json.loads(EXAMPLE_JAS.read_text(encoding="utf-8")),
+    )
+
+    assert validate_envelope(envelope) == []
+    assert envelope["posts"] is None
+    assert envelope["ranking"][0]["post"] is None
+
+
+# The check_updates envelope carries the post dimension and the post change keys (FR-12).
+def test_project_check_updates_carries_the_post_dimension() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={
+            "status": "success",
+            "refno": "260907003",
+            "candidate_count": 2,
+            "has_changes": True,
+            "first_check": False,
+            "changes": {
+                "jd_changed": False,
+                "added": [],
+                "removed": [],
+                "status_changed": {},
+                "post_changed": {
+                    "111111": {"from": "Research Assistant", "to": "Research Associate"}
+                },
+                "added_posts": {},
+                "removed_posts": {},
+                "posts_appeared": ["Research Associate"],
+                "posts_disappeared": [],
+            },
+            "posts": [
+                {"post": "Research Assistant", "applicants": 1},
+                {"post": "Research Associate", "applicants": 1},
+            ],
+            "needs_confirmation": [],
+        },
+    )
+
+    assert validate_envelope(envelope) == []
+    assert envelope["has_changes"] is True
+    assert envelope["changes"]["post_changed"] == {
+        "111111": {"from": "Research Assistant", "to": "Research Associate"}
+    }
+    assert envelope["changes"]["posts_appeared"] == ["Research Associate"]
+    # An update check knows the counts but not the scores, which only a screen produces.
+    assert envelope["posts"]["groups"] == [
+        {"post": "Research Assistant", "applicants": 1, "top_appno": None, "top_score": None},
+        {"post": "Research Associate", "applicants": 1, "top_appno": None, "top_score": None},
+    ]
+
+
+# A post label that looks like markup is still caught before it can reach the conversation.
+def test_forbidden_post_label_rejects_the_envelope() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260907003",
+            "posts": [{"post": "<html>Research Assistant", "applicants": 1}],
+        },
+    )
+
+    assert envelope["status"] == "error"
+    assert envelope["error_code"] == "envelope_rejected"

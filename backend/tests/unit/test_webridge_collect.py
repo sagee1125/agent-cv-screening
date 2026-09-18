@@ -110,6 +110,48 @@ def test_collect_http_driver_writes_folder(tmp_path, monkeypatch) -> None:
     assert manifest["post_title"] == "Senior Software Engineer"
     assert manifest["candidates"][0]["status"] == "TBC"
     assert manifest["cv_downloaded"] == ["2600827004"]
+    # A single-post page gains the null post key and no post list (PRD Section 6).
+    assert manifest["candidates"][0]["post"] is None
+    assert "posts" not in manifest
+
+
+# A multi-post page carries the post per candidate and the per-post counts (PRD Section 6).
+def test_collect_multi_post_manifest_carries_the_post_dimension(tmp_path, monkeypatch) -> None:
+    from jas_import import mock
+
+    html = mock.mock_records_html("260818001", multi_post=True)
+
+    async def fake_fetch_html(url, cookie_file=None, allowed_hosts=None):
+        return html
+
+    async def fake_download_to(url, dest, cookie_file=None, allowed_hosts=None):
+        Path(dest).write_bytes(b"%PDF")
+        return Path(dest)
+
+    monkeypatch.setattr(collect._jas_fetch, "fetch_html", fake_fetch_html)
+    monkeypatch.setattr(collect._jas_fetch, "download_to", fake_download_to)
+
+    folder = tmp_path / "job"
+    manifest = collect.collect_job(
+        records_url="https://jes-web-demo.vercel.app/records.html?refno=260818001",
+        folder=folder,
+        driver="http",
+        base_url=DEMO_BASE_URL,
+        allowed_hosts=ALLOWED,
+    )
+
+    assert manifest["multi_post"] is True
+    assert manifest["posts"] == [
+        {"post": "Project Associate", "applicants": 1},
+        {"post": "Project Assistant", "applicants": 1},
+    ]
+    assert [candidate["post"] for candidate in manifest["candidates"]] == [
+        "Project Associate",
+        "Project Assistant",
+    ]
+    # The folder on disk is still one folder per refno, and the manifest matches what was returned.
+    on_disk = json.loads((folder / collect.MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert on_disk["posts"] == manifest["posts"]
 
 
 # The WebBridge driver simulates a human (list page -> View link) and writes the same folder layout.

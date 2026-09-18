@@ -186,3 +186,102 @@ def test_record_screen_run_without_scores_keeps_entry_shape(tmp_path) -> None:
         at="2026-08-31T10:00:00+08:00",
     )
     assert "scores" not in state["history"][-1]
+
+
+# A multi-post page records each applicant's post; a single-post page records none (FR-12).
+def test_current_snapshot_records_post_only_when_the_page_has_one() -> None:
+    assert "posts" not in current_snapshot(JOB)
+    multi_post = {
+        **JOB,
+        "candidates": [
+            {"appno": "2600827001", "status": "S", "post": "Research Assistant (Full-time)"},
+            {"appno": "2600827002", "status": "P", "post": None},
+        ],
+    }
+    assert current_snapshot(multi_post)["posts"] == {
+        "2600827001": "Research Assistant (Full-time)"
+    }
+
+
+# A re-assignment changes no count and no status, so only the post dimension can report it (FR-12).
+def test_diff_snapshots_reports_a_re_assignment() -> None:
+    prev = {"jd": "abc", "candidates": {"1": "S"}, "posts": {"1": "Research Assistant"}}
+    curr = {"jd": "abc", "candidates": {"1": "S"}, "posts": {"1": "Research Associate"}}
+    diff = diff_snapshots(prev, curr)
+    assert diff["jd_changed"] is False
+    assert diff["added"] == [] and diff["removed"] == [] and diff["status_changed"] == {}
+    assert diff["post_changed"] == {
+        "1": {"from": "Research Assistant", "to": "Research Associate"}
+    }
+    assert has_changes(diff) is True
+
+
+# A new applicant is reported with the post they applied for, and a withdrawn one with theirs.
+def test_diff_snapshots_reports_which_post_each_mover_is_in() -> None:
+    prev = {"jd": "abc", "candidates": {"1": "S"}, "posts": {"1": "Research Assistant"}}
+    curr = {
+        "jd": "abc",
+        "candidates": {"1": "S", "2": "TBC"},
+        "posts": {"1": "Research Assistant", "2": "Research Associate"},
+    }
+    diff = diff_snapshots(prev, curr)
+    assert diff["added"] == ["2"]
+    assert diff["added_posts"] == {"2": "Research Associate"}
+    assert diff["removed"] == [] and diff["removed_posts"] == {}
+
+
+# A post that appeared or disappeared is reported on its own (FR-12).
+def test_diff_snapshots_reports_posts_appearing_and_disappearing() -> None:
+    prev = {"jd": "abc", "candidates": {"1": "S"}, "posts": {"1": "Research Assistant"}}
+    curr = {"jd": "abc", "candidates": {"1": "S"}, "posts": {"1": "Research Associate"}}
+    diff = diff_snapshots(prev, curr)
+    assert diff["posts_appeared"] == ["Research Associate"]
+    assert diff["posts_disappeared"] == ["Research Assistant"]
+
+
+# A single-post job reports an empty post dimension and is not a change.
+def test_diff_snapshots_post_dimension_is_empty_without_posts() -> None:
+    diff = diff_snapshots(
+        {"jd": "abc", "candidates": {"1": "S"}}, {"jd": "abc", "candidates": {"1": "S"}}
+    )
+    assert diff["post_changed"] == {}
+    assert diff["added_posts"] == {} and diff["removed_posts"] == {}
+    assert diff["posts_appeared"] == [] and diff["posts_disappeared"] == []
+    assert has_changes(diff) is False
+
+
+# has_changes treats a post-only difference as a change (FR-12).
+def test_has_changes_covers_the_post_dimension() -> None:
+    empty = {"jd_changed": False, "added": [], "removed": [], "status_changed": {}}
+    assert has_changes(empty) is False
+    assert has_changes({**empty, "post_changed": {"1": {"from": "A", "to": "B"}}}) is True
+    assert has_changes({**empty, "posts_appeared": ["A"]}) is True
+    assert has_changes({**empty, "posts_disappeared": ["A"]}) is True
+
+
+# A baseline written before the post dimension existed is not a change: there is nothing to
+# compare, so no post is reported as having appeared.
+def test_diff_snapshots_without_a_post_baseline_reports_no_appearance() -> None:
+    prev = {"jd": "abc", "candidates": {"1": "S"}}
+    curr = {"jd": "abc", "candidates": {"1": "S"}, "posts": {"1": "Research Assistant"}}
+    diff = diff_snapshots(prev, curr)
+    assert diff["posts_appeared"] == [] and diff["posts_disappeared"] == []
+    assert diff["post_changed"] == {}
+    assert has_changes(diff) is False
+
+
+# A recorded check keeps the post dimension, so a later check can still see a re-assignment.
+def test_record_check_stores_the_post_dimension(tmp_path) -> None:
+    job = {
+        **JOB,
+        "candidates": [{"appno": "2600827001", "status": "S", "post": "Research Assistant"}],
+    }
+    state = record_check(
+        tmp_path / "state",
+        "2600827001",
+        job=job,
+        result="no_change",
+        changes={"jd_changed": False, "added": [], "removed": [], "status_changed": {}},
+        at="2026-08-31T10:00:00+08:00",
+    )
+    assert state["last_check"]["posts"] == {"2600827001": "Research Assistant"}
