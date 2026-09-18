@@ -533,6 +533,20 @@ def test_board_row_publishes_only_allowlisted_question_variables(tmp_path) -> No
     assert questions[2] == {"priority": "low", "question": "Legacy plain question."}
 
 
+# A CV link the application number does not identify must not reach the board row, because the
+# page's own file name can carry the candidate's name (measured: .../uploads/CV_<Given>_<Surname>.pdf).
+def test_board_row_drops_a_cv_link_that_names_the_candidate() -> None:
+    module = _import_pipeline()
+    named = {"123456": "https://jobs.polyu.edu.hk/uploads/CV_Hana_Ito.pdf"}
+    assert "resume_url" not in module._board_row({"rank": 1, "appno": "123456"}, named)
+    # The appno-identified shapes the report may link still come through.
+    for url in (
+        "https://host/uploads/123456.pdf",
+        "https://host/file.php?t=cv&id=123456&refno=260917001",
+    ):
+        assert module._board_row({"rank": 1, "appno": "123456"}, {"123456": url})["resume_url"] == url
+
+
 # Stored HR conditions must not be applied until the current conversation confirms them.
 def test_pipeline_asks_before_reusing_stored_conditions(tmp_path, monkeypatch, capsys) -> None:
     """A fresh run for a job with saved conditions returns conditions_pending, not scores."""

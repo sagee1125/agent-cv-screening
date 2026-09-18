@@ -36,7 +36,7 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from jd_parser.post_split import PostSplit, split_advertisement
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
 from screening_core.board_tooltip import public_radar_dimensions
-from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem, safe_http_url
+from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem, cv_link_for_appno
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
     extra_allowed_hosts_from_env,
@@ -1015,7 +1015,9 @@ PUBLIC_QUESTION_VARIABLE_KEYS = frozenset({"requirement", "skill", "context"})
 def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
     public = {key: value for key, value in row.items() if not str(key).startswith("_")}
     if resume_links and row.get("appno"):
-        resume_url = safe_http_url(resume_links.get(str(row.get("appno"))))
+        # Only a link the application number identifies may reach HR-facing HTML: the page's own CV
+        # file name can carry the candidate's name, and a name in an href is a name in the report.
+        resume_url = cv_link_for_appno(resume_links.get(str(row.get("appno"))), row.get("appno"))
         if resume_url:
             public["resume_url"] = resume_url
     detail_path = row.get("_detail")

@@ -5,6 +5,7 @@ from screening_core.hr_output import (
     HR_PACK_FOLDER,
     RANKING_OVERVIEW_HTML,
     candidate_match_stem,
+    cv_link_for_appno,
     default_hr_pack_root,
     is_internal_output_dir,
     pipeline_work_dir,
@@ -87,3 +88,46 @@ def test_open_hr_file_skips_missing(tmp_path) -> None:
     from screening_core.hr_output import open_hr_file
 
     open_hr_file(tmp_path / "missing.html")
+
+
+# A CV file name that carries the candidate's name must never reach HR-facing HTML.
+# Measured on the demo page: every CV link is .../uploads/CV_<Given>_<Surname>.pdf.
+def test_cv_link_drops_a_file_name_that_carries_the_name() -> None:
+    url = "https://jobs.polyu.edu.hk/uploads/CV_Hana_Ito.pdf"
+    assert cv_link_for_appno(url, "260907004") == ""
+
+
+# A file that names the appno *and* the candidate is refused too, so the gate cannot be
+# walked around by a page that appends the number to a name.
+def test_cv_link_drops_a_file_name_that_carries_both() -> None:
+    assert cv_link_for_appno("https://host/uploads/CV_260907004_Hana_Ito.pdf", "260907004") == ""
+    assert cv_link_for_appno("https://host/uploads/CV_Hana_Ito_260907004.pdf", "260907004") == ""
+
+
+# An appno-named file is what the report may link, and it keeps working.
+def test_cv_link_keeps_an_appno_named_file() -> None:
+    for url in (
+        "https://example.test/cvs/260901007.pdf",
+        "https://host/uploads/260907004.pdf",
+        "https://host/uploads/CV_260907004.pdf",
+    ):
+        appno = "260901007" if "260901007" in url else "260907004"
+        assert cv_link_for_appno(url, appno) == url
+
+
+# The real JAS shape identifies the CV by query value, and names nobody in the path.
+def test_cv_link_keeps_a_query_identified_url() -> None:
+    url = "https://jobs.polyu.edu.hk/file.php?t=cv&id=260907004&refno=260917001"
+    assert cv_link_for_appno(url, "260907004") == url
+    # A different applicant's link is not this row's link.
+    assert cv_link_for_appno(url, "260907005") == ""
+
+
+# The gate fails closed: an unrecognised but harmless file name loses the link rather than
+# risk publishing a name, and an unusable URL or a missing appno yields no link at all.
+def test_cv_link_fails_closed() -> None:
+    assert cv_link_for_appno("https://host/uploads/scan_of_resume.pdf", "260907004") == ""
+    assert cv_link_for_appno("https://host/uploads/260907004.pdf", "") == ""
+    assert cv_link_for_appno("", "260907004") == ""
+    assert cv_link_for_appno("javascript:alert(1)", "260907004") == ""
+    assert cv_link_for_appno(None, "260907004") == ""

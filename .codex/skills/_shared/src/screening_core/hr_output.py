@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 HR_PACK_FOLDER = "workbuddy-cv-screen"
 PIPELINE_SUBDIR = "_pipeline"
@@ -135,6 +135,43 @@ def safe_http_url(value: object) -> str:
     return text
 
 
+# A run of letters inside a file name, used to spot a personal name that is not the application no.
+_ALPHA_RUN_RE = re.compile(r"[A-Za-z]+")
+
+
+# Return the CV URL only when the **application number** is what identifies it, else "".
+#
+# The JAS CV link is built from the candidate's own uploaded file name, and that name can carry the
+# candidate's name (measured: `.../uploads/CV_<Given>_<Surname>.pdf`). A name inside an `href` is a
+# name in the delivered HTML, and a report identifies candidates by `refno`/`appno` alone, so a link
+# whose identity is anything other than the application number is dropped instead of rendered.
+#
+# Two shapes are accepted, and nothing else:
+#   * query-identified, e.g. `file.php?t=cv&id=<appno>&refno=<refno>` - the appno is a query value
+#     and the path is the serving script, which names nobody;
+#   * path-identified, e.g. `cvs/<appno>.pdf` - the file name carries the appno and no other word of
+#     three or more letters, so `CV_<appno>.pdf` passes while `CV_<Given>_<Surname>.pdf` and even
+#     `CV_<appno>_<Surname>.pdf` do not.
+#
+# It fails closed: an unrecognised but harmless file name loses its link rather than risk a name,
+# which is the right direction for a privacy gate. Callers render their own "no link" state.
+def cv_link_for_appno(value: object, appno: object) -> str:
+    url = safe_http_url(value)
+    identifier = str(appno or "").strip()
+    if not url or not identifier:
+        return ""
+    parsed = urlparse(url)
+    for part in parsed.query.split("&"):
+        if part.partition("=")[2].strip() == identifier:
+            return url
+    stem = Path(unquote(parsed.path)).stem
+    if not re.search(rf"(?<![0-9A-Za-z]){re.escape(identifier)}(?![0-9A-Za-z])", stem):
+        return ""
+    if any(len(run) >= 3 for run in _ALPHA_RUN_RE.findall(stem)):
+        return ""
+    return url
+
+
 # Open an HR file with the OS default app (browser for HTML).
 def open_hr_file(path: Path | str) -> None:
     target = Path(path)
@@ -155,6 +192,7 @@ __all__ = [
     "RANKING_OVERVIEW_HTML",
     "RESUME_LINKS_JSON",
     "candidate_match_stem",
+    "cv_link_for_appno",
     "default_hr_pack_root",
     "is_host_session_dir",
     "is_internal_output_dir",
