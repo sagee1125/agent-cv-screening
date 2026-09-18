@@ -430,3 +430,110 @@ def test_gate_lets_an_explicit_discard_past_an_unreadable_file(tmp_path: Path) -
     module._require_conditions_decision(
         argparse.Namespace(_discard_conditions=True), out_dir
     )
+
+
+# Builds a two-applicant, two-post out_dir plus the args a re-run would pass.
+def _resync_fixture(tmp_path: Path) -> tuple[Path, dict, Any]:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    jd = tmp_path / "jd.txt"
+    jd.write_text("role A", encoding="utf-8")
+    cvs = {}
+    for appno in ("260907001", "260907002"):
+        path = tmp_path / f"{appno}.pdf"
+        path.write_bytes(b"%PDF-1.4 " + appno.encode())
+        cvs[appno] = path
+        for prefix in ("extracted-", "score-", "detail-"):
+            (out_dir / f"{prefix}{appno}.json").write_text("{}", encoding="utf-8")
+    (out_dir / "jd-parse.json").write_text("{}", encoding="utf-8")
+
+    def args_for(posts: dict[str, str]) -> argparse.Namespace:
+        return argparse.Namespace(
+            resume=True,
+            engine="matching",
+            position="PA",
+            refno="1",
+            jd_file=str(jd),
+            jd_json=None,
+            cv=[str(p) for p in cvs.values()],
+            extracted=[],
+            cv_post=[f"{appno}={label}" for appno, label in posts.items()],
+        )
+
+    return out_dir, {"args_for": args_for, "cvs": cvs}, module
+
+
+# FR-10, at the level that actually matters: when one applicant changes post, the other group's
+# artifacts must survive untouched. Asserting only that the moved applicant was rebuilt would pass
+# even if every CV in every group had been re-parsed, which is the bug FR-10 exists to remove.
+def test_resync_keeps_the_untouched_group_cached(tmp_path: Path) -> None:
+    out_dir, fixture, module = _resync_fixture(tmp_path)
+    args_for = fixture["args_for"]
+    before = {"260907001": "Research Assistant", "260907002": "Research Associate"}
+
+    # A first run establishes the baseline fingerprint.
+    first = args_for(before)
+    module._sync_resume_with_inputs(first, out_dir)
+    module._persist_fingerprints(out_dir, first)
+
+    # A re-run finds one applicant moved to the other post; the advertisement is unchanged.
+    moved = args_for({"260907001": "Research Assistant", "260907002": "Research Assistant"})
+    module._sync_resume_with_inputs(moved, out_dir)
+
+    # The run still resumes, so nothing is re-parsed wholesale and the JD parse survives.
+    assert moved.resume is True
+    assert (out_dir / "jd-parse.json").is_file()
+    # The moved applicant keeps their parsed CV but loses the score computed against the old post.
+    assert (out_dir / "extracted-260907002.json").is_file()
+    assert not (out_dir / "score-260907002.json").exists()
+    assert not (out_dir / "detail-260907002.json").exists()
+    # The untouched group is left completely alone.
+    assert (out_dir / "extracted-260907001.json").is_file()
+    assert (out_dir / "score-260907001.json").is_file()
+    assert (out_dir / "detail-260907001.json").is_file()
+
+
+# The other FR-10 trigger: a replaced CV rebuilds that applicant only. Their score goes with it,
+# and the group that did not change keeps every artifact.
+def test_resync_rebuilds_only_the_replaced_cv(tmp_path: Path) -> None:
+    out_dir, fixture, module = _resync_fixture(tmp_path)
+    args_for = fixture["args_for"]
+    posts = {"260907001": "Research Assistant", "260907002": "Research Associate"}
+
+    first = args_for(posts)
+    module._sync_resume_with_inputs(first, out_dir)
+    module._persist_fingerprints(out_dir, first)
+
+    fixture["cvs"]["260907002"].write_bytes(b"%PDF-1.4 revised")
+    second = args_for(posts)
+    module._sync_resume_with_inputs(second, out_dir)
+
+    assert second.resume is True
+    assert (out_dir / "jd-parse.json").is_file()
+    assert not (out_dir / "extracted-260907002.json").exists()
+    assert not (out_dir / "score-260907002.json").exists()
+    assert (out_dir / "extracted-260907001.json").is_file()
+    assert (out_dir / "score-260907001.json").is_file()
+    assert (out_dir / "detail-260907001.json").is_file()
+
+
+# A changed advertisement still invalidates everything: a post's requirements can move between
+# posts when the ad is rewritten, so FR-10's "only one group changed" does not apply.
+def test_resync_still_rebuilds_everything_when_the_ad_changes(tmp_path: Path) -> None:
+    out_dir, fixture, module = _resync_fixture(tmp_path)
+    args_for = fixture["args_for"]
+    posts = {"260907001": "Research Assistant", "260907002": "Research Associate"}
+
+    first = args_for(posts)
+    module._sync_resume_with_inputs(first, out_dir)
+    module._persist_fingerprints(out_dir, first)
+
+    Path(first.jd_file).write_text("role A, revised", encoding="utf-8")
+    second = args_for(posts)
+    module._sync_resume_with_inputs(second, out_dir)
+
+    # Resume off is the guarantee that matters: every reuse site is gated on `args.resume and
+    # _is_usable_json(...)`, so the surviving score files below are inert rather than reused.
+    assert second.resume is False
+    assert not (out_dir / "jd-parse.json").exists()

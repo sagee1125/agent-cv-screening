@@ -93,24 +93,39 @@ def input_run_payload(
         # run must not reuse scores that were computed with conditions applied.
         "overrides_applied": bool(apply_overrides),
         "cvs": dict(sorted(cv_hashes.items())),
-        # Which post each applicant was scored against. An applicant re-assigned to another
-        # post is scored against a different JD even though the advertisement and the CV are
-        # unchanged, so this has to take part in invalidation (PRD Section 6). Absent for a
-        # single-post run, where the two sides compare equal and nothing is invalidated.
+        # Which post each applicant was scored against, keyed by the same slug as "cvs". An
+        # applicant re-assigned to another post is scored against a different JD even though the
+        # advertisement and the CV are unchanged, so this has to take part in invalidation (PRD
+        # Section 6) — per slug, through post_changed_slugs, so only that applicant is rebuilt
+        # (FR-10). Absent for a single-post run, where both sides compare equal and nothing is
+        # invalidated.
         "posts": dict(sorted((posts or {}).items())),
     }
 
 
-# True when JD text, scoring engine or the post assignment changed and cached parse/score
-# JSON must not be reused.
+# True when the advertisement text or the scoring engine changed and cached parse/score JSON must
+# not be reused. A post re-assignment is deliberately NOT part of this: it invalidates the score of
+# the applicant who moved, not the whole run, so it is reported separately (FR-10).
 def jd_inputs_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
     prior = previous or {}
     if not prior.get("jd"):
         return False
-    return (
-        prior.get("jd") != current.get("jd")
-        or prior.get("engine") != current.get("engine")
-        or prior.get("posts", {}) != current.get("posts", {})
+    return prior.get("jd") != current.get("jd") or prior.get("engine") != current.get("engine")
+
+
+# Slugs whose post assignment differs between two runs, so their cached score was computed against
+# a JD that no longer applies to them. Compared over the union of both maps: an applicant whose post
+# became unreadable leaves the current map and must still be re-scored. A slug appearing for the
+# first time is included too — it has no cached score, so clearing it is a no-op rather than a bug.
+def post_changed_slugs(previous: dict[str, Any] | None, current: dict[str, Any]) -> list[str]:
+    prior_posts = (previous or {}).get("posts")
+    if not isinstance(prior_posts, dict):
+        return []
+    current_posts = current.get("posts") if isinstance(current.get("posts"), dict) else {}
+    return sorted(
+        str(slug)
+        for slug in set(prior_posts) | set(current_posts)
+        if prior_posts.get(slug) != current_posts.get(slug)
     )
 
 
@@ -188,6 +203,7 @@ __all__ = [
     "jd_inputs_changed",
     "load_fingerprints",
     "overrides_changed",
+    "post_changed_slugs",
     "save_fingerprints",
     "sha256_file",
     "sha256_text",

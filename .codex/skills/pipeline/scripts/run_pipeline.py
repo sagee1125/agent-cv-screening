@@ -71,6 +71,7 @@ from screening_core.report_fingerprint import (
     jd_inputs_changed,
     load_fingerprints,
     overrides_changed,
+    post_changed_slugs,
     save_fingerprints,
     sha256_file,
     sha256_text,
@@ -201,6 +202,14 @@ def _clear_score_artifacts(out_dir: Path) -> None:
     (out_dir / "jd-final.json").unlink(missing_ok=True)
 
 
+# Deletes one candidate's cached score so it is recomputed against their post's JD, keeping their
+# parsed CV: a re-assignment changes which JD applies to them, not the CV itself (FR-10).
+def _clear_score_for_slug(out_dir: Path, slug: str) -> None:
+    """Remove score/detail JSON for one slug, leaving extracted JSON and every other slug alone."""
+    for prefix in ("score-", "detail-"):
+        (out_dir / f"{prefix}{slug}.json").unlink(missing_ok=True)
+
+
 # Delete the per-post effective JDs and their scoring configs so a changed post is rebuilt.
 # Only a multi-post run writes these, so this is a no-op on a single-post job.
 def _clear_post_jd_artifacts(out_dir: Path) -> None:
@@ -218,9 +227,17 @@ def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
     jd_paths: list[Path | str | None] = [getattr(args, "jd_file", None), getattr(args, "jd_json", None)]
     used: set[str] = set()
     cv_hashes: dict[str, str] = {}
+    # --cv-post is keyed by appno, but every cached artifact is keyed by slug. Staged CVs are named
+    # <appno>.pdf, so the file stem is the appno and the two key spaces are aligned here. Without
+    # that, a re-assignment could not be traced to the one artifact it invalidates (FR-10).
+    post_by_appno = _post_map(args)
+    posts: dict[str, str] = {}
     for source in list(args.cv or []) + list(args.extracted or []):
         slug = _unique_slug(str(source), used)
         cv_hashes[slug] = sha256_file(source)
+        label = post_by_appno.get(_safe_name(Path(source).stem))
+        if label:
+            posts[slug] = label
     return input_run_payload(
         engine=getattr(args, "engine", None),
         position=getattr(args, "position", None),
@@ -229,13 +246,15 @@ def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
         cv_hashes=cv_hashes,
         overrides_path=out_dir / OVERRIDES_FILENAME,
         apply_overrides=bool(getattr(args, "_conditions_confirmed", False)),
-        posts=_post_map(args),
+        posts=posts,
     )
 
 
-# Turn off --resume or drop per-CV cache when JD text or a CV file changed.
+# Turn off --resume or drop cached work when the JD, the engine, the conditions, a CV or a post
+# assignment changed. Each input change invalidates the smallest set of artifacts that covers it,
+# so a re-run that touches one post group does not rebuild the others (FR-10).
 def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
-    """Keep --resume only when JD/engine match; rebuild CVs whose bytes changed."""
+    """Keep --resume only when JD/engine match; rebuild only what the changed inputs stale."""
     payload = _input_payload(args, out_dir)
     args._input_payload = payload
     previous = load_fingerprints(out_dir).get("input")
@@ -244,6 +263,9 @@ def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
     if not args.resume:
         return
     if jd_inputs_changed(prior, payload):
+        # The advertisement or the engine changed: no cached parse, score or post JD can be
+        # trusted, so the whole run is rebuilt. FR-10's "only one group changed" does not cover
+        # this case, because a changed advertisement can move requirements between posts.
         args.resume = False
         args._inputs_unchanged = False
         (out_dir / "jd-parse.json").unlink(missing_ok=True)
@@ -256,8 +278,15 @@ def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
         _clear_score_artifacts(out_dir)
         args._inputs_unchanged = False
         return
-    for slug in stale_cv_slugs(prior, payload):
+    stale_cvs = stale_cv_slugs(prior, payload)
+    for slug in stale_cvs:
         _clear_candidate_artifacts(out_dir, slug)
+    # An applicant moved to another post is scored against another post's JD, so their score is
+    # stale even though their CV bytes are not: rebuild the score, reuse the parsed CV (FR-10).
+    moved = [slug for slug in post_changed_slugs(prior, payload) if slug not in set(stale_cvs)]
+    for slug in moved:
+        _clear_score_for_slug(out_dir, slug)
+    if stale_cvs or moved:
         args._inputs_unchanged = False
 
 
