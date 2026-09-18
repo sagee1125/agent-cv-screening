@@ -556,3 +556,43 @@ def test_resync_still_rebuilds_everything_when_the_ad_changes(tmp_path: Path) ->
     # _is_usable_json(...)`, so the surviving score files below are inert rather than reused.
     assert second.resume is False
     assert not (out_dir / "jd-parse.json").exists()
+
+
+# post-jds.json records the requirements an unclaimed post was attributed, because those sentences
+# are excluded from the base and then appear in no rendered artifact: without this the run would
+# drop a requirement and nothing HR can read would say which one (FR-3, FR-4).
+def test_post_jd_payload_records_what_an_unclaimed_post_lost() -> None:
+    from screening_core.post_jds import post_jd_payload
+
+    payload = post_jd_payload(
+        base_jd_json="/tmp/jd-parse.json",
+        base_text="shared bullet",
+        posts=[
+            {
+                "post": "Research Assistant",
+                "slug": "Research_Assistant",
+                "jd_json": None,
+                "delta": [],
+            }
+        ],
+        mentioned=["Research Assistant"],
+        unclaimed=["Research Fellow"],
+        unclaimed_sentences={
+            "Research Fellow": ["Applicants for the Research Fellow post need a PhD."]
+        },
+    )
+
+    assert payload["unclaimed"] == ["Research Fellow"]
+    assert payload["unclaimed_sentences"] == {
+        "Research Fellow": ["Applicants for the Research Fellow post need a PhD."]
+    }
+    # `mentioned` stays scoped to the post universe, so HR is never asked to confirm a derivation
+    # for a post that has no section.
+    assert payload["mentioned"] == ["Research Assistant"]
+    # Always present, so a reader never has to tell "none were dropped" from "not recorded".
+    assert (
+        post_jd_payload(base_jd_json="/tmp/jd-parse.json", base_text="shared", posts=[])[
+            "unclaimed_sentences"
+        ]
+        == {}
+    )

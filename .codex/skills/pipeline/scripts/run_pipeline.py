@@ -533,6 +533,7 @@ def _build_post_jds(
         posts=entries,
         mentioned=split.mentioned,
         unclaimed=split.unclaimed,
+        unclaimed_sentences=split.unclaimed_sentences,
     )
     (out_dir / POST_JDS_NAME).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

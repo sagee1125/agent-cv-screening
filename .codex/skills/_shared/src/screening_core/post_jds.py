@@ -60,6 +60,7 @@ def post_jd_payload(
     posts: list[dict[str, Any]],
     mentioned: Iterable[str] = (),
     unclaimed: Iterable[str] = (),
+    unclaimed_sentences: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Return the post-jds.json payload for a multi-post run."""
     return {
@@ -67,6 +68,12 @@ def post_jd_payload(
         "base": {"jd_json": base_jd_json, "text": base_text},
         # Posts the advertisement describes but nobody applied for: recorded, never rendered.
         "unclaimed": list(unclaimed),
+        # The requirements those posts were attributed. This run excludes them from the base, so
+        # they appear in no other artifact, and a bare name would not say what was dropped (FR-3).
+        "unclaimed_sentences": {
+            str(name): [str(unit) for unit in units]
+            for name, units in (unclaimed_sentences or {}).items()
+        },
         "mentioned": list(mentioned),
         "posts": posts,
     }

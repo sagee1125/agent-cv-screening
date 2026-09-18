@@ -98,6 +98,27 @@ def test_unclaimed_reports_a_post_the_advertisement_names_but_nobody_applied_for
     """A post the advertisement describes with no applicant has no group, so it is recorded, not guessed."""
     split = split_advertisement(SAMPLE, ["Senior Fellow (Full-time)", "Senior Fellow (Part-time)"])
     assert split.unclaimed == ["Research Assistant"]
+    # Its requirements are recorded too, so the exclusion can be audited afterwards.
+    assert split.unclaimed_sentences == {
+        "Research Assistant": [
+            "Applicants for the Research Assistant post should have a bachelor's degree in Physics;"
+        ]
+    }
+
+
+# A requirement the advertisement reserves for a post nobody applied for must not fall through to
+# the shared base: it would then be scored against every post that DID receive applications.
+def test_unclaimed_post_requirement_never_reaches_the_shared_base() -> None:
+    split = split_advertisement(SAMPLE, ["Senior Fellow (Full-time)", "Senior Fellow (Part-time)"])
+
+    assert not any("bachelor's degree in Physics" in unit for unit in split.base_sentences)
+    # Only the claimed post keeps a delta, so HR's per-post derivation is unaffected.
+    assert split.mentioned == ["Senior Fellow"]
+    assert [delta.label for delta in split.deltas] == ["Senior Fellow"]
+    # So the claimed post's effective JD is free of the unclaimed post's requirement.
+    assert "bachelor's degree in Physics" not in split.effective_text("Senior Fellow (Full-time)")
+    # And a bullet naming no post is still shared by everyone.
+    assert any("have experience with Python" in unit for unit in split.base_sentences)
 
 
 def test_post_names_in_returns_the_attributed_names_in_order() -> None:

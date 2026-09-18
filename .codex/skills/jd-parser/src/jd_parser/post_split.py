@@ -64,6 +64,10 @@ class PostSplit:
     # Mentioned by the advertisement but absent from the post universe: no applicant applied
     # for them, so no section is rendered. Recorded as the FR-3 cross-check disagreement.
     unclaimed: list[str] = field(default_factory=list)
+    # The requirement sentences those posts were attributed, keyed by base name. Recorded because
+    # the sentences are excluded from every artifact: without this, a run would silently drop a
+    # requirement and nothing HR can read would say which one.
+    unclaimed_sentences: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def base_text(self) -> str:
@@ -128,10 +132,36 @@ def post_names_in(text: str) -> list[str]:
 
 # Attribute every requirement unit to a post; a unit naming no post stays shared in the base.
 def split_advertisement(text: str, labels: Iterable[str]) -> PostSplit:
-    bases: list[str] = []
+    # Materialised because the labels are walked more than once, and a generator would be spent.
+    labels = list(labels)
+    # No labels is the single-post shape (the pipeline returns before splitting in that case): there
+    # is no post to attribute anything to, so a bullet naming the post is ordinary prose and stays
+    # shared — and nothing can be missing from a universe that does not exist, so nothing is recorded
+    # as unclaimed either. Recording a name while leaving its bullet shared would make the trace lie.
+    if not labels:
+        return PostSplit(base_sentences=split_units(text))
+
+    claimed: list[str] = []
     for label in labels:
         name = base_name(label)
-        if name and not any(name.casefold() == seen.casefold() for seen in bases):
+        if name and not any(name.casefold() == seen.casefold() for seen in claimed):
+            claimed.append(name)
+
+    # A post the advertisement describes but nobody applied for has no group to render; it is
+    # recorded rather than guessed at, because the records page cannot confirm it was an option.
+    unclaimed = [
+        name
+        for name in post_names_in(text)
+        if not any(base_name(label).casefold() == name.casefold() for label in labels)
+    ]
+
+    # Attribution runs over the claimed posts AND the unclaimed ones. Leaving the unclaimed names
+    # out is not a harmless omission: a unit the advertisement reserves for such a post then matches
+    # no base, falls through to the shared base, and every post that DID receive applications is
+    # scored against a requirement that was never theirs (measured 2026-09-18).
+    bases = list(claimed)
+    for name in unclaimed:
+        if not any(name.casefold() == seen.casefold() for seen in bases):
             bases.append(name)
 
     split = PostSplit()
@@ -142,16 +172,16 @@ def split_advertisement(text: str, labels: Iterable[str]) -> PostSplit:
             continue
         for name in hits:
             split.delta_sentences.setdefault(name, []).append(unit)
-            if name not in split.mentioned:
+            # `mentioned` stays scoped to the post universe: it is what HR's per-post derivation is
+            # built from, and an unclaimed post has no group for that answer to apply to.
+            if name in claimed and name not in split.mentioned:
                 split.mentioned.append(name)
 
-    # A post the advertisement describes but nobody applied for has no group to render; it is
-    # recorded rather than guessed at, because the records page cannot confirm it was an option.
-    split.unclaimed = [
-        name
-        for name in post_names_in(text)
-        if not any(base_name(label).casefold() == name.casefold() for label in labels)
-    ]
+    split.unclaimed = unclaimed
+    # What was set aside, so the exclusion can be audited rather than only inferred from a name.
+    split.unclaimed_sentences = {
+        name: list(split.delta_sentences.get(name, [])) for name in unclaimed
+    }
     return split
 
 
