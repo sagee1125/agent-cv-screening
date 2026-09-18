@@ -56,6 +56,13 @@ cross-post comparison would be meaningless:
 > reference number, then open ranking-overview.html. Each PDF is named with the application
 > number. Reports do not list personal privacy data.
 
+If the run reports `unmatched_posts`, the advertisement's title does not mention a post that
+applicants named on their forms. The board shows it above the sections as "Check these post names
+against the advertisement". Mention it in the summary and ask HR to confirm the advertisement and
+the records page describe the same posts — it is a warning, not a failure, and every applicant was
+still scored against their own post's JD. If HR confirms the posts match, re-run with
+`--conditions confirmed` as usual.
+
 Render it in Traditional Chinese when HR wrote in Chinese; keep the post labels exactly as the
 advertisement states them (they are proper names from the ad, not text to translate).
 
