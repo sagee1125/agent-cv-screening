@@ -937,9 +937,9 @@ def _tag_group(label: str, count: int, pills: list[str]) -> str:
     )
 
 
-# Build pill badges for one must/preferred skill list.
-def _skill_pills(items: Any, variant: str) -> list[str]:
-    pills: list[str] = []
+# Build pill badges for one must/preferred skill list as (label, badge HTML) pairs.
+def _skill_pills(items: Any, variant: str) -> list[tuple[str, str]]:
+    pills: list[tuple[str, str]] = []
     for item in items or []:
         if not isinstance(item, dict):
             continue
@@ -950,14 +950,23 @@ def _skill_pills(items: Any, variant: str) -> list[str]:
             continue
         provenance = item.get("provenance")
         pills.append(
-            _tag(label, _source_sentence(provenance), variant, origin=_provenance_origin(provenance))
+            (
+                label,
+                _tag(
+                    label,
+                    _source_sentence(provenance),
+                    variant,
+                    origin=_provenance_origin(provenance),
+                ),
+            )
         )
     return pills
 
 
-# Build pill badges for language requirements, showing level and mandatory state.
-def _language_pills(items: Any) -> list[str]:
-    pills: list[str] = []
+# Build pill badges for language requirements as (label, badge HTML) pairs, with level and
+# mandatory state folded into the label so the label alone identifies the requirement.
+def _language_pills(items: Any) -> list[tuple[str, str]]:
+    pills: list[tuple[str, str]] = []
     for item in items or []:
         if not isinstance(item, dict):
             continue
@@ -971,12 +980,15 @@ def _language_pills(items: Any) -> list[str]:
             label = label + " \u00b7 mandatory"
         provenance = item.get("provenance")
         pills.append(
-            _tag(
+            (
                 label,
-                _source_sentence(provenance),
-                "language",
-                mandatory=mandatory,
-                origin=_provenance_origin(provenance),
+                _tag(
+                    label,
+                    _source_sentence(provenance),
+                    "language",
+                    mandatory=mandatory,
+                    origin=_provenance_origin(provenance),
+                ),
             )
         )
     return pills
@@ -1034,29 +1046,40 @@ def _visa_line(value: Any) -> str:
     )
 
 
+# One (label, rendered HTML, requirement key) entry per parsed-requirements group the JD states.
+# The key is what the group states rather than how it renders: a group's pills can be ordered
+# differently between two parses of the same requirements, because the order comes from the ranking.
+def _parsed_group_parts(parsed: dict | None) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Return the named requirement groups a parsed JD states, in the order the panel shows them."""
+    if not parsed:
+        return []
+    parts: list[tuple[str, str, tuple[str, ...]]] = []
+    for group_label, pairs in (
+        ("Must Skills", _skill_pills(parsed.get("must_skills"), "must")),
+        ("Preferred Skills", _skill_pills(parsed.get("preferred_skills"), "preferred")),
+        ("Language Requirements", _language_pills(parsed.get("language_requirements"))),
+    ):
+        if pairs:
+            parts.append(
+                (
+                    group_label,
+                    _tag_group(group_label, len(pairs), [html for _, html in pairs]),
+                    tuple(sorted(text for text, _ in pairs)),
+                )
+            )
+    for group_label, html in (
+        ("Education", _education_line(parsed.get("education_requirement"))),
+        ("Work authorisation", _visa_line(parsed.get("visa_requirement"))),
+    ):
+        if html:
+            # A single-value line states one thing, so its own rendering is its key.
+            parts.append((group_label, html, (html,)))
+    return parts
+
+
 # Render every parsed-requirements group plus education/visa lines, or empty when none exist.
 def _parsed_groups(parsed: dict | None) -> str:
-    if not parsed:
-        return ""
-    chunks: list[str] = []
-    must = _skill_pills(parsed.get("must_skills"), "must")
-    if must:
-        chunks.append(_tag_group("Must Skills", len(must), must))
-    preferred = _skill_pills(parsed.get("preferred_skills"), "preferred")
-    if preferred:
-        chunks.append(_tag_group("Preferred Skills", len(preferred), preferred))
-    languages = _language_pills(parsed.get("language_requirements"))
-    if languages:
-        chunks.append(_tag_group("Language Requirements", len(languages), languages))
-    chunks.extend(
-        part
-        for part in (
-            _education_line(parsed.get("education_requirement")),
-            _visa_line(parsed.get("visa_requirement")),
-        )
-        if part
-    )
-    return "\n".join(chunks)
+    return "\n".join(html for _, html, _ in _parsed_group_parts(parsed))
 
 
 # Build the JD context panel (collapsible metadata + parsed tags) or empty when no JD inputs are given.
@@ -1143,11 +1166,36 @@ def _needs_confirmation(rows: list[dict[str, Any]]) -> str:
     )
 
 
-# One post's JD panel: the requirements it adds over the shared base, then the parsed
-# requirements of its own effective JD (FR-6.3, FR-4). JD-derived text is contact-scrubbed.
-def _post_jd_panel(label: str, delta: list[str], jd_parsed: dict | None) -> str:
+# A post's effective JD is the base JD plus its delta (FR-4), so most of its tag set is the base's
+# tag set. Repeating it under every post buries the post-specific requirements in text the reader has
+# already read at the top of the page, so a group stating the same requirements as the shared panel's
+# is replaced by a note naming it. A group that differs is still shown in full, so nothing is hidden.
+def _post_groups(parsed: dict | None, shared: dict | None) -> tuple[str, str]:
+    """Return (the groups this post does not share, a note naming the groups it does)."""
+    shared_keys = {label: key for label, _, key in _parsed_group_parts(shared)}
+    kept: list[str] = []
+    shared_labels: list[str] = []
+    for label, html, key in _parsed_group_parts(parsed):
+        if shared_keys.get(label) == key:
+            shared_labels.append(label)
+            continue
+        kept.append(html)
+    note = ""
+    if shared_labels:
+        note = (
+            "<p class='post-shared'>Shared with the panel at the top of this page: "
+            f"{_esc(', '.join(shared_labels))}.</p>"
+        )
+    return "\n".join(kept), note
+
+
+# One post's JD panel: the requirements it adds over the shared base, then whatever its own
+# effective JD states beyond the shared panel (FR-6.3, FR-4). JD-derived text is contact-scrubbed.
+def _post_jd_panel(
+    label: str, delta: list[str], jd_parsed: dict | None, shared_parsed: dict | None = None
+) -> str:
     parsed = _jd_structured(jd_parsed)
-    groups_html = _parsed_groups(parsed)
+    groups_html, shared_note = _post_groups(parsed, _jd_structured(shared_parsed))
     delta_html = ""
     if delta:
         items = "".join(f"<li>{_esc(_scrub_contact(sentence))}</li>" for sentence in delta)
@@ -1155,7 +1203,7 @@ def _post_jd_panel(label: str, delta: list[str], jd_parsed: dict | None) -> str:
             "<p class='post-delta-label'>Requirements specific to this post</p>"
             f"<ul class='post-delta'>{items}</ul>"
         )
-    if not delta_html and not groups_html:
+    if not delta_html and not groups_html and not shared_note:
         # A post whose requirements are all shared has no delta, so its effective JD is the base
         # JD itself (FR-4). The shared panel at the top of the page already lists exactly those
         # requirements, so the section says so instead of repeating the whole tag set per post.
@@ -1166,13 +1214,16 @@ def _post_jd_panel(label: str, delta: list[str], jd_parsed: dict | None) -> str:
             "against the shared requirements listed in the panel at the top of this page.</p>"
             "</section>"
         )
-    if not groups_html:
-        groups_html = "<p class='jd-empty'>No parsed skills yet.</p>"
+    parts = [_conditions_line(parsed), delta_html]
+    if groups_html:
+        parts.append(f"<div class='tag-groups'>{groups_html}</div>")
+    elif not shared_note:
+        parts.append("<div class='tag-groups'><p class='jd-empty'>No parsed skills yet.</p></div>")
+    parts.append(shared_note)
     return (
         f"<section class='jd-panel' aria-label='Requirements for {_esc(label)}'>"
         "<h2>Requirements for this post</h2>"
-        f"{_conditions_line(parsed)}{delta_html}"
-        f"<div class='tag-groups'>{groups_html}</div>"
+        f"{''.join(part for part in parts if part)}"
         "</section>"
     )
 
@@ -1185,6 +1236,7 @@ def _post_section(
     rows: list[dict[str, Any]],
     *,
     jd_parsed: dict | None,
+    shared_parsed: dict | None = None,
     delta: list[str],
     expanded: bool,
 ) -> str:
@@ -1195,7 +1247,7 @@ def _post_section(
     plural = "" if count == 1 else "s"
     open_attr = " open" if expanded else ""
     body = (
-        f"{_post_jd_panel(label, delta, jd_parsed)}"
+        f"{_post_jd_panel(label, delta, jd_parsed, shared_parsed)}"
         f"{_ranking_table(ranked)}"
         f"{_low_band_advisory(ranked)}"
         f"{_cards(ranked)}"
@@ -1246,6 +1298,7 @@ def write_screening_board(
                     group.label,
                     group.rows,
                     jd_parsed=spec.get("jd_parsed"),
+                    shared_parsed=jd_parsed,
                     delta=list(spec.get("delta") or []),
                     expanded=index == 0,
                 )

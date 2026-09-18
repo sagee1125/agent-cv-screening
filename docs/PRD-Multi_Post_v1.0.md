@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Multi_Post-v1.0
 feature_name: Multi-Post JAS Advertisements
-version: 1.2.2
+version: 1.2.3
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -31,7 +31,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Multi-Post JAS Advertisements
-**Version:** 1.2.2 (MVP)
+**Version:** 1.2.3 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** HR recruiters screening a JAS `refno` through the WorkBuddy chat
@@ -49,6 +49,7 @@ affected_modules:
 | 1.2.0   | 2026-09-17 | HR Screening Product Owner | Record the prerequisite fix as resolved (§8); correct the test baseline to 517 (§9); add §13 Implementation Handover. |
 | 1.2.1   | 2026-09-17 | HR Screening Product Owner | Withdraw FR-6.4: the records page has no post list, so a zero-applicant post cannot be shown. Add the measurement to §2.4 and scope the universe in FR-3. |
 | 1.2.2   | 2026-09-17 | HR Screening Product Owner | FR-6: redact the named contact from the rendered JD panel and correct the "no trace" wording, which the advertisement text contradicts. Record `unclaimed` as the cross-check. |
+| 1.2.3   | 2026-09-18 | HR Screening Product Owner | FR-6.3: a per-post JD panel repeats the shared tag groups (measured: every group of both posts equals the base's), so it now prints only the groups that state something the shared panel does not and names the rest. |
 
 ---
 
@@ -273,10 +274,25 @@ One `ranking-overview.html` per refno, containing:
    the shared requirements only. The text is reproduced as the advertisement states it, except that the
    named contact's personal details are replaced by placeholders — see "Contact details are redacted" below.
 3. One collapsible section per post, ordered as the post universe is ordered. Each section header states the
-   post label, the number of applicants, and the top score; the body contains that post's JD panel (its delta
-   plus the merged parsed requirements) and that post's own ranking table and applicant cards.
+   post label, the number of applicants, and the top score; the body contains that post's JD panel and that
+   post's own ranking table and applicant cards. A post's effective JD is the base JD plus its delta (FR-4),
+   so its JD panel carries the delta plus only those requirement groups that state something the shared panel
+   does not; a group that states exactly the shared requirements is named in one line instead of repeated.
 4. The first section may default to expanded; every other section defaults to collapsed.
 5. Ranking tables inside a section are ranked within that section only.
+
+**The shared requirements are stated once.** A post's effective JD is the base JD with its delta appended, so
+most of that post's parsed tag set *is* the base's tag set. Measured on the live multi-post advertisement: every
+parsed group of both the Research Associate and the Research Assistant post equals the base's — 15 must skills,
+8 preferred skills and 2 language requirements, all of them re-rendered under each post, in a panel whose
+purpose is to show what that post requires. The per-post panel therefore prints a group only when it states a
+requirement the shared panel does not, and names the groups it shares ("Shared with the panel at the top of
+this page: Must Skills, …"). A group that differs is still printed in full, so nothing is ever hidden, and a
+post whose groups are all shared falls back to the single sentence that already existed for a post with no
+delta. Groups are compared on the **requirements they state**, not on their rendered HTML: the same requirement
+set can be ranked in a different order once a delta shifts a skill's weight, and that order is a presentation
+artefact rather than a requirement. The comparison is made against the shared panel's own parse, so it needs no
+extra input and cannot disagree with what that panel shows.
 
 Collapsible sections must use native HTML `<details>` / `<summary>` so the report needs no JavaScript and
 prints correctly.

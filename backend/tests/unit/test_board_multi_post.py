@@ -125,11 +125,93 @@ def test_board_ranks_within_a_section_only(tmp_path: Path) -> None:
 
 # The per-post panel carries that post's parsed requirements, not just its delta (FR-6.3).
 def test_board_per_post_panel_shows_delta_and_parsed_tags(tmp_path: Path) -> None:
-    text = _board(tmp_path, _rows(), post_jds=_post_jds())
+    text = _board(
+        tmp_path,
+        _rows(),
+        jd_parsed={"must_skills": [{"canonical_skill": "Teamwork"}]},
+        post_jds=_post_jds(),
+    )
     assert "Requirements for this post" in text
     assert "Project Management" in text
     assert "Cantonese" in text
     assert "Python" in text
+
+
+# A post whose tag groups are the shared ones names them instead of repeating them (FR-6.3).
+def test_board_post_panel_does_not_repeat_the_shared_tag_groups(tmp_path: Path) -> None:
+    shared = {
+        "must_skills": [{"canonical_skill": "Python"}],
+        "language_requirements": [{"language": "Cantonese", "is_mandatory": True}],
+    }
+    post_jds = {
+        "Senior Project Fellow": {
+            "jd_text": "Senior Project Fellow duties.",
+            "jd_parsed": {
+                "must_skills": [{"canonical_skill": "Python"}],
+                "language_requirements": [{"language": "Cantonese", "is_mandatory": True}],
+            },
+            "delta": ["The appointee must be fluent in Cantonese and Putonghua."],
+        },
+    }
+    text = _board(
+        tmp_path,
+        [_row("260901001", "Senior Project Fellow (Full-time)", 1, 80.78)],
+        jd_parsed=shared,
+        post_jds=post_jds,
+    )
+    assert "The appointee must be fluent in Cantonese and Putonghua." in text
+    assert (
+        "Shared with the panel at the top of this page: Must Skills, Language Requirements." in text
+    )
+    # Only the shared panel's two groups are rendered; the post panel repeats neither.
+    assert text.count("<div class='tag-group'>") == 2
+
+
+# Only the groups a post does not share are printed, so nothing is hidden and nothing repeats.
+def test_board_post_panel_keeps_the_group_it_does_not_share(tmp_path: Path) -> None:
+    post_jds = {
+        "Senior Project Fellow": {
+            "jd_text": "Senior Project Fellow duties.",
+            "jd_parsed": {
+                "must_skills": [{"canonical_skill": "Python"}],
+                "language_requirements": [{"language": "Cantonese", "is_mandatory": True}],
+            },
+            "delta": ["The appointee must be fluent in Cantonese."],
+        },
+    }
+    text = _board(
+        tmp_path,
+        [_row("260901001", "Senior Project Fellow (Full-time)", 1, 80.78)],
+        jd_parsed={"must_skills": [{"canonical_skill": "Python"}]},
+        post_jds=post_jds,
+    )
+    assert "Shared with the panel at the top of this page: Must Skills." in text
+    # The post's own language group is printed; the shared must group is not repeated.
+    assert text.count("<div class='tag-group'>") == 2
+    assert text.index("Language Requirements") < text.index("Shared with the panel")
+
+
+# A post's group is compared on the requirements it states, not on the order they were ranked in.
+def test_board_post_panel_ignores_pill_order_when_matching_the_shared_panel(tmp_path: Path) -> None:
+    post_jds = {
+        "Senior Project Fellow": {
+            "jd_text": "Senior Project Fellow duties.",
+            "jd_parsed": {
+                "must_skills": [{"canonical_skill": "Tableau"}, {"canonical_skill": "Python"}]
+            },
+            "delta": ["The appointee must be fluent in Cantonese."],
+        },
+    }
+    text = _board(
+        tmp_path,
+        [_row("260901001", "Senior Project Fellow (Full-time)", 1, 80.78)],
+        jd_parsed={
+            "must_skills": [{"canonical_skill": "Python"}, {"canonical_skill": "Tableau"}]
+        },
+        post_jds=post_jds,
+    )
+    assert "Shared with the panel at the top of this page: Must Skills." in text
+    assert text.count("<div class='tag-group'>") == 1
 
 
 # The shared panel keeps the whole advertisement text with the shared tags (FR-6.2).
