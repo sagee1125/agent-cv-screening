@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Multi_Post-v1.0
 feature_name: Multi-Post JAS Advertisements
-version: 1.2.4
+version: 1.2.5
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -31,7 +31,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Multi-Post JAS Advertisements
-**Version:** 1.2.4 (MVP)
+**Version:** 1.2.5 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** HR recruiters screening a JAS `refno` through the WorkBuddy chat
@@ -51,6 +51,7 @@ affected_modules:
 | 1.2.2   | 2026-09-17 | HR Screening Product Owner | FR-6: redact the named contact from the rendered JD panel and correct the "no trace" wording, which the advertisement text contradicts. Record `unclaimed` as the cross-check. |
 | 1.2.3   | 2026-09-18 | HR Screening Product Owner | FR-6.3: a per-post JD panel repeats the shared tag groups (measured: every group of both posts equals the base's), so it now prints only the groups that state something the shared panel does not and names the rest. |
 | 1.2.4   | 2026-09-18 | HR Screening Product Owner | FR-6.3: sections follow the **records page's** candidate order, not the post universe's. Measured on `260907003`: the page lists newest-first (`005, 004, 003, 002, 001`), so its first post is Research Associate while the board showed Research Assistant. Ordering is imposed once, in `_run_screening` via `order_by_records_page`, so the board sections, both manifests' post lists and the update check agree by construction; the board digest now carries the post order, without which a reorder would silently reuse the cached board. Add the page-order measurement to §2.4. |
+| 1.2.5   | 2026-09-18 | HR Screening Product Owner | Close the two items an FR-by-FR audit left open, both of which were invisible on current data. FR-3's cross-check had no caller, so a post the advertisement's `Post title` never names was never recorded; it is now recorded in `post-jds.json`, read back into `manifest.json`, warned about **above** the board's sections and carried in the envelope as `posts.unmatched_posts` — a warning, never a block, and always present on a multi-post run so an empty list means "nothing disagreed". The §9 Integration row now has a test: the multi-post fixture drives `run_jas_import.py` through the whole chain offline. Correct the §9 baseline to 671 and record the offline recipe and its one limit in §13.4. |
 
 ---
 
@@ -505,15 +506,17 @@ there is no contaminated history to reconcile.
 | Unit — JD split      | Base plus delta reconstruction; bullets naming a post land in that post's delta; unnamed bullets stay shared; full-time and part-time variants inherit the same bullets; provenance points at the source sentence.                                                   |
 | Unit — grouping      | Post universe from the column values, in first-appearance order; a blank post value on a multi-post page produces the needs-confirmation block and never a guess; the universe holds exactly the posts that received applications (a post with zero applicants is out of scope — see FR-6). |
 | Unit — report        | One `<details>` per post; the shared panel carries the advertisement text with the named contact redacted and the raw text left unmodified in `_pipeline`; section order follows the records page (FR-6.3); no cross-post table.                      |
-| Integration          | A multi-post fixture runs the full wrapper chain and produces one report with the expected per-post counts.                                                                                                                                                          |
+| Integration          | A multi-post fixture runs the full wrapper chain and produces one report with the expected per-post counts. Implemented by `test_multi_post_fixture_runs_the_whole_chain` (`backend/tests/e2e/test_jas_mock_pipeline.py`), which drives `run_jas_import.py <folder>` on `generate_mock_jas_dir(…, multi_post=True)` — see §13.4 for why it starts there and not at `screen_refno`. |
 | Regression           | The single-post path is unchanged: same scores, same file names, same report shape.                                                                                                                                                                                  |
 | Cache                | Adding one applicant to post B does not invalidate post A's parsed, scored or per-applicant artifacts.                                                                                                                                                               |
 
 Baseline at the start of the multi-post work (HEAD `1e8e499`, before the prerequisite fix): **514 passed,
-1 skipped**. Current baseline at PRD v1.2.0 (HEAD `90b09e5`, prerequisite fix applied): **517 passed,
-1 skipped** — measured on 2026-09-17; the three added tests are the two column-map assertions and the fixture
-guard. An earlier revision of this PRD quoted 502, which was stale. Redirect pytest's output to a file before
-grepping it: the temporary-directory cleanup prints a trailing `SystemExit: 1` that hides the summary line.
+1 skipped**. Baseline at PRD v1.2.0 (HEAD `90b09e5`, prerequisite fix applied): **517 passed, 1 skipped** —
+the three added tests are the two column-map assertions and the fixture guard. **Current baseline at PRD
+v1.2.5: 671 passed, 1 skipped**, measured on 2026-09-18 once the multi-post work had landed; the multi-post
+integration test is ~20 s of the ~62 s total, the suite's most expensive case by a wide margin. An earlier
+revision of this PRD quoted 502, which was stale. Redirect pytest's output to a file before grepping it: the
+temporary-directory cleanup prints a trailing `SystemExit: 1` that hides the summary line.
 
 ```bash
 venv/Scripts/python.exe -m pytest backend/tests -q > "$LOCALAPPDATA/Temp/pytest.txt" 2>&1
@@ -643,10 +646,20 @@ the cache.
 
 - `jas_import/mock.py` generates both page shapes. `mock_records_html(refno, multi_post=True)` returns the
   HTML; `generate_mock_jas_dir(target_dir, multi_post=True)` writes a complete offline job folder
-  (`records.html` + `cvs/`). Both default to `multi_post=False`, so existing callers are unchanged. Use the
-  multi-post fixture for the integration row of the Section 9 test plan rather than building a new one.
+  (`records.html` + `cvs/`). Both default to `multi_post=False`, so existing callers are unchanged. The
+  multi-post fixture drives the integration row of the Section 9 test plan — do not build a new one.
 - An offline folder can drive the whole chain without a browser:
   `run_jas_import.py <folder> --output-dir <tmp>`.
+- **The deepest link that can be driven offline is `run_jas_import.py`, not `screen_refno`.** The host
+  envelope's `screen_refno` accepts no `--output-dir`, so a test entering there would write the HR pack to
+  the real `Desktop/workbuddy-cv-screen/` and the job state into the repo. Its multi-post projection is
+  covered separately, in `backend/tests/unit/test_host_envelope.py`.
+- **To run the chain with no LLM call, seed the cv-parser's hash cache — not `extracted-*.json`.** The
+  pipeline reuses `extracted-*` under `--resume` and would skip the cv-parser link altogether, whereas a
+  warm cache keeps that subprocess in the chain and replaces only the network call. The key is
+  `<md5 of the CV>-<PARSER_CACHE_VERSION>` (`cv_parser.service`) and must be **computed at run time**:
+  reportlab stamps a creation date into the mock PDFs, so their bytes differ on every generation. Point
+  `CACHE_DIR` at a temp directory, or the seeded entries land in the repo's `data/cache`.
 - The demo records pages are the agreed stand-in for the real `records.php`. Appendix A re-runs the page
   checks; re-verify against the real pages when they become available.
 
