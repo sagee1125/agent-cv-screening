@@ -16,10 +16,13 @@ SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
 
 from jas_import import fetch  # noqa: E402
 from jas_import.errors import JobNotFoundError  # noqa: E402
-from jas_import.mock import mock_records_html  # noqa: E402
+from jas_import.mock import MOCK_REFNO, mock_records_html  # noqa: E402
 
-ALLOWED_JD_URL = "https://jobs.polyu.edu.hk/internal/records.php?refno=260818001"
-ALLOWED_CV_URL = "https://jobs.polyu.edu.hk/internal/file.php?t=cv&id=123456&refno=260818001"
+# The mock job's refno comes from the generator, never from a literal: a literal drifts the moment the
+# generator changes, and a test that fetches mock HTML while naming a real refno is how a mock run came
+# to overwrite a real job's state file.
+ALLOWED_JD_URL = f"https://jobs.polyu.edu.hk/internal/records.php?refno={MOCK_REFNO}"
+ALLOWED_CV_URL = f"https://jobs.polyu.edu.hk/internal/file.php?t=cv&id=123456&refno={MOCK_REFNO}"
 
 
 def _import_script(skill: str, script: str):
@@ -134,10 +137,10 @@ def test_fetch_job_payload_parses_records_page(monkeypatch) -> None:
 
     monkeypatch.setattr(fetch, "_request", fake_request)
     payload = asyncio.run(fetch.fetch_job_payload(ALLOWED_JD_URL))
-    assert payload["refno"] == "260818001"
+    assert payload["refno"] == MOCK_REFNO
     assert payload["job"]["post_title"] == "Project Associate"
     assert [candidate["appno"] for candidate in payload["candidates"]] == ["123456", "654321"]
-    assert payload["candidates"][0]["cv_url"].endswith("file.php?t=cv&id=123456&refno=260818001")
+    assert payload["candidates"][0]["cv_url"].endswith(f"file.php?t=cv&id=123456&refno={MOCK_REFNO}")
 
 
 # Non-JAS pages are rejected so candidate-table PII cannot become JD text.
@@ -155,17 +158,17 @@ def test_fetch_jd_text_rejects_page_without_jd_table(monkeypatch) -> None:
 
 # fetch_job_payload rejects pages that have refno but no JD advertisement table.
 def test_fetch_job_payload_rejects_page_without_jd_table(monkeypatch) -> None:
-    candidate_only_html = """
+    candidate_only_html = f"""
     <html><body>
     <table class="listTable job-detail-table"><tbody><tr>
       <td class="f-data-1">1</td>
       <td class="f-data-1">123456</td>
-      <td class="f-data-1"><a href="https://jobs.polyu.edu.hk/internal/record_detail.php?id=123456&amp;refno=260818001">form</a></td>
+      <td class="f-data-1"><a href="https://jobs.polyu.edu.hk/internal/record_detail.php?id=123456&amp;refno={MOCK_REFNO}">form</a></td>
       <td class="f-data-1">TBC</td>
       <td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td>
       <td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td>
       <td class="f-data-1"></td><td class="f-data-1"></td>
-      <td class="f-data-1"><a href="https://jobs.polyu.edu.hk/internal/file.php?t=cv&amp;id=123456&amp;refno=260818001">cv</a></td>
+      <td class="f-data-1"><a href="https://jobs.polyu.edu.hk/internal/file.php?t=cv&amp;id=123456&amp;refno={MOCK_REFNO}">cv</a></td>
       <td class="f-data-1"></td>
     </tr></tbody></table>
     </body></html>
@@ -233,7 +236,7 @@ def test_pipeline_resolve_url_inputs(tmp_path, monkeypatch) -> None:
         allow_host=[],
         base_url=None,
         state_dir=str(tmp_path / "state"),
-        refno="260818001",
+        refno=MOCK_REFNO,
         scratch_dir=str(tmp_path / "scratch"),
         jd_file=None,
         cv=[],
@@ -357,12 +360,12 @@ def test_run_agent_forwards_url_flags(tmp_path) -> None:
 
 # fetch_job_payload threads base_url through so relative CV links resolve to the demo host.
 def test_fetch_job_payload_base_url_resolves_cv_links(monkeypatch) -> None:
-    html = """
+    html = f"""
     <html><body>
     <table class="listTable job-detail-table"><tbody><tr>
       <td class="f-data-1">1</td>
       <td class="f-data-1">123456</td>
-      <td class="f-data-1"><a href="/record_detail.php?id=123456&amp;refno=260818001">form</a></td>
+      <td class="f-data-1"><a href="/record_detail.php?id=123456&amp;refno={MOCK_REFNO}">form</a></td>
       <td class="f-data-1">TBC</td>
       <td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td>
       <td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td><td class="f-data-1"></td>
@@ -370,7 +373,7 @@ def test_fetch_job_payload_base_url_resolves_cv_links(monkeypatch) -> None:
     </tr></tbody></table>
     <p>Job advertisement information</p>
     <table><tbody>
-      <tr><td class="f-header">Reference number</td><td class="f-data-1">260818001</td></tr>
+      <tr><td class="f-header">Reference number</td><td class="f-data-1">{MOCK_REFNO}</td></tr>
       <tr><td class="f-header">Post title</td><td class="f-data-1">Project Associate</td></tr>
       <tr><td class="f-header">Description</td><td class="f-data-1"><p>Python SQL</p></td></tr>
     </tbody></table>
@@ -386,12 +389,12 @@ def test_fetch_job_payload_base_url_resolves_cv_links(monkeypatch) -> None:
     monkeypatch.setattr(fetch, "_request", fake_request)
     payload = asyncio.run(
         fetch.fetch_job_payload(
-            "https://jes-web-demo.vercel.app/records.html?refno=260818001",
+            f"https://jes-web-demo.vercel.app/records.html?refno={MOCK_REFNO}",
             base_url="https://jes-web-demo.vercel.app",
             allowed_hosts=("jes-web-demo.vercel.app",),
         )
     )
-    assert payload["refno"] == "260818001"
+    assert payload["refno"] == MOCK_REFNO
     assert payload["candidates"][0]["cv_url"] == "https://jes-web-demo.vercel.app/uploads/CV.pdf"
 
 

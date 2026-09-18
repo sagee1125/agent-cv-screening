@@ -3,6 +3,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 os.environ.setdefault("ZAI_API_KEY", "test-key")
 os.environ.setdefault("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
@@ -27,3 +29,26 @@ from screening_core.bootstrap import ensure_skill_imports
 ensure_skill_imports(REPO_ROOT)
 # Skill and taxonomy relative paths are repo-root based (same as CLI).
 os.chdir(REPO_ROOT)
+
+# The repo's real job-state directory; a screening run writes a refno's snapshot here by default.
+REPO_STATE_DIR = REPO_ROOT / "data" / "jas_state"
+
+
+# Fingerprint the repo job-state dir as {name: (mtime_ns, size)} so a change is cheap to spot.
+def _state_fingerprint() -> dict[str, tuple[int, int]]:
+    if not REPO_STATE_DIR.is_dir():
+        return {}
+    return {path.name: (path.stat().st_mtime_ns, path.stat().st_size) for path in REPO_STATE_DIR.glob("*.json")}
+
+
+@pytest.fixture(autouse=True)
+def repo_job_state_untouched():
+    """Fail the test that rewrites the repo's real job-state dir (a run must pass its own --state-dir)."""
+    before = _state_fingerprint()
+    yield
+    after = _state_fingerprint()
+    changed = sorted(name for name in set(before) | set(after) if before.get(name) != after.get(name))
+    assert not changed, (
+        f"the test wrote the repo job-state dir {REPO_STATE_DIR} ({', '.join(changed)}); "
+        "pass a tmp_path-based --state-dir / state_dir instead"
+    )

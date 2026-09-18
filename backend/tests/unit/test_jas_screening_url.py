@@ -281,6 +281,10 @@ def test_main_url_mode_dispatches(tmp_path, monkeypatch, capsys) -> None:
             str(tmp_path / "out"),
             "--scratch-dir",
             str(tmp_path / "scratch"),
+            # Without this the CLI resolves the repo's own data/jas_state and record_screen_run overwrites
+            # the real 260818001 snapshot with this test's two-candidate fixture (found 2026-09-18).
+            "--state-dir",
+            str(tmp_path / "state"),
             "--cleanup-cvs",
             "--skip-reports",
         ],

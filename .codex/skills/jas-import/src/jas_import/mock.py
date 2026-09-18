@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-MOCK_REFNO = "260818001"
+# A refno no real job can have, so mock data can never collide with one.
+#
+# Live refnos are 9 digits of the form YYMMDD + a 3-digit sequence and every current one starts
+# "26", so "999999001" (month 99, day 99) is impossible rather than merely unused. The value
+# matters because a mock screening writes job state under this refno, and a state file is the
+# baseline the update check diffs a real job against: when this was the real "260818001", running
+# the test suite replaced that job's real snapshot with the mock applicants and 100 mock history
+# entries (found 2026-09-18). Never set this to a refno that exists on the records page.
+MOCK_REFNO = "999999001"
 BASE_URL = "https://jobs.polyu.edu.hk/internal"
 
 # Two fictional candidate profiles used by the mock generator.
