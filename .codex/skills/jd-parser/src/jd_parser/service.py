@@ -212,6 +212,13 @@ class JDParserService:
         r"(?:for example|e\.g\.|eg\.|such as|including|例如)\s*:?\s*(.+)$",
         re.IGNORECASE,
     )
+    # "<domain>-related discipline/field/area" states a field of study through a boilerplate noun.
+    # The domain is the field; without this the trailing noun would discard the whole fragment.
+    FIELD_RELATED_RE = re.compile(
+        r"^(?:an?\s+)?(.+?)[- ]related\s+"
+        r"(?:field|fields|area|areas|discipline|disciplines|subject|subjects)$",
+        re.IGNORECASE,
+    )
     SKILL_CUE_RE = re.compile(
         r"(?:experience with|proficient in|knowledge of|familiar with|"
         r"hands[- ]on|expertise in|熟悉|精通|了解|掌握|"
@@ -345,6 +352,7 @@ class JDParserService:
         return section, matched.group("rem").strip(" :.-	").strip()
 
     def _match_section_line(self, line: str) -> tuple[str | None, str]:
+        """Return the section a line opens and the requirement text that belongs to it."""
         heading_section, heading_remainder = self._match_section_heading(line)
         if heading_section:
             return heading_section, heading_remainder
@@ -366,7 +374,15 @@ class JDParserService:
         if best is None:
             return None, ""
         position, section_name, marker = best
-        remainder = line[position + len(marker) :].lstrip(" :.-	").strip()
+        if position > 0:
+            # Mid-sentence the marker is prose, not a heading: "an equivalent qualification" and
+            # "post-qualification experience" are requirement text. Cutting the line there used to
+            # leave a one-character remainder and delete the whole requirement before any degree or
+            # skill extraction saw it ("...an equivalent qualification;" survived as ";"). The
+            # section still changes, so lines after a "they will be required to" cue stay in the
+            # bucket they have always been in; only the text is kept whole.
+            return section_name, line
+        remainder = line[len(marker) :].lstrip(" :.-	").strip()
         other_markers = tuple(
             m
             for target_name, target_markers in marker_groups
@@ -436,6 +452,19 @@ class JDParserService:
                     seen.add(marker.casefold())
                     fields.append(marker)
                 return
+            # "a computing-related discipline" names its field through a boilerplate noun, so the
+            # domain in front of "related" is the field and the noun is dropped. Checked before the
+            # discard rule below, which would otherwise throw the fragment away for containing
+            # "discipline". A bare "a related discipline" has no domain and stays discarded.
+            related = self.FIELD_RELATED_RE.match(cleaned)
+            if related:
+                domain = related.group(1).strip()
+                if domain and domain.casefold() not in self.FIELD_STOPWORDS:
+                    canonical_domain = self._token_to_canonical.get(domain, domain)
+                    if canonical_domain.casefold() not in seen:
+                        seen.add(canonical_domain.casefold())
+                        fields.append(canonical_domain)
+                    return
             canonical = self._token_to_canonical.get(cleaned)
             key = canonical if canonical else cleaned
             if any(word in self.FIELD_DISCARD_WORDS for word in key.split()):

@@ -272,6 +272,48 @@ async def test_field_of_study_keeps_explicit_non_taxonomy_majors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_degree_sentence_containing_a_section_word_keeps_its_requirement() -> None:
+    """A requirement sentence is not cut at a section word it merely contains."""
+    service = JDParserService()
+    result = await service.parse_jd(
+        "Qualifications: have a good command of written and spoken English; and\n"
+        "Applicants for the Research Assistant post should have an honours degree in a "
+        "computing-related discipline or an equivalent qualification;"
+    )
+    field = (result["structured_data"]["education_requirement"].get("field_of_study") or "").lower()
+    assert "computing" in field
+    assert "equivalent qualification" not in field
+
+
+def test_mid_sentence_marker_keeps_the_requirement_whole() -> None:
+    """A marker inside a sentence marks the section but must not truncate the text."""
+    service = JDParserService()
+    sentence = (
+        "applicants for the research assistant post should have an honours degree in a "
+        "computing-related discipline or an equivalent qualification;"
+    )
+    assert service._match_section_line(sentence) == ("must", sentence)
+
+
+def test_heading_at_the_head_of_a_line_still_opens_its_section() -> None:
+    """A real heading yields the content that follows it, not the whole line."""
+    service = JDParserService()
+    assert service._match_section_line("preferred qualifications: experience with tableau") == (
+        "preferred",
+        "experience with tableau",
+    )
+
+
+def test_duties_cue_keeps_the_list_it_introduces_in_the_must_bucket() -> None:
+    """A mid-sentence cue still switches section, so the duties list stays in 'must'."""
+    service = JDParserService()
+    sections = service._split_sections(
+        "the appointees will be required to:\ndesign and maintain python services;"
+    )
+    assert any("design and maintain python services" in line for line in sections["must"])
+
+
+@pytest.mark.asyncio
 async def test_preferred_qualifications_heading_keeps_preferred_bucket() -> None:
     """A 'Preferred qualifications' heading must not demote its items to must."""
     service = JDParserService()
