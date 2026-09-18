@@ -49,6 +49,8 @@ from screening_core.jd_overrides import (
     FINAL_JD_FILENAME,
     OVERRIDES_FILENAME,
     describe_overrides,
+    load_overrides,
+    pending_post_grill,
     write_final_jd,
 )
 from screening_core.job_state import load_job_state, save_job_state
@@ -447,6 +449,11 @@ def _resolve_jd_sources(args: argparse.Namespace, out_dir: Path) -> JdSources:
         )
     split = split_advertisement(jd_text, labels)
     names = base_names_of(labels)
+    # Splitting the advertisement needs only its text, so HR's decision about the derived
+    # per-post requirements is taken before anything is parsed or scored (FR-9).
+    _require_conditions_decision(
+        args, out_dir, post_deltas=_post_deltas(split, names), post_labels=labels
+    )
     # jd-parse.json becomes the base JD: the advertisement with every post-specific unit removed,
     # so the shared JD panel and the shared parsed tags are shared by construction (FR-6).
     base_path = _parse_jd_text(
@@ -537,20 +544,66 @@ def _apply_jd_overrides(args: argparse.Namespace, out_dir: Path, jd_parse_path: 
         # HR chose to screen against the job ad alone: an answer, so nothing to ask.
         args._jd_overrides = {"applied": False, "reason": "discarded by HR"}
         return jd_parse_path
-    pending = describe_overrides(out_dir)
-    if pending is None:
-        args._jd_overrides = {"applied": False, "reason": "no conditions file"}
-        return jd_parse_path
-    # Unconfirmed conditions are an answered question, not a silent inheritance.
+    _require_conditions_decision(args, out_dir)
+    args._jd_overrides = {"applied": False, "reason": "no conditions file"}
+    return jd_parse_path
+
+
+# The derived delta of every post that has one, keyed by base name in post-universe order (FR-9).
+# A post whose requirements are all shared has no delta, so it is no item: there is nothing about
+# it for HR to confirm.
+def _post_deltas(split: PostSplit, names: list[str]) -> dict[str, list[str]]:
+    """Return {post base name: derived sentences} for the posts with a derivation of their own."""
+    return {name: delta for name in names if (delta := split.delta_for(name))}
+
+
+# Stop the run while HR still has a decision to make, before anything is parsed or scored (FR-9).
+#
+# Two things can be pending, and both are answered questions rather than something to inherit
+# silently: conditions saved by an earlier conversation, and the base/delta derivation of a
+# multi-post advertisement. `--conditions confirmed|discard` answers either. A post HR already
+# confirmed is not asked again, so a partially confirmed run asks only about what is left.
+def _require_conditions_decision(
+    args: argparse.Namespace,
+    out_dir: Path,
+    *,
+    post_deltas: dict[str, list[str]] | None = None,
+    post_labels: list[str] | None = None,
+) -> None:
+    """Raise NeedInputError(status='conditions_pending') while HR has a decision to make."""
+    if getattr(args, "_conditions_confirmed", False) or getattr(args, "_discard_conditions", False):
+        return
+    pending_posts = pending_post_grill(
+        load_overrides(out_dir), post_deltas or {}, post_labels or []
+    )
+    pending_conditions = describe_overrides(out_dir)
+    if pending_conditions is None and not pending_posts:
+        return
+    questions: list[str] = []
+    details: dict = {}
+    if pending_conditions is not None:
+        details["conditions"] = pending_conditions
+        questions.append(
+            "This job has conditions saved by an earlier conversation: read them back and ask HR "
+            "to reuse, change or drop them."
+        )
+    if pending_posts:
+        # Each item carries its post and the advertisement sentences that post's requirements
+        # were read from, so HR confirms the attribution against the source, not a summary.
+        details["post_deltas"] = pending_posts
+        # Kept short on purpose: the host envelope truncates every question at 120 characters.
+        questions.append(
+            "Show HR each post's own requirements with the source sentence and confirm the attribution."
+        )
+    questions.append(
+        "Then re-run with --conditions confirmed (keep them) or --conditions discard "
+        "(screen against the job ad alone)."
+    )
     raise NeedInputError(
         ["conditions"],
-        [
-            "This job already has saved conditions from an earlier conversation. "
-            "Read them back to HR and ask whether to reuse them, change them, or screen "
-            "against the job ad alone; then re-run with --conditions confirmed|discard.",
-        ],
+        questions,
         status="conditions_pending",
-        details={"conditions": pending},
+        details=details,
     )
 
 

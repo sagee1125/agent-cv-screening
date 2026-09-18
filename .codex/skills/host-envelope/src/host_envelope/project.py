@@ -136,7 +136,51 @@ def _project_ask(payload: dict[str, Any]) -> dict[str, Any] | None:
         conditions = _project_conditions(ask.get("conditions") if ask else None)
         if conditions:
             projected["conditions"] = conditions
+        # A multi-post advertisement also holds back its per-post derivation: HR confirms which
+        # requirements belong to which post before any score is produced (FR-9).
+        post_deltas = _project_post_deltas(ask.get("post_deltas") if ask else None)
+        if post_deltas:
+            projected["post_deltas"] = post_deltas
     return projected
+
+
+# Projects the per-post derivations HR must confirm, one entry per post base name (FR-9).
+# Each carries the post's own labels, its confirmation state, and the advertisement sentences the
+# requirements were read from, so HR checks the attribution against the source. Sentences are
+# bounded because this is the one place advertisement prose reaches the conversation.
+def _project_post_deltas(raw: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(raw, list):
+        return None
+    out: list[dict[str, Any]] = []
+    for item in raw[:12]:
+        if not isinstance(item, dict):
+            continue
+        post = sanitize_text(item.get("post"), 80)
+        if not post or looks_like_forbidden_payload(post):
+            continue
+        labels = [
+            label
+            for label in (sanitize_text(value, 80) for value in list(item.get("labels") or [])[:4])
+            if label and not looks_like_forbidden_payload(label)
+        ]
+        sentences = [
+            sentence
+            for sentence in (
+                sanitize_text(value, 300) for value in list(item.get("delta") or [])[:12]
+            )
+            if sentence and not looks_like_forbidden_payload(sentence)
+        ]
+        if not sentences:
+            continue
+        out.append(
+            {
+                "post": post,
+                "labels": labels,
+                "confirmed": item.get("confirmed") is True,
+                "delta": sentences,
+            }
+        )
+    return out or None
 
 
 # Keeps the stored conditions readable to HR while staying inside the host whitelist.

@@ -1,11 +1,14 @@
-"""Tests for multi-post scoring groups and cache keys (PRD-Multi_Post step 5)."""
+"""Tests for multi-post scoring groups, cache keys and the per-post grill (PRD steps 5-7)."""
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PIPELINE_SCRIPT = REPO_ROOT / ".codex" / "skills" / "pipeline" / "scripts" / "run_pipeline.py"
@@ -250,3 +253,152 @@ def test_generate_reports_hands_unplaced_rows_to_the_board(tmp_path: Path, monke
     board_rows = json.loads((out_dir / "rows.json").read_text(encoding="utf-8"))
     assert [row["appno"] for row in board_rows] == ["123456", "999999"]
     assert board_rows[1]["post"] == ""
+
+
+# --- The per-post derivation gate (FR-9) ----------------------------------------------------
+
+# The two posts of one advertisement, with the sentence each was read from.
+_GATE_DELTAS = {"Research Assistant": ["Applicants for the Research Assistant post need honours."]}
+# Two labels for one post: the item must name both variants, because HR answers once for both.
+_GATE_LABELS = ["Research Assistant (Full-time)", "Research Assistant (Part-time)"]
+
+
+# Write a jd-overrides.yaml carrying HR's per-post confirmation of the derived deltas.
+def _confirm_posts(out_dir: Path, deltas: dict[str, list[str]]) -> None:
+    lines = ["collected_at: '2026-09-17'", "posts:"]
+    for name, sentences in deltas.items():
+        lines.append(f"  - post: {name}")
+        lines.append("    confirmed: true")
+        lines.append("    delta:")
+        for sentence in sentences:
+            lines.append("      - " + json.dumps(sentence))
+    (out_dir / "jd-overrides.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# An unconfirmed derivation stops the run before anything is parsed, carrying one item per post.
+def test_gate_stops_for_unconfirmed_post_deltas(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    with pytest.raises(module.NeedInputError) as excinfo:
+        module._require_conditions_decision(
+            argparse.Namespace(), out_dir, post_deltas=_GATE_DELTAS, post_labels=_GATE_LABELS
+        )
+
+    error = excinfo.value
+    assert error.status == "conditions_pending"
+    assert error.missing == ["conditions"]
+    items = error.details["post_deltas"]
+    assert [item["post"] for item in items] == ["Research Assistant"]
+    # One item covers both variants, and it carries the source sentence HR must check.
+    assert items[0]["labels"] == _GATE_LABELS
+    assert items[0]["delta"] == _GATE_DELTAS["Research Assistant"]
+    assert items[0]["confirmed"] is False
+    # No conditions file exists, so nothing about stored conditions is asked.
+    assert "conditions" not in error.details
+
+
+# Once HR has confirmed every post, the run has nothing left to stop for.
+def test_gate_passes_when_every_post_is_confirmed(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _confirm_posts(out_dir, _GATE_DELTAS)
+
+    # No raise: the derivation is settled and there are no stored conditions.
+    module._require_conditions_decision(
+        argparse.Namespace(), out_dir, post_deltas=_GATE_DELTAS, post_labels=_GATE_LABELS
+    )
+
+
+# A partially confirmed run asks only about the posts HR has not answered yet.
+def test_gate_asks_only_about_the_unconfirmed_post(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    deltas = dict(_GATE_DELTAS, **{"Research Associate": ["The Research Associate post needs a PhD."]})
+    _confirm_posts(out_dir, _GATE_DELTAS)
+
+    with pytest.raises(module.NeedInputError) as excinfo:
+        module._require_conditions_decision(
+            argparse.Namespace(), out_dir, post_deltas=deltas, post_labels=_GATE_LABELS
+        )
+
+    assert [item["post"] for item in excinfo.value.details["post_deltas"]] == ["Research Associate"]
+
+
+# HR's explicit answer settles the question, so the run proceeds without asking again.
+def test_gate_passes_on_an_explicit_hr_answer(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    for flag in ("_conditions_confirmed", "_discard_conditions"):
+        module._require_conditions_decision(
+            argparse.Namespace(**{flag: True}),
+            out_dir,
+            post_deltas=_GATE_DELTAS,
+            post_labels=_GATE_LABELS,
+        )
+
+
+# A single-post run has no derivation to confirm, so the gate stays silent for it.
+def test_gate_is_silent_without_a_post_dimension(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    module._require_conditions_decision(argparse.Namespace(), out_dir)
+
+
+# Only the posts that have a delta of their own are items: a shared-requirements post asks nothing.
+def test_post_deltas_keeps_only_the_posts_with_their_own_requirements() -> None:
+    module = _import_pipeline()
+
+    class _Split:
+        def delta_for(self, name: str) -> list[str]:
+            return ["only this post"] if name == "A" else []
+
+    assert module._post_deltas(_Split(), ["A", "B"]) == {"A": ["only this post"]}
+
+
+# A file holding only the per-post confirmation is not a conditions file: there is nothing for HR
+# to read back, so the run must not stop to ask about conditions that do not exist.
+def test_gate_does_not_ask_about_conditions_when_the_file_holds_only_confirmations(
+    tmp_path: Path,
+) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _confirm_posts(out_dir, _GATE_DELTAS)
+
+    # describe_overrides must report nothing to reuse, so no conditions question is raised.
+    # The file is readable and does hold the confirmations, so this is not a parse failure.
+    assert module.load_overrides(out_dir) is not None
+    assert module.describe_overrides(out_dir) is None
+    module._require_conditions_decision(
+        argparse.Namespace(), out_dir, post_deltas=_GATE_DELTAS, post_labels=_GATE_LABELS
+    )
+
+
+# A stored degree gate is still a condition HR must be asked about, so the check is not narrowed
+# to the skill lists alone.
+def test_gate_still_asks_when_the_file_holds_only_an_eligibility_rule(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "jd-overrides.yaml").write_text(
+        """eligibility_rules:
+  - rule: minimum_degree
+    value: master
+""",
+        encoding="utf-8",
+    )
+    # A file the loader cannot read would make this test pass for the wrong reason.
+    assert module.load_overrides(out_dir) is not None
+
+    with pytest.raises(module.NeedInputError) as excinfo:
+        module._require_conditions_decision(argparse.Namespace(), out_dir)
+
+    assert excinfo.value.details["conditions"] is not None

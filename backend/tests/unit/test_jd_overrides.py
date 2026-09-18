@@ -446,3 +446,139 @@ def test_education_gate_shows_hr_marker_in_the_report() -> None:
     assert "Education:" in html
     assert "hr-mark" in html
     assert "Added by HR (conversation)" in html
+
+
+# --- Per-post derivation grill (FR-9) ------------------------------------------------------
+
+# The two posts of a multi-post advertisement, each with the sentences it was read from.
+_DELTAS = {
+    "Research Assistant": ["Applicants for the Research Assistant post need an honours degree."],
+    "Research Associate": ["Applicants for the Research Associate post need a master's degree."],
+}
+# Two labels for the first post and one for the second: two items, not three.
+_LABELS = [
+    "Research Assistant (Full-time)",
+    "Research Assistant (Part-time)",
+    "Research Associate (Full-time)",
+]
+
+
+# One grill item per base name, tagged with its post and carrying the source sentences.
+def test_post_grill_items_one_per_post_with_its_source_sentences() -> None:
+    from screening_core.jd_overrides import post_grill_items
+
+    items = post_grill_items(None, _DELTAS, _LABELS)
+
+    assert [item["post"] for item in items] == ["Research Assistant", "Research Associate"]
+    assert all(item["confirmed"] is False for item in items)
+    assert items[0]["delta"] == _DELTAS["Research Assistant"]
+    assert items[1]["delta"] == _DELTAS["Research Associate"]
+
+
+# Full-time and part-time variants of one post share one item, so one answer covers both.
+def test_post_grill_items_group_variants_by_base_name() -> None:
+    from screening_core.jd_overrides import post_grill_items
+
+    items = post_grill_items(None, _DELTAS, _LABELS)
+
+    assert len(items) == 2
+    assert items[0]["labels"] == ["Research Assistant (Full-time)", "Research Assistant (Part-time)"]
+    # A base name no label states still names itself, so the item is never unlabelled.
+    assert items[1]["labels"] == ["Research Associate (Full-time)"]
+
+
+# A post whose requirements are all shared has no delta, so HR has nothing to confirm about it.
+def test_post_grill_items_skip_a_post_with_no_delta() -> None:
+    from screening_core.jd_overrides import post_grill_items
+
+    deltas = dict(_DELTAS, **{"Research Fellow": []})
+    items = post_grill_items(None, deltas, [*_LABELS, "Research Fellow"])
+
+    assert [item["post"] for item in items] == ["Research Assistant", "Research Associate"]
+
+
+# A confirmed post is not asked again, so a partially confirmed run asks only about what is left.
+def test_pending_post_grill_skips_confirmed_posts() -> None:
+    from screening_core.jd_overrides import POSTS_KEY, pending_post_grill
+
+    overrides = {
+        POSTS_KEY: [
+            {
+                "post": "Research Assistant",
+                "confirmed": True,
+                "delta": _DELTAS["Research Assistant"],
+            }
+        ]
+    }
+
+    assert [item["post"] for item in pending_post_grill(overrides, _DELTAS, _LABELS)] == [
+        "Research Associate"
+    ]
+
+
+# Confirming both posts settles the grill, so a later run has nothing left to stop for.
+def test_pending_post_grill_is_empty_when_every_post_is_confirmed() -> None:
+    from screening_core.jd_overrides import POSTS_KEY, pending_post_grill
+
+    overrides = {
+        POSTS_KEY: [
+            {"post": name, "confirmed": True, "delta": delta} for name, delta in _DELTAS.items()
+        ]
+    }
+
+    assert pending_post_grill(overrides, _DELTAS, _LABELS) == []
+
+
+# A confirmation is about the text HR saw: a changed advertisement re-opens the question rather
+# than reusing an answer given about something else.
+def test_pending_post_grill_reopens_when_the_derived_delta_changed() -> None:
+    from screening_core.jd_overrides import POSTS_KEY, pending_post_grill
+
+    overrides = {
+        POSTS_KEY: [
+            {
+                "post": "Research Assistant",
+                "confirmed": True,
+                "delta": ["a sentence the advertisement no longer contains"],
+            },
+            {
+                "post": "Research Associate",
+                "confirmed": True,
+                "delta": _DELTAS["Research Associate"],
+            },
+        ]
+    }
+
+    assert [item["post"] for item in pending_post_grill(overrides, _DELTAS, _LABELS)] == [
+        "Research Assistant"
+    ]
+
+
+# The recorded post is matched by base name, so HR's answer survives the variant spelling.
+def test_pending_post_grill_matches_the_recorded_post_by_base_name() -> None:
+    from screening_core.jd_overrides import POSTS_KEY, pending_post_grill
+
+    overrides = {
+        POSTS_KEY: [
+            {
+                "post": "research assistant",
+                "confirmed": True,
+                "delta": _DELTAS["Research Assistant"],
+            },
+            {
+                "post": "Research Associate (Full-time)",
+                "confirmed": True,
+                "delta": _DELTAS["Research Associate"],
+            },
+        ]
+    }
+
+    assert pending_post_grill(overrides, _DELTAS, _LABELS) == []
+
+
+# A single-post run has no deltas, so the grill carries no post items and nothing changes for it.
+def test_pending_post_grill_is_empty_without_deltas() -> None:
+    from screening_core.jd_overrides import pending_post_grill
+
+    assert pending_post_grill(None, {}, []) == []
+    assert pending_post_grill(None, None, None) == []

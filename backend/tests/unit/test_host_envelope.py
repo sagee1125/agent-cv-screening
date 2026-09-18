@@ -306,3 +306,96 @@ def test_project_check_updates_preserves_not_found_error_code() -> None:
     assert envelope["error_code"] == "not_found"
     assert envelope["changes"] is None
     assert envelope["has_changes"] is None
+
+
+# A multi-post run holds back its per-post derivation, so HR can confirm which requirements
+# belong to which post before any score is produced (FR-9).
+def test_project_conditions_pending_carries_per_post_deltas() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "conditions_pending",
+            "refno": "260907003",
+            "missing": ["conditions"],
+            "questions": ["Confirm the per-post requirements."],
+            "ask": {
+                "missing": ["conditions"],
+                "questions": ["Confirm the per-post requirements."],
+                "post_deltas": [
+                    {
+                        "post": "Research Assistant",
+                        "labels": ["Research Assistant (Full-time)", "Research Assistant (Part-time)"],
+                        "confirmed": False,
+                        "delta": ["Applicants for the Research Assistant post need honours."],
+                    }
+                ],
+            },
+        },
+        jas_session="granted",
+    )
+
+    assert envelope["status"] == "conditions_pending"
+    items = envelope["ask"]["post_deltas"]
+    assert items[0]["post"] == "Research Assistant"
+    assert items[0]["labels"] == [
+        "Research Assistant (Full-time)",
+        "Research Assistant (Part-time)",
+    ]
+    assert items[0]["delta"] == ["Applicants for the Research Assistant post need honours."]
+    assert validate_envelope(envelope) == []
+
+
+# The projected delta is bounded and scrubbed, because it is the one place advertisement prose
+# reaches the conversation.
+def test_project_post_deltas_bounds_and_scrubs_sentences() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "conditions_pending",
+            "refno": "260907003",
+            "missing": ["conditions"],
+            "questions": ["Confirm the per-post requirements."],
+            "ask": {
+                "missing": ["conditions"],
+                "questions": ["Confirm the per-post requirements."],
+                "post_deltas": [
+                    {
+                        "post": "Research Assistant",
+                        "labels": ["Research Assistant"],
+                        "confirmed": False,
+                        # An email must not survive into the conversation, and a very long
+                        # sentence must not arrive unbounded.
+                        "delta": ["Write to hr@example.edu for details." + "x" * 500],
+                    }
+                ],
+            },
+        },
+        jas_session="granted",
+    )
+
+    sentence = envelope["ask"]["post_deltas"][0]["delta"][0]
+    assert "hr@example.edu" not in sentence
+    assert "[redacted]" in sentence
+    assert len(sentence) <= 300
+
+
+# Without per-post items the ask keeps the shape it has always had.
+def test_project_conditions_pending_without_post_deltas_is_unchanged() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "conditions_pending",
+            "refno": "260818001",
+            "missing": ["conditions"],
+            "questions": ["Reuse the saved conditions?"],
+            "ask": {
+                "missing": ["conditions"],
+                "questions": ["Reuse the saved conditions?"],
+                "conditions": {"must_skills": ["Python"]},
+            },
+        },
+        jas_session="granted",
+    )
+
+    assert envelope["ask"]["conditions"]["must_skills"] == ["Python"]
+    assert "post_deltas" not in envelope["ask"]

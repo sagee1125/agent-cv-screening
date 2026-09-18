@@ -9,6 +9,13 @@ conditions are written to `_pipeline/jd-overrides.yaml`. This module folds them 
 The merge is deterministic on purpose. Re-parsing a JD that HR has edited would make
 must-have / nice-to-have assignment probabilistic again, and that assignment is both
 the field HR edits most and the least stable output of the parser.
+
+A multi-post advertisement adds a second thing the grill must settle: the derivation that
+attributed each requirement bullet to a post. That derivation decides what each post is
+scored against, so HR confirms it before any score is produced (FR-9). The confirmation is
+recorded in the same file under `posts`, one entry per base name, and carries the delta HR
+actually saw. A delta that no longer matches its recorded copy is unconfirmed again, because
+an answer about different text is not an answer about this one.
 """
 from __future__ import annotations
 
@@ -16,15 +23,18 @@ import copy
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from screening_core.paths import taxonomy_yaml_path
+from screening_core.posts import base_name
 from screening_core.taxonomy import SkillTaxonomyLoader
 
 # HR conditions file written by the conversation grill inside the output directory.
 OVERRIDES_FILENAME = "jd-overrides.yaml"
 # Merged JD every downstream consumer should score and report against.
 FINAL_JD_FILENAME = "jd-final.json"
+# Per-post confirmation of the base/delta split, one entry per post base name (FR-9).
+POSTS_KEY = "posts"
 
 # Provenance origins marking a requirement as coming from the conversation, not the ad.
 ORIGIN_SUPPLEMENT = "hr_supplement"
@@ -442,11 +452,113 @@ def merge_structured(jd_parsed: Any, overrides: Any) -> tuple[dict[str, Any], di
     return data, summary
 
 
+# Collapse a delta into the comparable strings HR confirms and the file stores.
+def _delta_sentences(sentences: Any) -> list[str]:
+    if not isinstance(sentences, list):
+        return []
+    return [" ".join(str(item).split()) for item in sentences if str(item or "").strip()]
+
+
+# Read the per-post confirmation state, keyed by case-folded base name so the full-time and
+# part-time variants of one post resolve to the single entry HR answered about (FR-9).
+def _recorded_posts(overrides: Any) -> dict[str, dict[str, Any]]:
+    entries = overrides.get(POSTS_KEY) if isinstance(overrides, dict) else None
+    if not isinstance(entries, list):
+        return {}
+    recorded: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = base_name(str(entry.get("post") or ""))
+        if not name:
+            continue
+        recorded[name.casefold()] = {
+            "confirmed": entry.get("confirmed") is True,
+            "delta": _delta_sentences(entry.get("delta")),
+        }
+    return recorded
+
+
+# The raw post labels each base name covers, in universe order, so one item can name every
+# variant it stands for: HR recognises "Research Assistant (Full-time)", not "Research Assistant".
+def _labels_by_base(labels: Iterable[str] | None) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for label in labels or []:
+        name = base_name(str(label or ""))
+        if not name:
+            continue
+        variants = grouped.setdefault(name.casefold(), [])
+        if label not in variants:
+            variants.append(label)
+    return grouped
+
+
+# One grill item per post that has a derivation of its own (FR-9). Grouped by base name, so the
+# full-time and part-time variants of one post share one item and therefore one answer.
+#
+# A post counts as confirmed only while the delta HR was shown still matches the delta derived
+# now: a changed advertisement re-opens the question instead of reusing an answer about other
+# text. A post with no delta of its own is not an item at all - there is nothing to confirm.
+def post_grill_items(
+    overrides: Any,
+    deltas: Mapping[str, Any] | None,
+    labels: Iterable[str] | None = (),
+) -> list[dict[str, Any]]:
+    """Return one grill item per post base name that has a delta, tagged with its post."""
+    recorded = _recorded_posts(overrides)
+    grouped = _labels_by_base(labels)
+    items: list[dict[str, Any]] = []
+    for name, sentences in (deltas or {}).items():
+        base = base_name(str(name or ""))
+        delta = _delta_sentences(sentences)
+        if not base or not delta:
+            continue
+        state = recorded.get(base.casefold()) or {}
+        items.append(
+            {
+                "post": base,
+                "labels": grouped.get(base.casefold()) or [base],
+                "confirmed": bool(state.get("confirmed")) and state.get("delta") == delta,
+                # The exact advertisement sentences this post's requirements were read from, so
+                # HR confirms the attribution against the source and not against a summary.
+                "delta": delta,
+            }
+        )
+    return items
+
+
+# The posts whose derivation HR has not yet settled, which is what the grill must ask about.
+# Empty means every derivation is confirmed, so the run has nothing left to stop for (FR-9).
+def pending_post_grill(
+    overrides: Any,
+    deltas: Mapping[str, Any] | None,
+    labels: Iterable[str] | None = (),
+) -> list[dict[str, Any]]:
+    """Return only the posts whose derivation is still unconfirmed."""
+    return [item for item in post_grill_items(overrides, deltas, labels) if not item["confirmed"]]
+
+
+# True when the file carries a condition the merge would actually consume, so HR is asked about
+# it. The per-post confirmation state is not a condition: a file holding only `posts` has nothing
+# for HR to read back, and asking about it would be a question with no content (FR-9).
+def _has_conditions(overrides: Any) -> bool:
+    if not isinstance(overrides, dict):
+        return False
+    for key in ("must_skills", "preferred_skills", "language_requirements", "eligibility_rules"):
+        if overrides.get(key):
+            return True
+    for key in ("target_seniority", "min_relevant_years", "extra_notes"):
+        value = overrides.get(key)
+        if value is not None and str(value).strip():
+            return True
+    return False
+
+
 # Describe stored conditions so the conversation can read them back to HR before reuse.
 def describe_overrides(out_dir: Path | str) -> dict[str, Any] | None:
     """Return a summary of the stored conditions, or None when there are none."""
     overrides = load_overrides(out_dir)
-    if overrides is None:
+    if overrides is None or not _has_conditions(overrides):
         return None
     must_entries, must_rejected = _normalize_skill_entries(
         overrides.get("must_skills"), allow_weight=True
