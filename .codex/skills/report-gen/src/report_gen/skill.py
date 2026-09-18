@@ -130,6 +130,7 @@ def generate_screening_board_skill(
     jd_text: str | None = None,
     jd_parsed: dict | None = None,
     post_jds: dict[str, dict[str, Any]] | None = None,
+    unmatched_posts: list[str] | None = None,
 ) -> dict[str, Any]:
     service = ReporterService()
     service.generate_screening_board_html(
@@ -141,6 +142,7 @@ def generate_screening_board_skill(
         jd_text=jd_text,
         jd_parsed=jd_parsed,
         post_jds=post_jds,
+        unmatched_posts=unmatched_posts,
     )
     return {"status": "success", "format": "html", "output_path": output_path}
 

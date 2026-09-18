@@ -76,6 +76,22 @@ def _read_post_jds(path: str | None) -> dict[str, dict] | None:
     return by_post or None
 
 
+# The records-page post labels the advertisement's Post title never mentions (FR-3 cross-check),
+# as recorded by the pipeline in the same file. Empty on a single-post run, which has no universe
+# to cross-check.
+def _read_post_warnings(path: str | None) -> list[str]:
+    if not path:
+        return []
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return []
+    return [
+        str(label).strip()
+        for label in (payload.get("unmatched_posts") or [])
+        if str(label).strip()
+    ]
+
+
 # Generate a one-page PDF report for one scored candidate (optionally with matching detail).
 def _run_candidate(args: argparse.Namespace) -> int:
     try:
@@ -138,6 +154,7 @@ def _run_board(args: argparse.Namespace) -> int:
             jd_text=jd_text,
             jd_parsed=jd_parsed,
             post_jds=post_jds,
+            unmatched_posts=_read_post_warnings(args.post_jds),
         )
     except Exception as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)

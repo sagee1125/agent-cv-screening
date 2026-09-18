@@ -357,3 +357,34 @@ def test_read_post_jds_absent_or_malformed_returns_none(tmp_path: Path) -> None:
     empty = tmp_path / "empty.json"
     empty.write_text(json.dumps({"posts": []}), encoding="utf-8")
     assert module._read_post_jds(str(empty)) is None
+
+
+# A records-page post the advertisement's title never mentions is shown above the sections, because
+# it questions the split itself rather than one post's ranking (FR-3, FR-7). The label is printed as
+# HR saw it on the page, which is the only thing they can check it against.
+def test_board_warns_about_a_post_the_advertisement_never_names(tmp_path: Path) -> None:
+    text = _board(
+        tmp_path,
+        _rows(),
+        post_jds=_post_jds(),
+        unmatched_posts=["Research Fellow"],
+    )
+    assert "aria-label='Post cross-check warning'" in text
+    assert "Research Fellow" in text
+    # A warning, not a block: every post still has its own ranked section.
+    assert text.count("<details class='post-section'") == 3
+    assert text.index("Post cross-check warning") < text.index("<details class='post-section'")
+
+
+# The warning is absent whenever nothing disagrees, so its presence always means something.
+def test_board_has_no_cross_check_warning_when_every_post_is_named(tmp_path: Path) -> None:
+    for extra in ({}, {"unmatched_posts": []}, {"unmatched_posts": None}):
+        text = _board(tmp_path, _rows(), post_jds=_post_jds(), **extra)
+        assert "Post cross-check warning" not in text
+
+
+# A single-post board has no post universe, so it can never carry the warning — the single-post page
+# must stay byte-identical to what it was before the post dimension existed.
+def test_single_post_board_never_warns_about_posts(tmp_path: Path) -> None:
+    text = _board(tmp_path, [_row("260901001", "", 1, 80.78)], unmatched_posts=["Research Fellow"])
+    assert "Post cross-check warning" not in text

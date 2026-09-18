@@ -1166,6 +1166,26 @@ def _needs_confirmation(rows: list[dict[str, Any]]) -> str:
     )
 
 
+# Records-page post labels the advertisement's Post title never mentions are shown to HR (FR-3,
+# FR-7). A warning, not a block: the page decides who applied for what, and a post can legitimately
+# be renamed between the advertisement and the application form. But a mismatch is also what a typo
+# or a stale advertisement looks like, and it is the only signal that the two inputs may not be
+# describing the same posts — so it is stated rather than left in the audit file.
+def _unmatched_posts(labels: list[str]) -> str:
+    if not labels:
+        return ""
+    items = "".join(f"<li>{_esc(label)}</li>" for label in labels)
+    return (
+        "<section class='note' aria-label='Post cross-check warning'>"
+        "<h2>Check these post names against the advertisement</h2>"
+        "<p>The advertisement's title does not mention the posts below, which applicants named on "
+        "their application forms. Each was still scored against its own derived job description, "
+        "but confirm the advertisement and the records page are describing the same posts.</p>"
+        f"<ul>{items}</ul>"
+        "</section>"
+    )
+
+
 # A post's effective JD is the base JD plus its delta (FR-4), so most of its tag set is the base's
 # tag set. Repeating it under every post buries the post-specific requirements in text the reader has
 # already read at the top of the page, so a group stating the same requirements as the shared panel's
@@ -1273,6 +1293,7 @@ def write_screening_board(
     jd_text: str | None = None,
     jd_parsed: dict | None = None,
     post_jds: dict[str, dict[str, Any]] | None = None,
+    unmatched_posts: list[str] | None = None,
 ) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1289,6 +1310,9 @@ def write_screening_board(
     # Ranking and the low-band advisory stay inside a post, because scores are comparable
     # within a post and not across posts (FR-6.3, FR-11).
     grouped = group_by_post(rows, multi_post=bool(post_jds))
+    # A cross-check disagreement questions the split itself, so it is stated above the sections
+    # rather than after them (FR-3). Empty on a single-post run, which has no post universe.
+    warning = _unmatched_posts(unmatched_posts or [])
     if grouped.groups:
         sections = []
         for index, group in enumerate(grouped.groups):
@@ -1303,11 +1327,11 @@ def write_screening_board(
                     expanded=index == 0,
                 )
             )
-        body = "".join(sections) + _needs_confirmation(grouped.unassigned)
+        body = warning + "".join(sections) + _needs_confirmation(grouped.unassigned)
     elif grouped.multi_post:
         # A multi-post page on which no applicant's post could be read has no section to show.
         # Saying so beats an empty board that looks like a silent drop (FR-7).
-        body = _needs_confirmation(grouped.unassigned)
+        body = warning + _needs_confirmation(grouped.unassigned)
     else:
         body = f"{_ranking_table(ranked)}{_low_band_advisory(ranked)}{_cards(ranked)}"
     page = f"""<!DOCTYPE html>
