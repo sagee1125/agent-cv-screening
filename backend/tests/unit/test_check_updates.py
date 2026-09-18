@@ -485,6 +485,71 @@ def test_check_reports_a_post_re_assignment(tmp_path, monkeypatch, capsys) -> No
     }
 
 
+# A four-post advertisement is counted as four posts, and the full-time and part-time variants of
+# one post stay separate: they share a base name and one effective JD, but the page lists them as
+# two posts, so a count that keyed on the base name would report the wrong roster (FR-4, FR-11).
+def test_check_counts_full_time_and_part_time_variants_separately(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    # The real 260917001 roster: 12 applicants across SPF/PDF x Full-time/Part-time.
+    four_posts = {
+        "260917012": "Senior Project Fellow (Full-time)",
+        "260917011": "Senior Project Fellow (Full-time)",
+        "260917010": "Senior Project Fellow (Part-time)",
+        "260917009": "Senior Project Fellow (Part-time)",
+        "260917008": "Senior Project Fellow (Part-time)",
+        "260917007": "Postdoctoral Fellow (Full-time)",
+        "260917006": "Postdoctoral Fellow (Full-time)",
+        "260917005": "Postdoctoral Fellow (Full-time)",
+        "260917004": "Postdoctoral Fellow (Part-time)",
+        "260917003": "Postdoctoral Fellow (Part-time)",
+        "260917002": "Postdoctoral Fellow (Part-time)",
+        "260917001": "Postdoctoral Fellow (Part-time)",
+    }
+    payload = _second_check(
+        [_multi_post_payload(four_posts), _multi_post_payload(four_posts)],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        module,
+    )
+
+    assert payload["has_changes"] is False
+    # Counts follow the page's candidate order, exactly as the board's sections do (FR-6.3).
+    assert payload["posts"] == [
+        {"post": "Senior Project Fellow (Full-time)", "applicants": 2},
+        {"post": "Senior Project Fellow (Part-time)", "applicants": 3},
+        {"post": "Postdoctoral Fellow (Full-time)", "applicants": 3},
+        {"post": "Postdoctoral Fellow (Part-time)", "applicants": 4},
+    ]
+    assert payload["needs_confirmation"] == []
+
+
+# Moving an applicant between the full-time and part-time variants of one post is a change: the two
+# share a base name, so a comparison made on the base name would call this no change at all.
+def test_check_reports_a_move_between_full_time_and_part_time(tmp_path, monkeypatch, capsys) -> None:
+    module = _import_module()
+    payload = _second_check(
+        [
+            _multi_post_payload({"260917001": "Postdoctoral Fellow (Part-time)"}),
+            _multi_post_payload({"260917001": "Postdoctoral Fellow (Full-time)"}),
+        ],
+        tmp_path,
+        monkeypatch,
+        capsys,
+        module,
+    )
+
+    assert payload["has_changes"] is True
+    assert payload["changes"]["post_changed"] == {
+        "260917001": {
+            "from": "Postdoctoral Fellow (Part-time)",
+            "to": "Postdoctoral Fellow (Full-time)",
+        }
+    }
+    assert payload["changes"]["posts_appeared"] == ["Postdoctoral Fellow (Full-time)"]
+    assert payload["changes"]["posts_disappeared"] == ["Postdoctoral Fellow (Part-time)"]
+
+
 # The check reports per-post counts and which post each new applicant is in (FR-11, FR-12).
 def test_check_reports_per_post_counts_and_new_applicants(tmp_path, monkeypatch, capsys) -> None:
     module = _import_module()
