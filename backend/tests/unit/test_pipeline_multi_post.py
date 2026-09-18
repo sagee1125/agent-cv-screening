@@ -596,3 +596,25 @@ def test_post_jd_payload_records_what_an_unclaimed_post_lost() -> None:
         ]
         == {}
     )
+
+
+# post-jds.json carries the records-page labels the advertisement's Post title never mentions, so
+# the cross-check is auditable from the run artifacts and the board can show it (FR-3, FR-7).
+def test_post_jd_payload_records_the_post_title_cross_check() -> None:
+    from screening_core.post_jds import post_jd_payload
+
+    payload = post_jd_payload(
+        base_jd_json="/tmp/jd-parse.json",
+        base_text="shared bullet",
+        posts=[{"post": "Research Assistant", "slug": "Research_Assistant", "jd_json": None, "delta": []}],
+        post_title="Research Assistant / Research Associate",
+        unmatched_posts=["Research Fellow"],
+    )
+
+    assert payload["post_title"] == "Research Assistant / Research Associate"
+    assert payload["unmatched_posts"] == ["Research Fellow"]
+    # Both keys are always present, so a reader never has to tell "no disagreement" from
+    # "not recorded" — a run that did not cross-check must not read like a clean one.
+    bare = post_jd_payload(base_jd_json="/tmp/jd-parse.json", base_text="shared", posts=[])
+    assert bare["post_title"] == ""
+    assert bare["unmatched_posts"] == []

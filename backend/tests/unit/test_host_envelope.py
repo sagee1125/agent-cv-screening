@@ -617,3 +617,61 @@ def test_forbidden_post_label_rejects_the_envelope() -> None:
 
     assert envelope["status"] == "error"
     assert envelope["error_code"] == "envelope_rejected"
+
+
+# A post the advertisement's title never mentions is carried into the envelope, so the reply can ask
+# HR to confirm the two inputs describe the same posts without reading the report (FR-3, FR-7).
+def test_project_posts_carries_the_post_title_cross_check() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260907003",
+            "candidates": [{"rank": 1, "appno": "111111", "total_score": 70.0, "tier": "medium", "post": "Research Assistant"}],
+            "posts": [{"post": "Research Assistant", "applicants": 1, "top_appno": "111111", "top_score": 70.0}],
+            "needs_confirmation": [],
+            "unmatched_posts": ["Research Fellow"],
+        },
+        jas_session="granted",
+    )
+
+    assert validate_envelope(envelope) == []
+    # A warning, not a failure: the run is still a success and the ranking is intact.
+    assert envelope["status"] == "success"
+    assert envelope["posts"]["unmatched_posts"] == ["Research Fellow"]
+    assert [row["post"] for row in envelope["ranking"]] == ["Research Assistant"]
+
+
+# Nothing disagreed, so the list is empty rather than absent — the reply never has to tell
+# "no disagreement" from "not checked".
+def test_project_posts_cross_check_is_empty_when_every_post_is_named() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260907003",
+            "candidates": [{"rank": 1, "appno": "111111", "total_score": 70.0, "tier": "medium", "post": "Research Assistant"}],
+            "posts": [{"post": "Research Assistant", "applicants": 1, "top_appno": "111111", "top_score": 70.0}],
+            "needs_confirmation": [],
+            "unmatched_posts": [],
+        },
+        jas_session="granted",
+    )
+
+    assert envelope["posts"]["unmatched_posts"] == []
+
+
+# A single-post job has no post universe to cross-check, so the key never appears and the envelope
+# keeps its pre-multi-post shape.
+def test_project_single_post_has_no_cross_check() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "success",
+            "refno": "260901004",
+            "candidates": [{"rank": 1, "appno": "111111", "total_score": 70.0, "tier": "medium"}],
+        },
+        jas_session="granted",
+    )
+
+    assert envelope["posts"] is None

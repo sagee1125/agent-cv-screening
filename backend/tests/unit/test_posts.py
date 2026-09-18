@@ -7,6 +7,7 @@ from screening_core.posts import (
     post_counts,
     post_key,
     post_of,
+    unmatched_posts,
 )
 
 
@@ -42,6 +43,53 @@ def test_mentioned_in_post_title() -> None:
     assert mentioned_in_post_title(title, "Senior Project Fellow (Full-time)") is True
     assert mentioned_in_post_title(title, "Postdoctoral Fellow (Part-time)") is True
     assert mentioned_in_post_title(title, "Research Assistant") is False
+
+
+# A post value the advertisement's Post title never mentions is a cross-check disagreement (FR-3).
+# It is reported as HR saw it on the records page, because that is the label they can check.
+def test_unmatched_posts_reports_a_label_the_title_never_mentions() -> None:
+    title = "Senior Project Fellow / Postdoctoral Fellow (Full-time/Part-time)"
+    labels = ["Senior Project Fellow (Full-time)", "Research Assistant"]
+    assert unmatched_posts(title, labels) == ["Research Assistant"]
+
+
+# The normal case is silence: an advertisement that names every post it advertises produces no
+# warning, which is what keeps the warning meaningful when it does appear.
+def test_unmatched_posts_is_silent_when_the_title_names_every_post() -> None:
+    title = "Senior Project Fellow / Postdoctoral Fellow (Full-time/Part-time)"
+    labels = [
+        "Senior Project Fellow (Full-time)",
+        "Senior Project Fellow (Part-time)",
+        "Postdoctoral Fellow (Full-time)",
+        "Postdoctoral Fellow (Part-time)",
+    ]
+    assert unmatched_posts(title, labels) == []
+
+
+# Full-time and part-time variants share one base name, so a title naming the post covers both
+# variants rather than reporting the parenthetical spelling as a disagreement.
+def test_unmatched_posts_matches_on_the_base_name() -> None:
+    assert unmatched_posts("Research Assistant", ["Research Assistant (Part-time)"]) == []
+
+
+# Two spellings of one post are one disagreement, and the first spelling HR saw is the one reported.
+def test_unmatched_posts_reports_each_post_once() -> None:
+    labels = ["Research Assistant", "  research   assistant ", "Research Fellow"]
+    assert unmatched_posts("Research Fellow", labels) == ["Research Assistant"]
+
+
+# No title means there is nothing to cross-check against, so nothing is reported: otherwise every
+# label would "disagree" and HR would get a warning about a missing input rather than a mismatch.
+def test_unmatched_posts_is_silent_without_a_title() -> None:
+    labels = ["Research Assistant", "Research Fellow"]
+    for title in ("", "   ", None):
+        assert unmatched_posts(title, labels) == []
+
+
+# A single-post advertisement has no post universe, so there is nothing to disagree with.
+def test_unmatched_posts_is_empty_without_labels() -> None:
+    assert unmatched_posts("Research Assistant", []) == []
+    assert unmatched_posts("Research Assistant", None) == []
 
 
 # A single-post advertisement has no post dimension, so it yields no groups and no unassigned rows.

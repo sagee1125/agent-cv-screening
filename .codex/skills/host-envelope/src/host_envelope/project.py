@@ -446,7 +446,7 @@ def _safe_post_label(value: Any) -> str | None:
 # The ranking list stays flat, so the counts and each post's best applicant are stated here rather
 # than left for the conversation to derive from it. That keeps a per-post summary available without
 # ever inviting a comparison between posts, whose scores are not comparable (FR-5).
-def _project_posts(groups_raw: Any, needs_raw: Any) -> dict[str, Any] | None:
+def _project_posts(groups_raw: Any, needs_raw: Any, unmatched_raw: Any = None) -> dict[str, Any] | None:
     groups: list[dict[str, Any]] = []
     for item in list(groups_raw or [])[:24]:
         if not isinstance(item, dict):
@@ -480,9 +480,16 @@ def _project_posts(groups_raw: Any, needs_raw: Any) -> dict[str, Any] | None:
         # The raw value is kept because it is exactly what HR has to rule on: an unreadable post
         # must be shown as it appeared, never replaced by a guess (FR-7).
         needs.append({"appno": appno, "post": _safe_post_label(item.get("post"))})
-    if not groups and not needs:
+    # Posts the records page named but the advertisement's title never did (FR-3). Reported so the
+    # reply can ask HR to confirm the two inputs describe the same posts; a warning, never a block.
+    unmatched: list[str] = []
+    for item in list(unmatched_raw or [])[:24]:
+        label = _safe_post_label(item)
+        if label and label not in unmatched:
+            unmatched.append(label)
+    if not groups and not needs and not unmatched:
         return None
-    return {"groups": groups, "needs_confirmation": needs}
+    return {"groups": groups, "needs_confirmation": needs, "unmatched_posts": unmatched}
 
 
 # Projects a {appno: post} map, dropping entries whose application no. or label cannot be shown.
@@ -735,8 +742,12 @@ def project_host_return(
         "has_changes": None,
         "first_check": None,
         "changes": None,
-        # A multi-post run reports its per-post counts here; None on a single-post job (FR-11).
-        "posts": _project_posts(skill.get("posts"), skill.get("needs_confirmation")),
+        # A multi-post run reports its per-post counts here; None on a single-post job (FR-11). A
+        # post the advertisement never named rides along as a warning, so the reply can raise it
+        # without reading the report (FR-3, FR-7).
+        "posts": _project_posts(
+            skill.get("posts"), skill.get("needs_confirmation"), skill.get("unmatched_posts")
+        ),
     }
     errors = validate_envelope(envelope)
     if errors or _payload_is_dirty(envelope):

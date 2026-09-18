@@ -56,6 +56,32 @@ def mentioned_in_post_title(post_title: str, label: str) -> bool:
     return bool(base) and base in (post_title or "").casefold()
 
 
+# The records-page post labels the advertisement's Post title never mentions (FR-3 cross-check).
+#
+# The post universe comes from the records page and the advertisement is the only other input that
+# can be checked against it, so a label the title does not name is a disagreement between the two.
+# It is a warning, not a block: the page is authoritative about who applied for what, and a post can
+# legitimately be renamed between the advertisement and the application form. But it is exactly the
+# shape a typo or a stale advertisement takes, and it is the only signal that the two inputs may not
+# be describing the same posts, so it has to be recorded and shown to HR (FR-3, FR-7).
+#
+# An empty title means there is nothing to cross-check against, so nothing is reported: with no
+# title every label would otherwise "disagree", which would be a warning about a missing input
+# rather than about a mismatch.
+def unmatched_posts(post_title: str, labels: Iterable[str]) -> list[str]:
+    """Return the labels the Post title never mentions, in first-appearance order."""
+    if not (post_title or "").strip():
+        return []
+    out: list[str] = []
+    for label in labels or []:
+        if mentioned_in_post_title(post_title, label):
+            continue
+        # Compared the way the universe is keyed, so two spellings of one post report once.
+        if not any(post_key(label) == post_key(seen) for seen in out):
+            out.append(label)
+    return out
+
+
 # One entry per post with its applicant count, in first-appearance order of the sequence given.
 # This is the post list the manifests and the update check report (PRD Section 6, FR-11). The two
 # sides count different things on purpose: the JAS side counts everyone on the records page, the
@@ -139,4 +165,5 @@ __all__ = [
     "post_counts",
     "post_key",
     "post_of",
+    "unmatched_posts",
 ]

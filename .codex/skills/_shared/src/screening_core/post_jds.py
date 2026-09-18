@@ -61,11 +61,21 @@ def post_jd_payload(
     mentioned: Iterable[str] = (),
     unclaimed: Iterable[str] = (),
     unclaimed_sentences: dict[str, list[str]] | None = None,
+    post_title: str = "",
+    unmatched_posts: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Return the post-jds.json payload for a multi-post run."""
     return {
         "version": POST_JD_VERSION,
         "base": {"jd_json": base_jd_json, "text": base_text},
+        # The advertisement's own Post title, recorded so the cross-check below can be re-read
+        # without the records page.
+        "post_title": str(post_title or ""),
+        # Records-page labels this title never mentions (FR-3). A warning, not a block: the page is
+        # authoritative about who applied, but a disagreement is the only signal that the page and
+        # the advertisement may not be describing the same posts, so it is recorded here and shown
+        # to HR (FR-7).
+        "unmatched_posts": [str(label) for label in unmatched_posts],
         # Posts the advertisement describes but nobody applied for: recorded, never rendered.
         "unclaimed": list(unclaimed),
         # The requirements those posts were attributed. This run excludes them from the base, so

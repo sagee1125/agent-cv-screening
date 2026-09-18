@@ -63,7 +63,7 @@ from screening_core.post_jds import (
     post_jd_payload,
     post_slug,
 )
-from screening_core.posts import base_name, group_by_post, post_key, post_of
+from screening_core.posts import base_name, group_by_post, post_key, post_of, unmatched_posts
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
     candidate_report_fingerprint,
@@ -489,7 +489,7 @@ def _resolve_jd_sources(args: argparse.Namespace, out_dir: Path) -> JdSources:
     base_path = _parse_jd_text(
         args, split.base_text, out_dir / "jd-parse.json", out_dir / BASE_JD_TEXT_NAME
     )
-    by_post = _build_post_jds(args, out_dir, split, names)
+    by_post = _build_post_jds(args, out_dir, split, names, labels)
     return JdSources(
         default=_apply_jd_overrides(args, out_dir, base_path),
         text=jd_text,
@@ -504,7 +504,11 @@ def _resolve_jd_sources(args: argparse.Namespace, out_dir: Path) -> JdSources:
 # A post whose requirements are all shared has no delta, so its effective JD is the base JD
 # itself and no second parse is written for it.
 def _build_post_jds(
-    args: argparse.Namespace, out_dir: Path, split: PostSplit, names: list[str]
+    args: argparse.Namespace,
+    out_dir: Path,
+    split: PostSplit,
+    names: list[str],
+    labels: list[str],
 ) -> dict[str, Path]:
     """Return {post base name: effective JD JSON path} and write post-jds.json."""
     entries: list[dict] = []
@@ -534,6 +538,10 @@ def _build_post_jds(
         mentioned=split.mentioned,
         unclaimed=split.unclaimed,
         unclaimed_sentences=split.unclaimed_sentences,
+        # The records page gave us the post universe; the advertisement's own Post title is the
+        # only other input it can be checked against (FR-3). --position carries that title.
+        post_title=args.position or "",
+        unmatched_posts=unmatched_posts(args.position or "", labels),
     )
     (out_dir / POST_JDS_NAME).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -1343,6 +1351,22 @@ def _post_summary(rows: list[dict], unassigned: list[dict]) -> dict:
     return {"posts": posts, "needs_confirmation": needs_confirmation}
 
 
+# The post-title cross-check as the run recorded it (FR-3). Read back from post-jds.json rather than
+# recomputed, so the manifest, the board and the audit file cannot disagree about what disagreed.
+def _post_cross_check(out_dir: Path) -> list[str]:
+    """Return the records-page labels the advertisement's Post title never mentioned."""
+    path = out_dir / POST_JDS_NAME
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    return [str(label).strip() for label in (payload.get("unmatched_posts") or []) if str(label).strip()]
+
+
 def _build_manifest(
     args: argparse.Namespace,
     out_dir: Path,
@@ -1400,6 +1424,11 @@ def _build_manifest(
     }
     if jd_sources.multi_post:
         manifest.update(_post_summary(rows, unassigned or []))
+        # A post the advertisement never names is a warning, not a failure: the run is complete and
+        # every applicant was scored, but HR has to see the disagreement (FR-3, FR-7). Always
+        # present on a multi-post run, so an empty list means "nothing disagreed" rather than
+        # "not checked".
+        manifest["unmatched_posts"] = _post_cross_check(out_dir)
     _persist_fingerprints(out_dir, args)
     text = json.dumps(manifest, ensure_ascii=False, indent=2)
     (out_dir / "manifest.json").write_text(text + "\n", encoding="utf-8")
