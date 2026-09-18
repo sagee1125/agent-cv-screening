@@ -262,6 +262,53 @@ def test_build_manifest_single_post_has_no_post_list(tmp_path) -> None:
     assert manifest["candidates"][0]["status"] == "S"
 
 
+# Every HR-facing list follows the records page's own order, and the board's post sections follow the
+# order the CVs reach the pipeline in, so the pipeline must be handed page order rather than the
+# filename order the offline folder walk happens to produce (FR-6.3).
+def test_run_screening_hands_the_pipeline_the_records_page_order(tmp_path, monkeypatch) -> None:
+    cv_a = tmp_path / "111111.pdf"
+    cv_b = tmp_path / "222222.pdf"
+    cv_a.write_bytes(b"%PDF")
+    cv_b.write_bytes(b"%PDF")
+    job = {
+        "refno": "260907003",
+        "jd_text": "Post title: Research Associate / Research Assistant",
+        "job": {"post_title": "Research Associate / Research Assistant", "multi_post": True},
+        # The page lists the newest application first, the opposite of the filename order.
+        "candidates": [
+            {"appno": "222222", "status": "S", "post": "Research Associate"},
+            {"appno": "111111", "status": "S", "post": "Research Assistant"},
+        ],
+    }
+    captured_cmd: list[list[str]] = []
+
+    def fake_run_pipeline(cmd):
+        captured_cmd.append(cmd)
+        return 0, {"status": "success", "candidates": []}
+
+    monkeypatch.setattr(module, "_run_pipeline", fake_run_pipeline)
+    args = _args(tmp_path, output_dir=str(tmp_path / "job"))
+    cvs = [("111111", cv_a), ("222222", cv_b)]
+
+    assert module._run_screening(job, cvs, args) == module.EXIT_OK
+
+    cmd = captured_cmd[0]
+    staged = [cmd[i + 1] for i, token in enumerate(cmd) if token == "--cv"]
+    assert [Path(path).name for path in staged] == ["222222.pdf", "111111.pdf"]
+    assert [cmd[i + 1] for i, token in enumerate(cmd) if token == "--cv-post"] == [
+        "222222=Research Associate",
+        "111111=Research Assistant",
+    ]
+    # The JAS manifest agrees with the pipeline, so the two can be read side by side.
+    work_dir = tmp_path / "job" / "260907003" / "_pipeline"
+    manifest = json.loads((work_dir / "jas-manifest.json").read_text(encoding="utf-8"))
+    assert [candidate["appno"] for candidate in manifest["candidates"]] == ["222222", "111111"]
+    assert manifest["posts"] == [
+        {"post": "Research Associate", "applicants": 1},
+        {"post": "Research Assistant", "applicants": 1},
+    ]
+
+
 # WorkBuddy --output-dir data/jas_out --skip-reports still writes the Desktop HR pack.
 def test_internal_output_dir_and_skip_reports_redirect_to_desktop(tmp_path, monkeypatch, capsys) -> None:
     jas_dir = tmp_path / "job"

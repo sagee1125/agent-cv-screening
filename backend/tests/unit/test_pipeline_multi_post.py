@@ -100,6 +100,25 @@ def test_rank_rows_ranks_within_each_post_group() -> None:
     assert ranked[("B", "2")] == 1
 
 
+# Ranking keeps the groups in the order their posts first appeared, because that order is what the
+# board's sections follow — and the pipeline is handed the CVs in the records page's own order, so
+# the sections come out in page order (FR-6.3).
+def test_rank_rows_keeps_the_group_order_the_cvs_arrived_in() -> None:
+    module = _import_pipeline()
+    rows = [
+        {"appno": "5", "post": "Research Associate", "total_score": 70.0},
+        {"appno": "4", "post": "Research Assistant", "total_score": 90.0},
+        {"appno": "3", "post": "Research Associate", "total_score": 50.0},
+    ]
+    module._rank_rows(rows, multi_post=True)
+    # Groups in first-appearance order, members by score inside their own group.
+    assert [(r["post"], r["appno"]) for r in rows] == [
+        ("Research Associate", "5"),
+        ("Research Associate", "3"),
+        ("Research Assistant", "4"),
+    ]
+
+
 # A blank post value cannot be placed and must be reported, never guessed at (FR-7).
 def test_rank_rows_returns_rows_with_no_post() -> None:
     module = _import_pipeline()

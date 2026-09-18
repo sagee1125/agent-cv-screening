@@ -1189,12 +1189,21 @@ def _generate_reports(
     html_out = report_dir / RANKING_OVERVIEW_HTML
     # JD content feeds the board panel, so its digest must invalidate the cached board.
     jd_digest, jd_text_arg, jd_json_arg = _report_jd_inputs(out_dir, jd_sources, jd_text)
+    # The board's sections follow the order their posts first appear in the ranked rows, which is
+    # the order the CVs were handed to the run — the records page's own order (FR-6.3). The digest
+    # has to carry it, or a reordered board would reuse the cached one rendered in the old order.
+    post_order = (
+        [group.label for group in group_by_post(rows, multi_post=True).groups]
+        if jd_sources is not None and jd_sources.multi_post
+        else []
+    )
     board_fp = board_report_fingerprint(
         position=args.position,
         refno=getattr(args, "refno", None),
         candidate_fingerprints=candidate_fps,
         resume_links_digest=sha256_text(json.dumps(resume_links, sort_keys=True, ensure_ascii=False)),
         jd_digest=jd_digest,
+        post_order=post_order,
     )
     reuse_board = previous.get("board") == board_fp and html_out.is_file()
     # A multi-post board is told about every post through post-jds.json. Rendering without it

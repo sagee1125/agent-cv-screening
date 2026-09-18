@@ -41,7 +41,7 @@ from screening_core.hr_output import (
 )
 from screening_core.job_state import load_job_state, record_screen_run, save_job_state, score_snapshot
 from screening_core.demo_mode import apply_demo_defaults
-from screening_core.posts import post_counts
+from screening_core.posts import order_by_records_page, post_counts
 from screening_core.report_fingerprint import FINGERPRINTS_NAME
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
@@ -381,6 +381,13 @@ def _run_screening(
     jd_text_path = work_dir / "jd.txt"
     jd_text_path.write_text(job.get("jd_text", ""), encoding="utf-8")
 
+    # Order the CVs as the records page lists them before anything downstream sees them (FR-6.3).
+    # The pipeline keeps this order, and the board builds one section per post in the order its
+    # posts first appear, so this single line is what makes the board's sections, both manifests'
+    # post lists and the update check agree with the page. Ordering here rather than in each entry
+    # point covers all of them: the offline folder walk sorts by filename, the live records page
+    # arrives newest-first, and both stage their CVs through this function.
+    cvs = order_by_records_page(cvs, job.get("candidates"))
     staged = _stage_cvs_by_appno(work_dir, cvs)
     manifest = _build_manifest(job, staged, download_failures=download_failures)
     (work_dir / "jas-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

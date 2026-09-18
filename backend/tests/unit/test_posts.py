@@ -3,6 +3,7 @@ from screening_core.posts import (
     base_name,
     group_by_post,
     mentioned_in_post_title,
+    order_by_records_page,
     post_counts,
     post_key,
     post_of,
@@ -108,3 +109,36 @@ def test_post_counts_is_empty_without_a_post() -> None:
     assert post_counts(None) == []
     assert post_counts([{"appno": "1", "post": None}]) == []
     assert post_counts([{"appno": "1", "post": "  "}]) == []
+
+
+# Every HR-facing list follows the records page's own order, which is why the board's sections, both
+# manifests' post lists and the update check can be read side by side (FR-6.3).
+def test_order_by_records_page_follows_the_page() -> None:
+    items = [("111111", "cv-a"), ("222222", "cv-b"), ("333333", "cv-c")]
+    page = [{"appno": "333333"}, {"appno": "111111"}, {"appno": "222222"}]
+    assert order_by_records_page(items, page) == [
+        ("333333", "cv-c"),
+        ("111111", "cv-a"),
+        ("222222", "cv-b"),
+    ]
+
+
+# A CV HR passed by hand is not on the page, so it must not displace the order the page gives; it
+# keeps its relative place after the applicants the page does list.
+def test_order_by_records_page_keeps_unlisted_applicants_last() -> None:
+    items = [("hand-1", "cv-a"), ("111111", "cv-b"), ("hand-2", "cv-c"), ("222222", "cv-d")]
+    page = [{"appno": "222222"}, {"appno": "111111"}]
+    assert order_by_records_page(items, page) == [
+        ("222222", "cv-d"),
+        ("111111", "cv-b"),
+        ("hand-1", "cv-a"),
+        ("hand-2", "cv-c"),
+    ]
+
+
+# A page with no candidates at all leaves the sequence exactly as it came in, so an entry point that
+# has no records page keeps behaving as it always has.
+def test_order_by_records_page_without_a_page_is_a_no_op() -> None:
+    items = [("111111", "cv-a"), ("222222", "cv-b")]
+    for page in ([], None, [{"appno": None}, {}]):
+        assert order_by_records_page(items, page) == items

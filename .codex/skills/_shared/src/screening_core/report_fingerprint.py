@@ -159,6 +159,7 @@ def board_report_fingerprint(
     candidate_fingerprints: dict[str, str],
     resume_links_digest: str | None = None,
     jd_digest: str | None = None,
+    post_order: list[str] | None = None,
 ) -> str:
     ordered = [candidate_fingerprints[key] for key in sorted(candidate_fingerprints)]
     return sha256_text(
@@ -170,6 +171,11 @@ def board_report_fingerprint(
                 *ordered,
                 f"links:{resume_links_digest or ''}",
                 f"jd:{jd_digest or ''}",
+                # The section order is part of the page, and the per-candidate fingerprints above
+                # are compared key-sorted, so a reordered board would otherwise reuse a board
+                # rendered in the old order (FR-6.3). Empty for a single-post job, which has no
+                # sections.
+                "posts:" + ",".join(post_order or []),
             ]
         )
     )

@@ -37,7 +37,9 @@ This is the exact behaviour HR expects when they say "screen the CVs" / 「請�
 
 One advertisement can cover several posts, and HR applies to a specific one. The envelope then
 carries `posts.groups` (one entry per post: `post`, `applicants`, `top_appno`, `top_score`) and
-every ranking row carries `post`. The report is one section per post.
+every ranking row carries `post`. The report is one section per post, in the records page's own
+candidate order (newest application first) — so the top section is the post the most recent
+applicant applied for, and it changes as newer applications arrive.
 
 The summary must be **per post**, and it must say that scores are comparable within a post and
 not across posts — each applicant was scored against the JD of the post they applied for, so a

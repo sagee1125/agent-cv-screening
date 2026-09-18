@@ -107,6 +107,29 @@ def test_board_fingerprint_changes_with_jd_digest() -> None:
     assert repeat == first
 
 
+# The board's section order is part of the page, and the per-candidate fingerprints are compared
+# key-sorted, so the order has to be in the digest or a reordered board would reuse the old one.
+def test_board_fingerprint_changes_with_the_post_order() -> None:
+    fps = {"123456": "aaa"}
+    page_order = board_report_fingerprint(
+        position="PA",
+        refno="1",
+        candidate_fingerprints=fps,
+        post_order=["Research Associate", "Research Assistant"],
+    )
+    reversed_order = board_report_fingerprint(
+        position="PA",
+        refno="1",
+        candidate_fingerprints=fps,
+        post_order=["Research Assistant", "Research Associate"],
+    )
+    assert page_order != reversed_order
+    # A single-post job has no sections, so it keeps the digest it always produced.
+    assert board_report_fingerprint(
+        position="PA", refno="1", candidate_fingerprints=fps, post_order=[]
+    ) == board_report_fingerprint(position="PA", refno="1", candidate_fingerprints=fps)
+
+
 # A post re-assignment must not be read as "the advertisement changed": it invalidates the score of
 # the applicant who moved, not the whole run's parse and every other post's score (FR-10).
 def test_post_change_invalidates_one_slug_not_the_run(tmp_path) -> None:

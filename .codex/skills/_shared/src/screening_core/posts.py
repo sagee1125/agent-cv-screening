@@ -76,6 +76,31 @@ def post_counts(candidates: Iterable[Any]) -> list[dict[str, Any]]:
     return [{"post": labels[key], "applicants": count} for key, count in counts.items()]
 
 
+# Reorder (appno, value) pairs into the order the records page lists the applicants (FR-6.3).
+#
+# The records page is the only artefact HR can check a report against, so every HR-facing list
+# follows the page's own order and they agree by construction: the board's post sections, both
+# manifests' post lists and the update check. The page lists the newest application first, so the
+# post at the top of the board is the one the most recent applicant applied for — and it changes
+# when a newer application arrives for a different post, which is the point: it can always be
+# checked against the page.
+#
+# An appno the page does not list keeps its relative place, after the ones it does: CVs HR passed
+# by hand with --cv are not on the page and must not displace what is. A page with no candidates
+# leaves the sequence exactly as it came in.
+def order_by_records_page(
+    items: Iterable[tuple[str, Any]], page_candidates: Iterable[Any]
+) -> list[tuple[str, Any]]:
+    """Return `items` sorted into the records page's candidate order."""
+    rank: dict[str, int] = {}
+    for candidate in page_candidates or []:
+        appno = str(candidate.get("appno") or "").strip() if isinstance(candidate, dict) else ""
+        if appno and appno not in rank:
+            rank[appno] = len(rank)
+    beyond = len(rank)
+    return sorted(items or [], key=lambda item: rank.get(str(item[0]).strip(), beyond))
+
+
 # Group rows by post, keeping first-appearance order. Rows whose post value is blank cannot be
 # placed in any group and are returned separately so the caller can ask HR (FR-7).
 #
@@ -110,6 +135,7 @@ __all__ = [
     "base_name",
     "group_by_post",
     "mentioned_in_post_title",
+    "order_by_records_page",
     "post_counts",
     "post_key",
     "post_of",

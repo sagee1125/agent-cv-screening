@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Multi_Post-v1.0
 feature_name: Multi-Post JAS Advertisements
-version: 1.2.3
+version: 1.2.4
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -31,7 +31,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** Multi-Post JAS Advertisements
-**Version:** 1.2.3 (MVP)
+**Version:** 1.2.4 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** HR recruiters screening a JAS `refno` through the WorkBuddy chat
@@ -50,6 +50,7 @@ affected_modules:
 | 1.2.1   | 2026-09-17 | HR Screening Product Owner | Withdraw FR-6.4: the records page has no post list, so a zero-applicant post cannot be shown. Add the measurement to §2.4 and scope the universe in FR-3. |
 | 1.2.2   | 2026-09-17 | HR Screening Product Owner | FR-6: redact the named contact from the rendered JD panel and correct the "no trace" wording, which the advertisement text contradicts. Record `unclaimed` as the cross-check. |
 | 1.2.3   | 2026-09-18 | HR Screening Product Owner | FR-6.3: a per-post JD panel repeats the shared tag groups (measured: every group of both posts equals the base's), so it now prints only the groups that state something the shared panel does not and names the rest. |
+| 1.2.4   | 2026-09-18 | HR Screening Product Owner | FR-6.3: sections follow the **records page's** candidate order, not the post universe's. Measured on `260907003`: the page lists newest-first (`005, 004, 003, 002, 001`), so its first post is Research Associate while the board showed Research Assistant. Ordering is imposed once, in `_run_screening` via `order_by_records_page`, so the board sections, both manifests' post lists and the update check agree by construction; the board digest now carries the post order, without which a reorder would silently reuse the cached board. Add the page-order measurement to §2.4. |
 
 ---
 
@@ -151,6 +152,12 @@ accept any one of the three signals as "multi-post", and treat a page with none 
   (Full-time/Part-time)`) that cannot be split back into the four labels applicants see. The only source of
   the post universe is therefore the `Post applied for` column, which means a post nobody applied for is
   invisible — the reason FR-6.4 was withdrawn in v1.2.1.
+- **The records page lists the newest application first.** Measured on `260907003`: the five rows run
+  `260907005, 260907004, 260907003, 260907002, 260907001`, with the `No.` column counting `5, 4, 3, 2, 1` and the
+  application dates descending. Their first-appearance post order is therefore **Research Associate →
+  Research Assistant**, even though the first *applicant* on the page applied for Research Associate and the
+  majority of applicants applied for Research Assistant. A post's position in the report is decided by the page,
+  not by its applicant count and not by the post universe's own order (FR-6.3).
 - **Every advertisement ends with a named contact block.** Both live multi-post `Description` values close
   with a sentence naming a member of staff and giving a telephone number, and one of them also a fax number.
   The advertisement also names every post it describes, so the advertisement text *can* mention a post that
@@ -273,11 +280,12 @@ One `ranking-overview.html` per refno, containing:
 2. A shared JD panel showing the **complete original advertisement text**, with its parsed tag groups listing
    the shared requirements only. The text is reproduced as the advertisement states it, except that the
    named contact's personal details are replaced by placeholders — see "Contact details are redacted" below.
-3. One collapsible section per post, ordered as the post universe is ordered. Each section header states the
-   post label, the number of applicants, and the top score; the body contains that post's JD panel and that
-   post's own ranking table and applicant cards. A post's effective JD is the base JD plus its delta (FR-4),
-   so its JD panel carries the delta plus only those requirement groups that state something the shared panel
-   does not; a group that states exactly the shared requirements is named in one line instead of repeated.
+3. One collapsible section per post, ordered as the **records page lists the applicants** — see "Sections follow
+   the records page" below. Each section header states the post label, the number of applicants, and the top
+   score; the body contains that post's JD panel and that post's own ranking table and applicant cards. A post's
+   effective JD is the base JD plus its delta (FR-4), so its JD panel carries the delta plus only those
+   requirement groups that state something the shared panel does not; a group that states exactly the shared
+   requirements is named in one line instead of repeated.
 4. The first section may default to expanded; every other section defaults to collapsed.
 5. Ranking tables inside a section are ranked within that section only.
 
@@ -293,6 +301,27 @@ delta. Groups are compared on the **requirements they state**, not on their rend
 set can be ranked in a different order once a delta shifts a skill's weight, and that order is a presentation
 artefact rather than a requirement. The comparison is made against the shared panel's own parse, so it needs no
 extra input and cannot disagree with what that panel shows.
+
+**Sections follow the records page.** The records page is the only artefact HR can check a report against, so
+every HR-facing list follows the page's own order and they agree by construction: the board's post sections,
+both manifests' post lists, and the update check. The page lists the **newest application first** — measured on
+`260907003`, the rows run `260907005, 260907004, 260907003, 260907002, 260907001` with the `No.` column counting
+`5, 4, 3, 2, 1` — so the section at the top of the board is the post the most recent applicant applied for. That
+is deliberately not a fixed post order: it changes when a newer application arrives for a different post, which
+is the point, because it can always be checked against the page.
+
+The order is imposed in **exactly one place**: `order_by_records_page` (in `screening_core`, the helper both the
+collector and the pipeline can import) is applied to the CV list in `_run_screening`, before staging. The board
+builds one section per post in the order its posts first appear in the ranked rows, and the ranked rows follow
+the order the CVs were handed to the run, so ordering the CVs once orders every downstream list. Ordering there
+rather than in each entry point covers all of them at once: the offline folder walk yields `sorted(iterdir())`
+(filename order), the live records page arrives newest-first, and both stage their CVs through the same
+function. A CV that the page does not list — one HR passed by hand with `--cv` — keeps its relative place after
+the ones it does, so a hand-supplied CV can never displace a listed applicant.
+
+The section order is part of the rendered page, and the per-candidate fingerprints in the board digest are
+compared **key-sorted**, so the digest carries the post order explicitly. Without it, a reorder that left every
+score unchanged would silently reuse the cached board rendered in the old order.
 
 Collapsible sections must use native HTML `<details>` / `<summary>` so the report needs no JavaScript and
 prints correctly.
@@ -475,7 +504,7 @@ there is no contaminated history to reconcile.
 | Unit — fixture guard | The mock records page keeps link-wrapped headers, so the suite cannot silently return to testing a path production never takes.                                                                                                                                      |
 | Unit — JD split      | Base plus delta reconstruction; bullets naming a post land in that post's delta; unnamed bullets stay shared; full-time and part-time variants inherit the same bullets; provenance points at the source sentence.                                                   |
 | Unit — grouping      | Post universe from the column values, in first-appearance order; a blank post value on a multi-post page produces the needs-confirmation block and never a guess; the universe holds exactly the posts that received applications (a post with zero applicants is out of scope — see FR-6). |
-| Unit — report        | One `<details>` per post; the shared panel carries the advertisement text with the named contact redacted and the raw text left unmodified in `_pipeline`; section order follows the post universe; no cross-post table.                                            |
+| Unit — report        | One `<details>` per post; the shared panel carries the advertisement text with the named contact redacted and the raw text left unmodified in `_pipeline`; section order follows the records page (FR-6.3); no cross-post table.                      |
 | Integration          | A multi-post fixture runs the full wrapper chain and produces one report with the expected per-post counts.                                                                                                                                                          |
 | Regression           | The single-post path is unchanged: same scores, same file names, same report shape.                                                                                                                                                                                  |
 | Cache                | Adding one applicant to post B does not invalidate post A's parsed, scored or per-applicant artifacts.                                                                                                                                                               |
@@ -552,10 +581,10 @@ Take the steps in this order. Each is independently testable, and the later step
 | - | ---- | -------- |
 | 1 | Add `post` to the column map **and** `JASCandidate.post` **in the same change**, so a mapped key always has a field to land in. The verified multi-post map is `{appno: 1, record_detail: 3, status: 4, cv: 14, supp: 15, post: 2}`. | `jas_import/records.py` |
 | 2 | Expose the multi-post flag from the three signals (FR-1); carry the post into the parsed candidate reference (FR-2). | `jas_import/records.py`, `jas_import/skill.py` |
-| 3 | Build the ordered post universe from the candidate references, plus the grouping helper that the pipeline and the report both use. An applicant with a **missing** post value on a multi-post page goes to the needs-confirmation block (FR-7); never a guess. | `screening_core` (shared helper) |
+| 3 | Build the post universe from the candidate references, plus the grouping helper that the pipeline and the report both use. An applicant with a **missing** post value on a multi-post page goes to the needs-confirmation block (FR-7); never a guess. Also add the ordering helper (`order_by_records_page`) and apply it to the CV list in `_run_screening` — the single ordering point for every HR-facing list (FR-6.3). | `screening_core` (shared helper), `jas-import/scripts/run_jas_screening.py` |
 | 4 | Base ⊕ delta derivation with provenance (FR-4). | `jd-parser` |
 | 5 | Per-post scoring groups (FR-5); add the post dimension to the cache keys (Section 6). | `pipeline/scripts/run_pipeline.py`, `screening_core` |
-| 6 | One `<details>` per post in the board (FR-6). | `report-gen/src/report_gen/html_board.py` |
+| 6 | One `<details>` per post in the board (FR-6), in the order the posts first appear in the ranked rows — which the CV order from step 3 fixes. Carry that post order in the board digest (`board_report_fingerprint`), or a reorder with unchanged scores reuses the cached board. | `report-gen/src/report_gen/html_board.py`, `screening_core/report_fingerprint.py`, `pipeline/scripts/run_pipeline.py` |
 | 7 | Per-post grill, grouped by base name, stopping once (FR-9). | `screening_core/jd_overrides.py`, `run_jas_screening.py` |
 | 8 | Per-post update checking (FR-12) and the multi-post reply text (FR-11). | `jas-import/scripts/check_updates.py`, `AGENTS.md`, the `hr-cv-screening` skill |
 
