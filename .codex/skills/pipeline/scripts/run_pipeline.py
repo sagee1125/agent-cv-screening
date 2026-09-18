@@ -48,6 +48,7 @@ from screening_core.input_policy import (
 from screening_core.jd_overrides import (
     FINAL_JD_FILENAME,
     OVERRIDES_FILENAME,
+    OverridesUnreadableError,
     describe_overrides,
     load_overrides,
     pending_post_grill,
@@ -612,6 +613,10 @@ def _merge_jd_overrides(args: argparse.Namespace, out_dir: Path, jd_parse_path: 
     """Return the merged JD path when HR conditions changed something, else the parsed JD."""
     try:
         final_path, summary = write_final_jd(out_dir, jd_parse_path, confirmed=True)
+    except OverridesUnreadableError:
+        # Not a merge failure to fall back from: scoring without HR's conditions while she believes
+        # they are in force is the one outcome the gate exists to prevent, so this one propagates.
+        raise
     except Exception as exc:  # never block a screening because the merge failed
         args._jd_overrides = {"applied": False, "reason": f"merge failed: {exc}"}
         return jd_parse_path

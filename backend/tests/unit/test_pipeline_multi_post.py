@@ -402,3 +402,31 @@ def test_gate_still_asks_when_the_file_holds_only_an_eligibility_rule(tmp_path: 
         module._require_conditions_decision(argparse.Namespace(), out_dir)
 
     assert excinfo.value.details["conditions"] is not None
+
+
+# A conditions file the gate cannot read must stop the run, never be read as "no conditions": the
+# ranking would otherwise be scored against the job ad alone while HR believes her conditions are
+# in force. The way past this is --conditions discard, which is HR's answer, not our inference.
+def test_gate_propagates_an_unreadable_conditions_file(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "jd-overrides.yaml").write_text("must_skills: [Python\n", encoding="utf-8")
+
+    with pytest.raises(module.OverridesUnreadableError) as excinfo:
+        module._require_conditions_decision(argparse.Namespace(), out_dir)
+
+    assert "jd-overrides.yaml" in str(excinfo.value)
+
+
+# An explicit HR answer releases the run even when the file cannot be read, because "screen against
+# the job ad alone" is exactly what discard means.
+def test_gate_lets_an_explicit_discard_past_an_unreadable_file(tmp_path: Path) -> None:
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "jd-overrides.yaml").write_text("must_skills: [Python\n", encoding="utf-8")
+
+    module._require_conditions_decision(
+        argparse.Namespace(_discard_conditions=True), out_dir
+    )

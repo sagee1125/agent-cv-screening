@@ -80,6 +80,10 @@ def _error_code(status: str, error_message: str | None) -> str | None:
     if status != "error":
         return None
     text = (error_message or "").lower()
+    # Checked first: a conditions file HR saved but we cannot read is her decision to make, not a
+    # pipeline fault, and the message naming that file is the only signal the envelope carries.
+    if "jd-overrides" in text:
+        return "conditions_unreadable"
     if "allowlist" in text or "not allowlisted" in text:
         return "host_not_allowlisted"
     if "cookie" in text or "unauthor" in text or "401" in text:

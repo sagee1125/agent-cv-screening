@@ -36,6 +36,13 @@ FINAL_JD_FILENAME = "jd-final.json"
 # Per-post confirmation of the base/delta split, one entry per post base name (FR-9).
 POSTS_KEY = "posts"
 
+
+# Raised when a conditions file exists but cannot be honoured. A run must never treat that as
+# "no conditions": HR would be shown a ranking scored against the job ad alone while believing her
+# conditions were in force.
+class OverridesUnreadableError(RuntimeError):
+    """A jd-overrides.yaml exists but could not be read as conditions."""
+
 # Provenance origins marking a requirement as coming from the conversation, not the ad.
 ORIGIN_SUPPLEMENT = "hr_supplement"
 ORIGIN_MOVED = "hr_moved"
@@ -53,20 +60,39 @@ def overrides_path(out_dir: Path | str) -> Path:
     return Path(out_dir) / OVERRIDES_FILENAME
 
 
-# Load HR-supplied conditions, returning None when the file is absent or unusable.
+# Load HR-supplied conditions, returning None only when there is no file to read.
+#
+# A file that exists but cannot be honoured is an error, never a silent None. Returning None would
+# screen against the job ad alone while HR believes her conditions are in force, which is exactly
+# the failure this whole gate exists to prevent. The way to screen without them is --conditions
+# discard, which is an answer HR gives, not something inferred from a file we failed to read.
 def load_overrides(out_dir: Path | str) -> dict[str, Any] | None:
     path = overrides_path(out_dir)
     if not path.is_file():
         return None
     try:
-        import yaml  # imported lazily so a missing PyYAML never breaks the pipeline
-    except ImportError:
-        return None
+        import yaml
+    except ImportError as exc:
+        raise OverridesUnreadableError(
+            f"{OVERRIDES_FILENAME} exists but PyYAML is not installed, so HR's conditions cannot be "
+            "read. Install the dependencies (backend/requirements.txt), or re-run with "
+            "--conditions discard to screen against the job ad alone."
+        ) from exc
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
-    except Exception:
+    except Exception as exc:
+        raise OverridesUnreadableError(
+            f"{OVERRIDES_FILENAME} could not be parsed ({exc}). Fix the file, or re-run with "
+            "--conditions discard to screen against the job ad alone."
+        ) from exc
+    if data is None:
+        # An empty file holds no conditions, which is a valid state rather than a failure.
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        raise OverridesUnreadableError(
+            f"{OVERRIDES_FILENAME} must be a YAML mapping, not {type(data).__name__}."
+        )
+    return data
 
 
 # Normalize a skill or requirement name into the canonical underscore token form.

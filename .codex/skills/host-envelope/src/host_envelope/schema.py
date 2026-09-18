@@ -17,6 +17,7 @@ ALLOWED_ERROR_CODES = frozenset(
         "need_input",
         "conditions_pending",
         "not_found",
+        "conditions_unreadable",
         "pipeline_error",
         "partial_failures",
         "internal",

@@ -3,10 +3,16 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from screening_core.jd_overrides import (
     FINAL_JD_FILENAME,
     ORIGIN_MOVED,
     ORIGIN_SUPPLEMENT,
+    OVERRIDES_FILENAME,
+    OverridesUnreadableError,
+    describe_overrides,
+    load_overrides,
     merge_structured,
     write_final_jd,
 )
@@ -582,3 +588,46 @@ def test_pending_post_grill_is_empty_without_deltas() -> None:
 
     assert pending_post_grill(None, {}, []) == []
     assert pending_post_grill(None, None, None) == []
+
+
+# A missing conditions file is simply "no conditions".
+def test_load_overrides_returns_none_when_the_file_is_absent(tmp_path) -> None:
+    assert load_overrides(tmp_path) is None
+
+
+# An empty conditions file holds no conditions, which is a valid state rather than a failure.
+def test_load_overrides_returns_none_for_an_empty_file(tmp_path) -> None:
+    (tmp_path / OVERRIDES_FILENAME).write_text("", encoding="utf-8")
+    assert load_overrides(tmp_path) is None
+
+
+# A conditions file that cannot be parsed is an error, never a silent "no conditions": HR would be
+# shown a ranking scored against the job ad alone while believing her conditions were in force.
+def test_load_overrides_raises_on_a_malformed_file(tmp_path) -> None:
+    (tmp_path / OVERRIDES_FILENAME).write_text("must_skills: [Python\n", encoding="utf-8")
+
+    with pytest.raises(OverridesUnreadableError) as excinfo:
+        load_overrides(tmp_path)
+
+    # The message has to name the file and the way out, because the agent acts on it directly.
+    message = str(excinfo.value)
+    assert OVERRIDES_FILENAME in message
+    assert "--conditions discard" in message
+
+
+# YAML that is not a mapping is HR data we cannot honour either, so it is an error too.
+def test_load_overrides_raises_on_a_non_mapping_file(tmp_path) -> None:
+    (tmp_path / OVERRIDES_FILENAME).write_text("- Python\n- SQL\n", encoding="utf-8")
+
+    with pytest.raises(OverridesUnreadableError) as excinfo:
+        load_overrides(tmp_path)
+
+    assert "mapping" in str(excinfo.value)
+
+
+# describe_overrides must not answer "no conditions" for a file it could not read either.
+def test_describe_overrides_propagates_an_unreadable_file(tmp_path) -> None:
+    (tmp_path / OVERRIDES_FILENAME).write_text("must_skills: [Python\n", encoding="utf-8")
+
+    with pytest.raises(OverridesUnreadableError):
+        describe_overrides(tmp_path)

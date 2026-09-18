@@ -275,6 +275,26 @@ def test_project_check_updates_error() -> None:
     assert "Users" not in (envelope.get("error_message") or "")
 
 
+# A conditions file HR saved but we cannot read gets its own code: it is her decision, not a
+# pipeline fault, and a generic pipeline_error would have the agent report a crash rather than ask.
+def test_project_screen_reports_unreadable_conditions() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={
+            "status": "error",
+            "error_message": (
+                "jd-overrides.yaml could not be parsed (while parsing a flow sequence). Fix the "
+                "file, or re-run with --conditions discard to screen against the job ad alone."
+            ),
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["status"] == "error"
+    assert envelope["error_code"] == "conditions_unreadable"
+    # The filename leads the message on purpose, so it survives the 160-char truncation.
+    assert "jd-overrides.yaml" in (envelope.get("error_message") or "")
+
+
 # A skill-reported not_found error survives projection for screen_refno.
 def test_project_screen_preserves_not_found_error_code() -> None:
     envelope = project_host_return(
