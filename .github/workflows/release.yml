@@ -22,7 +22,11 @@ jobs:
         run: python release/build_release.py "${GITHUB_REF_NAME#v}"
 
       - name: Attach zip to the GitHub release
-        uses: softprops/action-ghrelease@v2
-        with:
-          files: release/dist/CV-Screening-Setup.zip
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "CV Screening $GITHUB_REF_NAME" \
+            --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" \
+            release/dist/CV-Screening-Setup.zip --clobber
