@@ -1,0 +1,59 @@
+CV Screening - Setup Instructions (Windows and Mac)
+====================================================
+
+You need: this folder, the API key we sent you, and about 10 minutes.
+
+
+WINDOWS
+-------
+1. If this PC has no Python yet: install it from https://www.python.org/downloads/
+   IMPORTANT: in the installer, tick "Add python.exe to PATH".
+   (setup.bat will offer to do this via winget automatically when possible.)
+2. Double-click  setup.bat
+3. When it asks, paste the API key we sent you, then wait.
+   First run downloads the Python packages - this can take several minutes.
+4. Quit WorkBuddy completely and open it again.
+5. Open  Experts -> My Experts -> Vera  and say:
+       screen refno 260901004
+   (a demo job, safe to try). Reports appear on your Desktop in the folder
+   workbuddy-cv-screen.
+
+
+MAC
+---
+1. If this Mac has no Python 3: run  xcode-select --install  in Terminal,
+   or install Python from https://www.python.org/downloads/
+2. Double-click  setup.command
+   (If macOS blocks it: right-click the file once and choose "Open".)
+3. When it asks, paste the API key we sent you, then wait.
+4. Quit WorkBuddy completely and open it again.
+5. Open  Experts -> My Experts -> Vera  and say:
+       screen refno 260901004
+
+
+UPDATES
+-------
+New versions are published on GitHub. The expert checks quietly before each
+screening session and applies updates automatically; your API key, saved
+conditions and past reports are always kept. You can also update manually:
+double-click  update_engine.cmd  (Windows) or  update_engine.command  (Mac).
+
+Note for Mac users: screening against the public demo site works out of the
+box. Screening against the internal PolyU records pages currently requires
+the Windows browser-bridge component and is Windows-only.
+
+
+PRIVACY
+-------
+Reports show application numbers only - no names, emails, phone numbers,
+HKIDs or salaries. CV files stay on this computer.
+
+
+TROUBLESHOOTING
+---------------
+- "Python was not found": install Python (step 1 above), then run setup again.
+- The window closes instantly: right-click setup.bat -> "Run in Terminal"
+  (or open a Terminal in this folder and run it there) to see the error.
+- Download failures: check the internet connection and run the updater again.
+- Expert missing in WorkBuddy: restart WorkBuddy; if still missing, run
+  setup again.

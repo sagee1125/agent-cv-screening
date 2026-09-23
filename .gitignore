@@ -19,3 +19,5 @@ backend/tmp_*.py
 # Large Docker image export artifact (temporary backup), not for version control.
 cv-backend-patched.tar
 .workbuddy-ai/memory/
+# Release build output (asset is attached to GitHub Releases by CI).
+release/dist/

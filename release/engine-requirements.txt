@@ -1,0 +1,47 @@
+# Screening engine runtime dependencies.
+#
+# Installed automatically by setup.bat. Versions are pinned to the set the
+# engine was tested against, so every machine gets an identical environment.
+#
+# These are exactly the third-party packages the screening command chain
+# imports (see .codex/skills/**). Transitive dependencies resolve on their own.
+#
+# Deliberately NOT included:
+#   torch / transformers / gliner / sympy  - the optional on-device name
+#       detection model. ~708 MB. Disabled via CV_LOCAL_NER_ENABLED=false
+#       in .env; name detection falls back to the built-in text heuristics.
+#   playwright                             - not imported anywhere in the chain
+#   fastapi / starlette / uvicorn          - web API layer, not used by the CLI
+#   sqlalchemy / asyncpg / alembic         - database layer, not used by the CLI
+
+# --- HTTP and the LLM client ---
+httpx==0.28.1
+zai-sdk==0.2.3
+tenacity==9.0.0
+
+# --- Configuration ---
+pydantic==2.10.4
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+PyYAML==6.0.2
+
+# --- PDF parsing ---
+pymupdf==1.28.2
+pdfplumber==0.11.4
+pypdf==5.9.0
+pypdfium2==5.13.0
+
+# --- OCR, for CVs that are scans or images ---
+rapidocr==3.9.2
+opencv-python==4.14.0.94
+
+# --- Report output: HTML, PDF, XLSX ---
+reportlab==4.2.5
+openpyxl==3.1.5
+pillow==12.3.0
+
+# --- Numerics ---
+numpy==2.5.2
+
+# --- TLS: lets Python trust the Windows certificate store ---
+truststore==0.10.4

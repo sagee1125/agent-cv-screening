@@ -1,4 +1,4 @@
-# AGENTS.md
+# [AGENTS.md](http://AGENTS.md)
 
 Project rules for all agents working in this repository.
 
@@ -13,19 +13,48 @@ This is the exact behaviour HR expects when they say "screen the CVs" / 「請�
    refno, a records-page URL, or an already-exported folder, do **not** scan the filesystem,
    do **not** offer a list of previously-screened refnos, and do **not** invent one. Ask
    HR straight away for the job reference number (or the records page link). Reply in the
-   language HR used — English if they wrote in English, 繁體中文 if they wrote in 繁體中文
+   language HR used — English if they wrote in English, 繁體中文 if they wrote in Chinese
    (ask in both if you cannot tell). One short question, nothing else.
 
+   **"Chinese" means any Han character, not "characters that happen to be Traditional-only".**
+   Decide by script, never by a word list such as 篩選 / 履歷 / 申請. A message written entirely
+   in Simplified characters (「请筛选这个岗位」) contains none of those words, and a Traditional-word
+   test reads it as "not Chinese", falls through to the no-signal default and answers in English.
+   Measured 2026-09-23 on the expert package. Whatever HR writes — Simplified, Traditional, or
+   mixed — the reply is **繁體中文**, never Simplified and never English.
+
+   **One reply, one deliverable.** Say it **once**. No summary, no "here's the essence again", no
+   "in short", no "to recap", no condensed restatement, no second listing of the same ranking —
+   **not in the same language either**. Re-telling the same thing from a different angle is still
+   repetition: "here's the result again, minus the file directions" is a second delivery, not a
+   new fact. One reply contains, once each: the answer, the two or three sentences that matter
+   about the result, where the pack is, and at most one offer of a next step. Before sending, ask:
+   *does this reply contain two accounts of the same outcome?* If yes, delete one. Measured
+   2026-09-23, **twice** — a full Traditional answer followed by a full English restatement of the
+   same ranking table each time.
+
+   **One reply, one language — and no bilingual echo.** The same outcome stated once in Chinese and
+   again in English is two answers in one message, even though neither half is "mixed". If you have
+   already said it, do not say it again in the other language. Both halves of this rule are needed:
+   the echo and the summary are the two shapes that have actually been observed, and each one has
+   slipped past a rule that named only the other.
+
+   **Never let the engine's vocabulary reach HR.** No `hard gate`, `gate`, `eligibility`,
+   `override`, `fingerprint`, `cache`, `pipeline`, `dimension`, `axis`, `must_have_skill_match`, or
+   `_pipeline/*.json` in a reply to her. A **must-have skill is a scored requirement, not a gate** —
+   the only real gates are work authorisation, a mandatory degree and a mandatory language, and they
+   mean *not eligible*, which is a different outcome from a low score. Measured 2026-09-23: seven
+   must-haves described as "a lot of hard gates", which invites HR to read every low score as
+   disqualification. Say **"required skills"**; say **"the conditions you set earlier"** rather than
+   naming the file that stores them.
 2. **Refno given → run the WebBridge human flow.** Use `--driver webbridge` (the default).
    The collector opens the demo site in HR's real browser, types the refno into the list
    page Ref-no filter, clicks the row's View link, downloads the CVs, and runs the
    pipeline — HR watches the whole human flow.
-
 3. **Not found → close the browser tabs and report.** If the refno has no matching row,
    the collector closes the WebBridge pages it opened and returns `not_found`. Tell HR in
    their language that the refno was not found and ask for the correct one. Do **not**
    leave the empty-search page on screen.
-
 4. **Found → open the ranking report, close the browser tabs, give a text summary.** On
    success the collector opens `ranking-overview.html` and closes the WebBridge tabs, so HR
    is left with the report. Then give HR a short text summary (counts, top candidate
@@ -49,8 +78,8 @@ cross-post comparison would be meaningless:
 > post — open each section for that post's own ranking. Applicants are not compared across
 > posts: a score only means something inside the post it was assessed against.
 >
-> - <post> — <n> applicants, top application no. <appno>
-> - <post> — <n> applicants, top application no. <appno>
+> - — applicants, top application no.
+> - — applicants, top application no.
 >
 > On your Desktop, open the folder workbuddy-cv-screen, then the folder named with this job
 > reference number, then open ranking-overview.html. Each PDF is named with the application
@@ -74,7 +103,7 @@ Never place them by guessing.
 ### Skill contract source
 
 The same screening contract is installed as a user-level WorkBuddy skill named
-**`hr-cv-screening`** (`~/.workbuddy-ai/skills/hr-cv-screening/SKILL.md`), so HR can trigger
+`hr-cv-screening` (`~/.workbuddy-ai/skills/hr-cv-screening/SKILL.md`), so HR can trigger
 it from any folder, not only inside this repo. That skill is the canonical source for the
 command list, the tool map, the privacy red lines, and the reply templates. This file stays
 authoritative for anything repo-specific (paths, code rules) — see the
@@ -92,9 +121,7 @@ interpreter when those packages are missing from the interpreter that was called
 Every code file and every function must include a short English comment explaining its purpose.
 
 1. **File header comment** Each source file (backend `.py`, frontend `.ts` / `.tsx` components, scripts, configs, etc.) must start with a brief one-line English comment describing the purpose of the file.
-
 2. **Function comment** Every function, method, and React component function must have a short English comment (1-2 lines) directly above its definition explaining what it does.
-
 3. **Language & length** Comments must be written in English and kept concise: state the _purpose_, not the implementation details.
 
 ### Examples
@@ -129,32 +156,29 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    types the refno into the list-page filter, clicks the row's View link, downloads the
    CVs, and then runs the screening pipeline — so HR watches the whole human flow.
 
-   ```bash
-   venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno-or-url>" --driver webbridge
-   ```
+- The WebBridge human flow is the default everywhere; `run_webridge_collect.py --driver webbridge`
+  auto-starts the Kimi WebBridge daemon when it is down (probes `http://127.0.0.1:10086/status`).
+- Only if the daemon still cannot be started (or HR explicitly asks for the offline/HTTP path),
+  fall back to the headless HTTP driver:
+  `venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno>" --driver http`
+- Only if HR explicitly asks for the offline/HTTP path, or hands over an **already exported
+  folder** (`records.html` + `cvs/`), run jas-import directly:
+  `venv/Scripts/python.exe .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`
+- `demo_mode.json` at the repo root supplies `--base-url` / `--allow-host` /
+  `--no-cookie` automatically, so do not pass them by hand.
+- Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
+- **Browser cleanup is automatic**: when a run succeeds and `ranking-overview.html` has
+  been opened, the collector calls WebBridge `close_session`, so every page it opened is
+  closed and HR is left with the report. A **not-found** result also closes the tabs
+  (the empty search is an answered question — tell HR the refno was not found and ask for
+  the correct one; do not leave them on the blank results page). Other failures (download
+  failure, pipeline error) keep the pages open on purpose so HR can see what went wrong.
+  Pass `--keep-browser` to opt out of closing in any case. The same applies to
+  `check_updates.py`, which closes the tab it opened once the check is answered. The
+  close is best-effort and never fails a screening.
+- The update checker `check_updates.py` uses the same WebBridge default; it only opens the
+  records page (no CV download, no report). Add `--driver http` for the offline/cookie path.
 
-   - The WebBridge human flow is the default everywhere; `run_webridge_collect.py --driver webbridge`
-     auto-starts the Kimi WebBridge daemon when it is down (probes `http://127.0.0.1:10086/status`).
-   - Only if the daemon still cannot be started (or HR explicitly asks for the offline/HTTP path),
-     fall back to the headless HTTP driver:
-     `venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_collect.py "<refno>" --driver http`
-   - Only if HR explicitly asks for the offline/HTTP path, or hands over an **already exported
-     folder** (`records.html` + `cvs/`), run jas-import directly:
-     `venv/Scripts/python.exe .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`
-   - `demo_mode.json` at the repo root supplies `--base-url` / `--allow-host` /
-     `--no-cookie` automatically, so do not pass them by hand.
-   - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
-   - **Browser cleanup is automatic**: when a run succeeds and `ranking-overview.html` has
-     been opened, the collector calls WebBridge `close_session`, so every page it opened is
-     closed and HR is left with the report. A **not-found** result also closes the tabs
-     (the empty search is an answered question — tell HR the refno was not found and ask for
-     the correct one; do not leave them on the blank results page). Other failures (download
-     failure, pipeline error) keep the pages open on purpose so HR can see what went wrong.
-     Pass `--keep-browser` to opt out of closing in any case. The same applies to
-     `check_updates.py`, which closes the tab it opened once the check is answered. The
-     close is best-effort and never fails a screening.
-   - The update checker `check_updates.py` uses the same WebBridge default; it only opens the
-     records page (no CV download, no report). Add `--driver http` for the offline/cookie path.
 3. If there is no refno, link, or folder, do not invent a screener. The CLI returns `need_input` (`refno`). Ask HR in the language they used (or both) for the job reference number or the records page link.
 4. Do not write or edit `screening.html` / `screening_report.html`. Do not add JS parsers or localhost demos. Do not pass `--skip-reports`.
 5. Reports go to `Desktop/workbuddy-cv-screen/<refno>/` (not the WorkBuddy session folder). Files: `ranking-overview.html`, `<appno>.html`, `<appno>.pdf`.
@@ -163,4 +187,3 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    Do not ask HR to name Python scripts. On a multi-post job, give the counts and top `appno`s
    **per post** and say that scores are comparable within a post, not across posts (FR-11) —
    the exact wording is in "Multi-post jobs" above.
-

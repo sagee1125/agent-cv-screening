@@ -1,0 +1,46 @@
+{
+  "name": "hr-cv-screener",
+  "version": "0.2.0",
+  "description": "Screens job applicants for HR: reads a job ad and every candidate CV, scores them on five dimensions, and writes a ranking overview plus individual reports to the Desktop. Identifies candidates by application number only.",
+  "author": {
+    "name": "IHERD / PolyU",
+    "email": "sa1jing.chen@polyu.edu.hk"
+  },
+  "agents": [
+    "./agents/hr-cv-screener.md"
+  ],
+  "skills": [
+    "./skills/hr-cv-screening"
+  ],
+  "expertType": "agent",
+  "agentName": "hr-cv-screener",
+  "displayName": {
+    "en": "Vera",
+    "zh": "Vera"
+  },
+  "profession": {
+    "en": "Resume Screening Specialist",
+    "zh": "履歷篩選專員"
+  },
+  "displayDescription": {
+    "en": "Reads a job ad and every applicant CV, scores them on five dimensions and produces a ranking overview plus individual reports, identifying candidates by application number only.",
+    "zh": "讀取招聘廣告與應徵履歷，依五個維度評分排名並產出報告；全程只用申請編號，不顯示個人隱私資料。"
+  },
+  "avatar": "avatars/expert.png",
+  "categoryId": "09-OperationsHR",
+  "defaultInitPrompt": {
+    "en": "Screen a job by reference number",
+    "zh": "用崗位編號篩選應徵者"
+  },
+  "plugin": "hr-cv-screener",
+  "tags": [
+    { "en": "CV Screening", "zh": "履歷篩選" },
+    { "en": "Candidate Ranking", "zh": "應徵者排名" },
+    { "en": "HR Reporting", "zh": "人事報告" }
+  ],
+  "quickPrompts": [
+    { "en": "Screen a job by reference number", "zh": "用崗位編號篩選應徵者" },
+    { "en": "Any new applications for this job?", "zh": "這個崗位有沒有新申請？" },
+    { "en": "Screen an exported folder of CVs", "zh": "篩選已匯出的履歷資料夾" }
+  ]
+}
