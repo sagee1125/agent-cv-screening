@@ -132,11 +132,6 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
         pkg = extract_dir
         if (pkg / "expert" / "hr-cv-screener").is_dir():
             setup_engine.install_expert(pkg, root, setup_engine.workbuddy_config_dir())
-        for name in ("update_engine.cmd", "update_engine.command", "setup.bat", "setup.command", "START-HERE.txt"):
-            source = pkg / name
-            if source.is_file():
-                shutil.copy2(source, root / name)
-        shutil.copy2(Path(__file__).resolve(), root / "scripts" / "update_engine.py")
         setup_engine.install_launcher_files(pkg, root)
 
         stamp = read_version_stamp(root)

@@ -114,10 +114,16 @@ def install_launcher_files(pkg: Path, dst: Path) -> None:
         src = pkg / name
         if src.is_file():
             shutil.copy2(src, dst / name)
-    shutil.copy2(Path(__file__).resolve(), dst / "scripts" / "setup_engine.py")
-    updater = Path(__file__).resolve().with_name("update_engine.py")
-    if updater.is_file():
-        shutil.copy2(updater, dst / "scripts" / "update_engine.py")
+    # Always copy from the payload's scripts dir. Copying from __file__ would
+    # make the updater overwrite its own running file on Windows (WinError 32).
+    scripts_src = pkg / "scripts"
+    for name in ("setup_engine.py", "update_engine.py"):
+        src = scripts_src / name
+        dst_file = dst / "scripts" / name
+        if not src.is_file() or src.resolve() == dst_file.resolve():
+            continue
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst_file)
 
 
 def looks_like_real_key(value: str) -> bool:
