@@ -137,11 +137,16 @@ def write_zip(stage: Path, output: Path) -> str:
             if path.is_dir():
                 continue
             arcname = path.relative_to(stage).as_posix()
-            info = zipfile.ZipInfo(arcname, date_time=(2026, 1, 1, 0, 0, 0))
             mode = 0o755 if path.name in EXECUTABLE_NAMES else 0o644
+            content = path.read_bytes()
+            if path.name in EXECUTABLE_NAMES:
+                # A Windows checkout with core.autocrlf=true stages CRLF;
+                # bash on macOS cannot run CRLF shell scripts.
+                content = content.replace(b"\r\n", b"\n")
+            info = zipfile.ZipInfo(arcname, date_time=(2026, 1, 1, 0, 0, 0))
             info.external_attr = (mode << 16) | 0o100000
             info.compress_type = zipfile.ZIP_DEFLATED
-            archive.writestr(info, path.read_bytes())
+            archive.writestr(info, content)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     return digest
 
