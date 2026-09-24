@@ -144,7 +144,16 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
             venv_python = root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
             if venv_python.is_file():
                 log("[..] dependencies changed - updating the Python environment...")
-                subprocess.run([str(venv_python), "-m", "pip", "install", "-r", str(new_req)], check=False)
+                # uv-created venvs have no pip inside them, so prefer the uv
+                # binary the launcher left in <engine>/tools/.
+                uv = root / "tools" / ("uv.exe" if sys.platform == "win32" else "uv")
+                if uv.is_file():
+                    subprocess.run(
+                        [str(uv), "pip", "install", "--python", str(venv_python), "-r", str(new_req)],
+                        check=False,
+                    )
+                else:
+                    subprocess.run([str(venv_python), "-m", "pip", "install", "-r", str(new_req)], check=False)
 
         bust_score_caches(quiet)
         if not quiet:

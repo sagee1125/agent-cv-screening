@@ -35,6 +35,12 @@ from pathlib import Path
 REPO_SLUG = "sagee1125/agent-cv-screening"
 ENGINE_CODENAME = "agent-cv-screening"
 
+# Interpreter versions the pinned dependency set actually ships wheels for.
+# Verified against PyPI: PyYAML 6.0.2 and pydantic-core 2.27.2 have no cp314
+# wheels (pip would need a C++/Rust toolchain), and numpy 2.5.2 has no cp310 /
+# cp311 wheels either. 3.12 is the version the engine is tested on.
+SUPPORTED_PYTHON = {(3, 12), (3, 13)}
+
 # Required .env keys for screening_core.config.Settings (checked at import time
 # even for CLI-only use, so the installer must write all of them).
 ENV_TEMPLATE = """\
@@ -159,14 +165,29 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_venv(engine_dst: Path, skip: bool) -> None:
+def venv_python_path(engine_dst: Path) -> Path:
+    return engine_dst / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+
+
+def build_venv(engine_dst: Path, prepared_by_bootstrap: bool) -> None:
+    """Ensure the private environment exists.
+
+    The normal install path is the launcher (setup.bat / setup.command), which
+    provisions Python 3.12 and the venv with uv and then passes --skip-venv.
+    The creation path below only runs when someone starts this script directly
+    with a system interpreter (development machines).
+    """
     venv_dir = engine_dst / "venv"
-    if skip and (venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")).is_file():
-        log("[ok] venv already present - skipping creation.")
-        return
+    python = venv_python_path(engine_dst)
+    if prepared_by_bootstrap:
+        if python.is_file():
+            log("[ok] private environment already prepared.")
+            return
+        log("[ERROR] --skip-venv was passed but no environment exists yet.")
+        log("        Run setup.bat (Windows) or setup.command (Mac) instead.")
+        raise SystemExit(1)
     log("[..] creating the Python environment (one-time, a few minutes)...")
     venv.create(venv_dir, with_pip=True)
-    python = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
     subprocess.run(
         [str(python), "-m", "pip", "install", "-r", str(engine_dst / "requirements.txt")],
@@ -221,7 +242,7 @@ def main() -> int:
     parser.add_argument("--engine-target", default=None, help="Install location (default: C:\\agent-cv-screening or ~/agent-cv-screening).")
     parser.add_argument("--api-key", default=None, help="ZAI_API_KEY (skips the prompt).")
     parser.add_argument("--version", default="0.0.0", help="Version stamp written to version.json.")
-    parser.add_argument("--skip-venv", action="store_true", help="Reuse an existing venv if present.")
+    parser.add_argument("--skip-venv", action="store_true", help="The launcher already prepared Python 3.12 and the venv with uv.")
     args = parser.parse_args()
 
     pkg = package_root()
@@ -229,6 +250,17 @@ def main() -> int:
     expert_src = pkg / "expert" / "hr-cv-screener"
     if not engine_src.is_dir() or not expert_src.is_dir():
         log("[ERROR] This installer must run from the release zip (engine/ or expert/ missing).")
+        return 1
+
+    # Only relevant when this script itself has to create the environment from
+    # a system interpreter. With --skip-venv the interpreter is already the
+    # private Python 3.12 that uv provisioned.
+    if not args.skip_venv and sys.version_info[:2] not in SUPPORTED_PYTHON:
+        current = f"{sys.version_info.major}.{sys.version_info.minor}"
+        log(f"[ERROR] Python {current} cannot build this environment.")
+        log("        Run setup.bat (Windows) or setup.command (Mac) instead - the")
+        log("        launcher provisions its own private Python 3.12 with uv and")
+        log("        never touches the Python installed on this computer.")
         return 1
 
     engine_dst = Path(args.engine_target).expanduser() if args.engine_target else default_engine_target()

@@ -1,19 +1,24 @@
 CV Screening - Setup Instructions (Windows and Mac)
 ====================================================
 
-You need: this folder, the API key we sent you, and about 10 minutes.
+You need: this folder, the API key we sent you, and about 15 minutes.
+
+Nothing else has to be installed first. The installer brings its own private
+copy of Python 3.12 - it never uses or changes the Python already on this
+computer, needs no administrator rights, and installs nothing system-wide.
+
+The first run downloads about 50 MB (the installer helper and the private
+Python) and then the screening components. This happens once.
 
 
 WINDOWS
 -------
-1. If this PC has no Python yet: install it from https://www.python.org/downloads/
-   IMPORTANT: in the installer, tick "Add python.exe to PATH".
-   (setup.bat will offer to do this via winget automatically when possible.)
-2. Double-click  setup.bat
-3. When it asks, paste the API key we sent you, then wait.
-   First run downloads the Python packages - this can take several minutes.
-4. Quit WorkBuddy completely and open it again.
-5. Open  Experts -> My Experts -> Vera  and say:
+1. Double-click  setup.bat
+2. When it asks, paste the API key we sent you, then wait.
+   A lot of text scrolls by - that is normal. Wait for the line:
+       Install complete.
+3. Quit WorkBuddy completely and open it again.
+4. Open  Experts -> My Experts -> Vera  and say:
        screen refno 260901004
    (a demo job, safe to try). Reports appear on your Desktop in the folder
    workbuddy-cv-screen.
@@ -21,13 +26,12 @@ WINDOWS
 
 MAC
 ---
-1. If this Mac has no Python 3: run  xcode-select --install  in Terminal,
-   or install Python from https://www.python.org/downloads/
-2. Double-click  setup.command
+1. Double-click  setup.command
    (If macOS blocks it: right-click the file once and choose "Open".)
-3. When it asks, paste the API key we sent you, then wait.
-4. Quit WorkBuddy completely and open it again.
-5. Open  Experts -> My Experts -> Vera  and say:
+2. When it asks, paste the API key we sent you, then wait.
+   Wait for the line:  Install complete.
+3. Quit WorkBuddy completely and open it again.
+4. Open  Experts -> My Experts -> Vera  and say:
        screen refno 260901004
 
 
@@ -38,10 +42,6 @@ screening session and applies updates automatically; your API key, saved
 conditions and past reports are always kept. You can also update manually:
 double-click  update_engine.cmd  (Windows) or  update_engine.command  (Mac).
 
-Note for Mac users: screening against the public demo site works out of the
-box. Screening against the internal PolyU records pages currently requires
-the Windows browser-bridge component and is Windows-only.
-
 
 PRIVACY
 -------
@@ -51,9 +51,11 @@ HKIDs or salaries. CV files stay on this computer.
 
 TROUBLESHOOTING
 ---------------
-- "Python was not found": install Python (step 1 above), then run setup again.
+- Setup could not download something: check the internet connection (the
+  downloads come from github.com and pypi.org) and run setup again.
 - The window closes instantly: right-click setup.bat -> "Run in Terminal"
   (or open a Terminal in this folder and run it there) to see the error.
-- Download failures: check the internet connection and run the updater again.
-- Expert missing in WorkBuddy: restart WorkBuddy; if still missing, run
-  setup again.
+- Expert missing in WorkBuddy: restart WorkBuddy; if it is still missing,
+  run setup again.
+- Mac: screening the internal PolyU job pages needs the Windows browser
+  bridge; on Mac the public demo jobs work.
