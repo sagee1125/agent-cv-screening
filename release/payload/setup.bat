@@ -17,8 +17,10 @@ mkdir "%TOOLS%" >nul 2>nul
 set UV=%TOOLS%\uv.exe
 if exist "%UV%" goto have_uv
 
+set UVARCH=x86_64
+if "%PROCESSOR_ARCHITECTURE%"=="ARM64" set UVARCH=aarch64
 echo Fetching the installer helper (uv, about 17 MB, one time)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile '%TEMP%\uv.zip' -UseBasicParsing; Expand-Archive -Force '%TEMP%\uv.zip' '%TEMP%\uvunpack' } catch { exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-%UVARCH%-pc-windows-msvc.zip' -OutFile '%TEMP%\uv.zip' -UseBasicParsing; Expand-Archive -Force '%TEMP%\uv.zip' '%TEMP%\uvunpack' } catch { exit 1 }"
 if not %errorlevel%==0 goto no_uv
 copy /y "%TEMP%\uvunpack\uv.exe" "%UV%" >nul 2>nul
 if not exist "%UV%" goto no_uv

@@ -283,6 +283,26 @@ def main() -> int:
     }
     (engine_dst / "version.json").write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
 
+    # Post-install self-test: proves the private environment and the engine's
+    # import chain work on THIS computer, before HR ever opens WorkBuddy.
+    # Rule-mode JD parsing needs no API key and finishes in seconds.
+    log("")
+    log("[..] self-test: running a short parsing check on this computer...")
+    interpreter = venv_python_path(engine_dst)
+    if not interpreter.is_file():
+        interpreter = Path(sys.executable)
+    selftest = subprocess.run(
+        [str(interpreter), str(engine_dst / ".codex" / "skills" / "jd-parser" / "scripts" / "run_jd_parse.py"),
+         "--jd-text", "Requirements: Bachelor degree in Computer Science; programming experience in Python."],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(engine_dst), timeout=240,
+    )
+    if selftest.returncode == 0 and '"parse_path"' in (selftest.stdout or ""):
+        log("[ok] self-test passed - the screening engine works on this computer.")
+    else:
+        log("[WARN] the engine self-test did not pass. The install itself is in place;")
+        log("       please send us a screenshot of this window so we can see why.")
+
     log("")
     log("Install complete.")
     log(f"  Engine + reports : {engine_dst}")
