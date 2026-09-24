@@ -21,3 +21,6 @@ cv-backend-patched.tar
 .workbuddy-ai/memory/
 # Release build output (asset is attached to GitHub Releases by CI).
 release/dist/
+
+# Local caches for the release self-test simulation.
+release/tests/.cache/
