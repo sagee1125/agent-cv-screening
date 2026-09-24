@@ -119,8 +119,10 @@ def install_launcher_files(pkg: Path, dst: Path) -> None:
         "update_engine.command",
     ):
         src = pkg / name
-        if src.is_file():
-            shutil.copy2(src, dst / name)
+        dst_file = dst / name
+        if not src.is_file() or src.resolve() == dst_file.resolve():
+            continue
+        shutil.copy2(src, dst_file)
     # Always copy from the payload's scripts dir. Copying from __file__ would
     # make the updater overwrite its own running file on Windows (WinError 32).
     scripts_src = pkg / "scripts"
@@ -152,7 +154,10 @@ def write_env(engine_dst: Path, api_key: str) -> None:
         if looks_like_real_key(api_key):
             log("[ok] API key taken from the CVS_API_KEY environment variable.")
     if not api_key:
-        api_key = input("Paste your API key (ZAI_API_KEY): ").strip()
+        try:
+            api_key = input("Paste your API key (ZAI_API_KEY): ").strip()
+        except EOFError:
+            api_key = ""
     if not looks_like_real_key(api_key):
         log("[WARN] No usable API key entered. A placeholder .env was written;")
         log("       edit .env in the engine folder later, then rerun setup.")
@@ -277,7 +282,27 @@ def main() -> int:
     copy_engine(engine_src, engine_dst)
     (engine_dst / "scripts").mkdir(parents=True, exist_ok=True)
     install_launcher_files(pkg, engine_dst)
-    write_env(engine_dst, args.api_key or "")
+
+    # The API key travels as a separate key.txt file (never inside a chat
+    # message or command line). The installer reads it, uses it, and deletes
+    # it, so no copy lingers in the folder.
+    file_key = None
+    for key_file in (pkg / "key.txt", engine_dst / "key.txt"):
+        if not key_file.is_file():
+            continue
+        first_line = next(
+            (line.strip() for line in key_file.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()),
+            "",
+        )
+        if looks_like_real_key(first_line):
+            file_key = first_line
+            key_file.unlink()
+            log("[ok] API key read from key.txt (the file has been removed).")
+        else:
+            log("[WARN] key.txt does not look like a valid API key - ignoring it.")
+        break
+
+    write_env(engine_dst, args.api_key or file_key or "")
 
     build_venv(engine_dst, args.skip_venv)
 
