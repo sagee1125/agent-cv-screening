@@ -154,10 +154,18 @@ def write_env(engine_dst: Path, api_key: str) -> None:
         if looks_like_real_key(api_key):
             log("[ok] API key taken from the CVS_API_KEY environment variable.")
     if not api_key:
+        # Input is hidden (getpass) so a colleague or camera cannot read the
+        # key off the screen. Falls back to visible input if the console
+        # cannot hide it.
         try:
-            api_key = input("Paste your API key (ZAI_API_KEY): ").strip()
-        except EOFError:
-            api_key = ""
+            import getpass
+
+            api_key = getpass.getpass("Paste your personal API key (input is hidden, right-click to paste): ").strip()
+        except Exception:
+            try:
+                api_key = input("Paste your personal API key (ZAI_API_KEY): ").strip()
+            except EOFError:
+                api_key = ""
     if not looks_like_real_key(api_key):
         log("[WARN] No usable API key entered. A placeholder .env was written;")
         log("       edit .env in the engine folder later, then rerun setup.")

@@ -1,22 +1,19 @@
 CV Screening - Setup Instructions (Windows and Mac)
 ====================================================
 
-You need: this folder, the small file "key.txt" we sent you, and about 15
-minutes.
+You need: this folder, your personal API key (sent to you separately), and
+about 15 minutes.
 
 Nothing else has to be installed first. The installer brings its own private
 copy of Python 3.12 - it never uses or changes the Python already on this
 computer (Apple M1/M2/M3/M4 and Intel are all handled automatically), needs no
 administrator rights, and installs nothing system-wide.
 
-STEP 0 - GET READY (30 seconds)
--------------------------------
-1. Double-click the zip and keep the unzipped folder named
-   "CV-Screening-Setup" in your Downloads folder - the commands below use
-   that location.
-2. Put the file "key.txt" we sent you INSIDE this folder, next to setup.bat.
-   The installer reads it automatically and deletes it afterwards - you never
-   need to type or paste the key anywhere.
+Each person has their own key. When the installer asks for it, paste YOUR key.
+The input is hidden on screen - that is normal.
+
+IMPORTANT: unzip this folder into your **Downloads** folder and keep the
+folder name "CV-Screening-Setup". The commands below use that location.
 
 The first run downloads about 50 MB (the installer helper and the private
 Python) and then the screening components. This happens once.
@@ -25,15 +22,17 @@ Python) and then the screening components. This happens once.
 WINDOWS
 -------
 1. Double-click  setup.bat
+2. When it asks for your personal API key, paste it and press Enter
+   (the input is hidden on screen - that is normal).
+3. Wait for the two lines:
+       Self-test passed - the screening engine works on this computer.
+       Install complete.
    (If the window closes instantly, open Command Prompt and paste:
        cd /d "%USERPROFILE%\Downloads\CV-Screening-Setup"
        setup.bat
     so any error message stays visible.)
-2. Wait for the two lines:
-       Self-test passed - the screening engine works on this computer.
-       Install complete.
-3. Quit WorkBuddy completely and open it again.
-4. Open  Experts -> My Experts -> Vera  and say:
+4. Quit WorkBuddy completely and open it again.
+5. Open  Experts -> My Experts -> Vera  and say:
        screen refno 260901004
    (a demo job, safe to try). Reports appear on your Desktop in the folder
    workbuddy-cv-screen.
@@ -41,29 +40,36 @@ WINDOWS
 
 MAC - EASIEST: let WorkBuddy install it for you
 -----------------------------------------------
-You never touch Terminal, and your key never appears in any chat.
+You never touch Terminal.
 
-1. Open WorkBuddy and start a NEW conversation (any assistant).
-2. Paste this message:
+1. Save your personal API key as a plain text file named  key.txt
+   (Notepad / TextEdit, plain text) and put it INSIDE this folder, next to
+   setup.command. The installer reads it automatically and deletes it
+   afterwards - your key never appears in any chat message.
+2. Open WorkBuddy and start a NEW conversation (any assistant).
+3. Paste this message:
 
    請幫我安裝 CV 篩選引擎：在 ~/Downloads/CV-Screening-Setup 資料夾裡執行
    bash setup.command。key.txt 已在資料夾內，安裝器會自動讀取並刪除；
    完成後回報結果。
 
-3. When it finishes, quit WorkBuddy completely and open it again.
-4. Open  Experts -> My Experts -> Vera  and say:
+4. When it finishes, quit WorkBuddy completely and open it again.
+5. Open  Experts -> My Experts -> Vera  and say:
        screen refno 260901004
 
 
-MAC - ALTERNATIVE: one line in Terminal
----------------------------------------
-1. Open Terminal (Applications -> Utilities -> Terminal) and paste:
+MAC - ALTERNATIVE: double-click, then paste your key
+----------------------------------------------------
+1. Double-click  setup.command
+   (If macOS blocks it: right-click the file once and choose "Open".)
+2. When it asks for your personal API key, paste it and press Enter
+   (the input is hidden on screen - that is normal).
+3. Wait for  Self-test passed  and  Install complete.
+4. Quit WorkBuddy completely and open it again, then open Vera and say:
+       screen refno 260901004
 
+Terminal variant (if double-clicking does nothing): open Terminal and paste
    cd ~/Downloads/CV-Screening-Setup && bash setup.command
-
-2. Wait for  Self-test passed  and  Install complete.
-3. Quit WorkBuddy completely and open it again, then open Vera and say:
-       screen refno 260901004
 
 
 UPDATES
@@ -77,8 +83,9 @@ double-click  update_engine.cmd  (Windows) or  update_engine.command  (Mac).
 PRIVACY
 -------
 Reports show application numbers only - no names, emails, phone numbers,
-HKIDs or salaries. CV files stay on this computer. The API key is stored
-only in the local configuration file inside this folder.
+HKIDs or salaries. CV files stay on this computer. Your API key is stored
+only in the local configuration file inside this folder - never share it,
+and never paste it into a chat conversation.
 
 
 TROUBLESHOOTING
@@ -87,10 +94,9 @@ TROUBLESHOOTING
   downloads come from github.com and pypi.org) and run setup again.
 - The window closes instantly: follow the Command Prompt / Terminal variant
   shown above, so the error message stays visible.
-- Screening fails with an authentication error: your key.txt was missing or
-  invalid. Save the key as key.txt inside the agent-cv-screening folder
-  (next to setup.bat) and run setup again - or edit the ZAI_API_KEY line in
-  the .env file there.
+- Screening fails with an authentication error: your key was not saved
+  correctly. Run setup again and paste your key when asked - or edit the
+  ZAI_API_KEY line in the .env file inside the agent-cv-screening folder.
 - Expert missing in WorkBuddy: restart WorkBuddy; if it is still missing,
   run setup again.
 - Mac: screening the internal PolyU job pages needs the Windows browser
