@@ -38,12 +38,29 @@ WINDOWS
    workbuddy-cv-screen.
 
 
-MAC - EASIEST: let WorkBuddy install it for you
+MAC - RECOMMENDED: paste one line into Terminal
 -----------------------------------------------
+This works on every Mac, including ones with a customised shell.
+
+1. Open Terminal (Applications -> Utilities -> Terminal). If it shows any
+   question or message first, press Enter to dismiss it.
+2. Paste this ONE line and press Enter:
+
+   cd ~/Downloads/CV-Screening-Setup && bash setup.command
+
+3. When it asks for your personal API key, paste it and press Enter
+   (the input is hidden on screen - that is normal).
+4. Wait for  Self-test passed  and  Install complete.
+5. Quit WorkBuddy completely and open it again, then open Vera and say:
+       screen refno 260901004
+
+
+MAC - ALTERNATIVE: let WorkBuddy install it for you
+---------------------------------------------------
 You never touch Terminal.
 
 1. Save your personal API key as a plain text file named  key.txt
-   (Notepad / TextEdit, plain text) and put it INSIDE this folder, next to
+   (TextEdit, plain text) and put it INSIDE this folder, next to
    setup.command. The installer reads it automatically and deletes it
    afterwards - your key never appears in any chat message.
 2. Open WorkBuddy and start a NEW conversation (any assistant).
@@ -58,18 +75,13 @@ You never touch Terminal.
        screen refno 260901004
 
 
-MAC - ALTERNATIVE: double-click, then paste your key
-----------------------------------------------------
-1. Double-click  setup.command
-   (If macOS blocks it: right-click the file once and choose "Open".)
-2. When it asks for your personal API key, paste it and press Enter
-   (the input is hidden on screen - that is normal).
-3. Wait for  Self-test passed  and  Install complete.
-4. Quit WorkBuddy completely and open it again, then open Vera and say:
-       screen refno 260901004
-
-Terminal variant (if double-clicking does nothing): open Terminal and paste
-   cd ~/Downloads/CV-Screening-Setup && bash setup.command
+MAC - LAST RESORT: double-click  setup.command
+----------------------------------------------
+Works on Macs with a standard shell setup. On Macs with a customised shell
+(for example oh-my-zsh with update prompts), the double-click can be swallowed
+by the shell's own startup messages - if that happens, use the Terminal route
+above instead.
+(If macOS blocks the file: right-click it once and choose "Open".)
 
 
 UPDATES
