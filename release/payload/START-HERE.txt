@@ -1,8 +1,8 @@
 CV Screening - Setup Instructions (Windows and Mac)
 ====================================================
 
-You need: this folder, your personal API key (sent to you separately), and
-about 15 minutes.
+You need: this folder, your personal API key (in the encrypted spreadsheet we
+sent you), and about 15 minutes.
 
 Nothing else has to be installed first. The installer brings its own private
 copy of Python 3.12 - it never uses or changes the Python already on this
@@ -38,13 +38,15 @@ WINDOWS
    workbuddy-cv-screen.
 
 
-MAC - RECOMMENDED: paste one line into Terminal
------------------------------------------------
-This works on every Mac, including ones with a customised shell.
-
-1. Open Terminal (Applications -> Utilities -> Terminal). If it shows any
-   question or message first, press Enter to dismiss it.
-2. Paste this ONE line and press Enter:
+MAC - TRY THIS FIRST: double-click  setup.command
+-------------------------------------------------
+1. Double-click  setup.command
+   - If macOS blocks it: right-click the file once and choose "Open".
+   - If you see an error message, or nothing happens, or the window closes
+     immediately: use the guaranteed fallback below (step 2). It takes one
+     pasted line and always works.
+2. Guaranteed fallback - open Terminal (Applications -> Utilities ->
+   Terminal), paste this ONE line and press Enter:
 
    cd ~/Downloads/CV-Screening-Setup && bash setup.command
 
@@ -55,10 +57,8 @@ This works on every Mac, including ones with a customised shell.
        screen refno 260901004
 
 
-MAC - ALTERNATIVE: let WorkBuddy install it for you
----------------------------------------------------
-You never touch Terminal.
-
+MAC - NO TERMINAL AT ALL: let WorkBuddy install it for you
+----------------------------------------------------------
 1. Save your personal API key as a plain text file named  key.txt
    (TextEdit, plain text) and put it INSIDE this folder, next to
    setup.command. The installer reads it automatically and deletes it
@@ -73,15 +73,6 @@ You never touch Terminal.
 4. When it finishes, quit WorkBuddy completely and open it again.
 5. Open  Experts -> My Experts -> Vera  and say:
        screen refno 260901004
-
-
-MAC - LAST RESORT: double-click  setup.command
-----------------------------------------------
-Works on Macs with a standard shell setup. On Macs with a customised shell
-(for example oh-my-zsh with update prompts), the double-click can be swallowed
-by the shell's own startup messages - if that happens, use the Terminal route
-above instead.
-(If macOS blocks the file: right-click it once and choose "Open".)
 
 
 UPDATES
