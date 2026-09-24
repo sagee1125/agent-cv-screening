@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import venv
+import os
 from pathlib import Path
 
 REPO_SLUG = "sagee1125/agent-cv-screening"
@@ -144,6 +145,12 @@ def write_env(engine_dst: Path, api_key: str) -> None:
         if match and looks_like_real_key(match.group(1).strip()):
             log("[ok] .env already has an API key - keeping it.")
             return
+    if not api_key:
+        # WorkBuddy's assistant can run this installer on the user's behalf by
+        # exporting CVS_API_KEY first - then nothing interactive is needed.
+        api_key = os.environ.get("CVS_API_KEY", "").strip()
+        if looks_like_real_key(api_key):
+            log("[ok] API key taken from the CVS_API_KEY environment variable.")
     if not api_key:
         api_key = input("Paste your API key (ZAI_API_KEY): ").strip()
     if not looks_like_real_key(api_key):
