@@ -21,6 +21,9 @@ jobs:
       - name: Build release zip
         run: python release/build_release.py "${GITHUB_REF_NAME#v}"
 
+      - name: Simulate a clean install (quality gate)
+        run: python release/tests/simulate_install.py --zip release/dist/CV-Screening-Setup.zip
+
       - name: Attach zip to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
