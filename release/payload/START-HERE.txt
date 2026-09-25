@@ -32,10 +32,15 @@ WINDOWS
        setup.bat
     so any error message stays visible.)
 4. Quit WorkBuddy completely and open it again.
-5. Open  Experts -> My Experts -> Vera  and say:
-       screen refno 260901004
-   (a demo job, safe to try). Reports appear on your Desktop in the folder
-   workbuddy-cv-screen.
+5. Open  Experts -> My Experts -> Vera  and give it a real internal job
+   number, for example:
+       screen refno 26xxxxxxxxx
+   This screens the University's internal job pages - stay on the campus
+   network (or VPN) and stay signed in to the internal job system in Chrome.
+   Reports appear on your Desktop in the folder  workbuddy-cv-screen.
+   (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
+   file as described in "Which jobs are screened" below, then say:
+       screen refno 260901004 )
 
 
 MAC - TRY THIS FIRST: double-click  setup.command
@@ -53,8 +58,15 @@ MAC - TRY THIS FIRST: double-click  setup.command
 3. When it asks for your personal API key, paste it and press Enter
    (the input is hidden on screen - that is normal).
 4. Wait for  Self-test passed  and  Install complete.
-5. Quit WorkBuddy completely and open it again, then open Vera and say:
-       screen refno 260901004
+5. Quit WorkBuddy completely and open it again, then open Vera and give it a
+   real internal job number, for example:
+       screen refno 26xxxxxxxxx
+   This screens the University's internal job pages - stay on the campus
+   network (or VPN) and stay signed in to the internal job system in Chrome.
+   Reports appear on your Desktop in the folder  workbuddy-cv-screen.
+   (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
+   file as described in "Which jobs are screened" below, then say:
+       screen refno 260901004 )
 
 
 MAC - NO TERMINAL AT ALL: let WorkBuddy install it for you
@@ -71,8 +83,15 @@ MAC - NO TERMINAL AT ALL: let WorkBuddy install it for you
    完成後回報結果。
 
 4. When it finishes, quit WorkBuddy completely and open it again.
-5. Open  Experts -> My Experts -> Vera  and say:
-       screen refno 260901004
+5. Open  Experts -> My Experts -> Vera  and give it a real internal job
+   number, for example:
+       screen refno 26xxxxxxxxx
+   This screens the University's internal job pages - stay on the campus
+   network (or VPN) and stay signed in to the internal job system in Chrome.
+   Reports appear on your Desktop in the folder  workbuddy-cv-screen.
+   (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
+   file as described in "Which jobs are screened" below, then say:
+       screen refno 260901004 )
 
 
 UPDATES
@@ -91,19 +110,21 @@ only in the local configuration file inside this folder - never share it,
 and never paste it into a chat conversation.
 
 
-INTERNAL POLYU JOBS (optional)
-------------------------------
-Out of the box the engine screens the public demo jobs. To screen the
-University's internal job pages instead, open the file named  .env  inside the
-agent-cv-screening folder (Notepad on Windows, TextEdit on Mac) and add this
-line at the end:
+WHICH JOBS ARE SCREENED
+-----------------------
+Out of the box this package screens the University's INTERNAL job pages.
+Screening them needs two things at the time of a run: you are signed in to the
+internal job system in Chrome, and the computer is on the campus network or
+connected to the University VPN.
 
-    JES_SITE_MODE=1
+To screen the public DEMO jobs instead (no sign-in or VPN needed), open the
+file named  .env  inside the agent-cv-screening folder (Notepad on Windows,
+TextEdit on Mac) and make its  JES_SITE_MODE  line read:
 
-Save the file. Every screening from then on uses the internal pages - you must
-already be signed in to them in Chrome, and you must be on the campus network
-or connected to the University VPN. Change the line to  JES_SITE_MODE=0  (or
-delete it) to go back to the demo jobs.
+    JES_SITE_MODE=0
+
+Save the file. Change the line back to  JES_SITE_MODE=1  (or delete it) to
+return to the internal pages.
 
 
 TROUBLESHOOTING
@@ -117,5 +138,7 @@ TROUBLESHOOTING
   ZAI_API_KEY line in the .env file inside the agent-cv-screening folder.
 - Expert missing in WorkBuddy: restart WorkBuddy; if it is still missing,
   run setup again.
-- Mac: screening the internal PolyU job pages needs the Windows browser
-  bridge; on Mac the public demo jobs work.
+- Screening the internal pages fails: check the campus network / VPN, and
+  that you are signed in to the internal job system in Chrome. To fall back
+  to the public demo jobs while troubleshooting, set  JES_SITE_MODE=0  in the
+  .env file (see "Which jobs are screened").

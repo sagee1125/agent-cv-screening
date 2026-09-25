@@ -59,6 +59,13 @@ LLM_VISION_MODEL=glm-4v-flash
 # falls back to the built-in text heuristics.
 CV_LOCAL_NER_ENABLED=false
 
+# Site mode. 1 = the University's internal job pages (the shipped default on
+# every platform - confirmed working on macOS at v1.1.6). Change to 0 - or
+# delete this line - to screen the public demo jobs instead. Anything other
+# than 1/prod/0/demo/empty makes the engine refuse to start, so a typo cannot
+# silently screen the wrong site.
+JES_SITE_MODE=1
+
 # Not used by the screening commands. The settings loader requires these two
 # values to be present, so harmless placeholders are fine here.
 DATABASE_URL=postgresql://unused:unused@localhost:5432/unused

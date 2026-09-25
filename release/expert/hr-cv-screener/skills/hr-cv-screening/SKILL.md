@@ -214,9 +214,10 @@ never mention it to HR. If it applies an update, say one line ("I've updated the
 starting now"); the next run re-scores from scratch, which is intended. If the updater is missing,
 offline, or fails, continue with the installed engine and never surface the failure.
 
-On macOS there is no WebBridge browser bridge: for demo-mode jobs pass `--driver http` (the public
-demo needs no browser). Screening the real PolyU records pages currently needs the Windows bridge
-and is Windows-only.
+For demo-mode jobs on any platform you can pass `--driver http` (the public demo needs no
+browser). Screening the real PolyU records pages uses the same human browser flow on
+Windows and macOS — confirmed working on macOS at v1.1.6; the old "Windows-only bridge"
+note was stale.
 
 ## Decision flow
 
@@ -574,9 +575,14 @@ the file that stores them.
 
 The engine runs against one of two sites. The switch is `JES_SITE_MODE`, read from the
 environment, else the repo-root `.env`, else `site_profiles.json`'s `default`:
-`1`/`prod` = the internal PolyU system; unset, empty, `0` or `demo` = the public demo;
-**anything else refuses to start** rather than guessing. The envelope stamps which site a
-run used (`site: "demo"` / `"prod"`) — say which one a result came from when it could matter.
+`1`/`prod` = the internal PolyU system; `0`/`demo`/empty = the public demo; **anything
+else refuses to start** rather than guessing. Since v1.2.0 the package ships
+**prod by default**: the installer writes `JES_SITE_MODE=1` into `.env` and
+`site_profiles.json`'s default is `prod`, so machines screen the internal pages out of
+the box (working on Windows and macOS — the old "prod is Windows-only" note was stale) —
+the demo needs an explicit `JES_SITE_MODE=0` in `.env`. The envelope
+stamps which site a run used (`site: "demo"` / `"prod"`) — say which one a result came
+from when it could matter.
 
 - **Demo** — `https://jes-web-demo.vercel.app`. No login, no cookies, and the preflight
   runs no sign-in check. Working demo refnos: **2600827001** (4 candidates),
@@ -594,11 +600,15 @@ run used (`site: "demo"` / `"prod"`) — say which one a result came from when i
 Never ask HR for cookies, passwords or tokens in either mode — the browser session HR
 already has is the only credential this skill touches.
 
-**Prod limitation (say it honestly):** the internal records page has no "Post applied
-for" column and its JD text has no multi-post field, so **prod jobs are screened as
-single-post** — one ranking, no per-post groups, no `needs_confirmation` list. If HR
-asks about per-post support on prod, the honest answer is that the page does not show
-the post — the tool does support per-post on the demo, where the page states it.
+**Prod and multi-post:** the internal records page *does* carry a `Post applied for`
+column — HR confirmed this 2026-09-25. (An earlier note claimed the column never
+appears on prod; it came from one saved **single-post** job, where the column is
+legitimately absent — as on the demo, it shows only on multi-post jobs.) A multi-post
+prod job should therefore screen the same way as on the demo — per-post groups,
+`needs_confirmation` for a blank `Post applied for` — but no multi-post prod job has
+been run end-to-end yet, so report what the envelope actually returned rather than
+promising per-post grouping in advance. If a prod run comes back single-post on a job
+HR calls multi-post, that is a finding to report, not a limitation to explain away.
 
 ## Scoring explained (HR will ask "why are the scores all so low?")
 

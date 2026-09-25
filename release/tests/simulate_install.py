@@ -199,6 +199,8 @@ def main() -> int:
              "-r", str(staged_requirements(pkg))])
 
         stamp = json.loads((pkg / "engine" / "version.json").read_text(encoding="utf-8"))
+        shipped_profiles = json.loads((pkg / "engine" / "site_profiles.json").read_text(encoding="utf-8"))
+        check("zip ships prod as the site default", shipped_profiles.get("default") == "prod")
         run("installer (env, expert, marketplace, path rewrite)",
             [str(venv_python), str(pkg / "scripts" / "setup_engine.py"),
              "--engine-target", str(sandbox_root / "agent-cv-screening"), "--skip-venv",
@@ -210,6 +212,7 @@ def main() -> int:
         env_text = (sandbox_root / "agent-cv-screening" / ".env").read_text(encoding="utf-8")
         check(".env has the supplied key", "ZAI_API_KEY=simulate-test-key" in env_text)
         check(".env disables the local NER model", "CV_LOCAL_NER_ENABLED=false" in env_text)
+        check(".env enables the prod site mode", "JES_SITE_MODE=1" in env_text)
         expert_md = home / ".workbuddy-ai" / "plugins" / "marketplaces" / "my-experts" / "plugins" / "hr-cv-screener" / "agents" / "hr-cv-screener.md"
         check("expert installed for WorkBuddy", expert_md.is_file())
         skill_text = (expert_md.parent.parent / "skills" / "hr-cv-screening" / "SKILL.md").read_text(encoding="utf-8")
@@ -232,6 +235,7 @@ def main() -> int:
             check("updater applied the latest release", "updated to version" in out)
             env_after = (sandbox_root / "agent-cv-screening" / ".env").read_text(encoding="utf-8")
             check("API key survived the update", "ZAI_API_KEY=simulate-test-key" in env_after)
+            check("prod site mode survived the update", "JES_SITE_MODE=1" in env_after)
             new_stamp = json.loads(version_file.read_text(encoding="utf-8"))
             check("version stamp advanced to the live release", new_stamp.get("version") not in ("", "0.0.0"))
     except SystemExit:

@@ -74,6 +74,11 @@ straight through with no post column), and the JD key/value block has no `Multi-
 The user confirmed 2026-09-24 that this is genuinely how prod looks — not a dummy-record artefact.
 **Decision recorded in §2.1: prod is single-post for now.**
 
+> **Correction (2026-09-25, owner):** the internal records page *does* carry a `Post applied
+> for` column. The 2026-09-24 observation came from one saved **single-post** job, where the
+> column is legitimately absent (as on the demo, it appears only on multi-post jobs). The
+> "prod has no post column" conclusion was over-generalised; see the corrected §2.1.
+
 ### 0.5 What else the saved page settled
 
 - `parse_job_html` runs against the saved page and returns a complete payload: refno (9 digits),
@@ -96,7 +101,7 @@ The user confirmed 2026-09-24 that this is genuinely how prod looks — not a du
 | CV file | `/uploads/CV_<Given>_<Surname>.pdf` (person-named) | `/internal/file.php?t=cv&id=<appno>&refno=<refno>` |
 | Login | none | SSO, in HR's own browser session; post-login domain is `/internal/` |
 | Applicant table | Title / Surname / Given name / Name in Chinese / HKID or passport no. / Email / Phone | **same 39 columns**, verified in §0.2 |
-| Post column | `Post applied for` on multi-post jobs | **absent** — §0.4, §2.1 |
+| Post column | `Post applied for` on multi-post jobs | **same — present on multi-post jobs** (corrected 2026-09-25; the "absent" reading was one single-post job — §0.4) |
 | Report pack | `Desktop/workbuddy-cv-screen/<refno>/` | same; **kept indefinitely, HR deletes it** (user, 2026-09-24) |
 
 The prod detail URL is already implemented: `screening_core/candidate_id.records_url_for_refno`
@@ -184,7 +189,7 @@ plausible-looking report that is wrong. Fix in §3.C.
 
 | # | Question | Decision |
 | --- | --- | --- |
-| 2.1 | How does prod express a multi-post job? | **It does not.** Prod has no post column and no `Multi-post` JD field. Keep the detection code as-is; **prod is treated as single-post for now.** Do not claim per-post support on prod. |
+| 2.1 | How does prod express a multi-post job? | **Superseded 2026-09-25 (owner):** the records page *does* carry `Post applied for` on multi-post jobs — the original "no post column" reading came from one saved single-post job. The detection code stays as-is (it already handles the multi-post column map); treat multi-post on prod as demo-like but **not yet observed end-to-end** — verify on the first real multi-post prod job instead of promising either behaviour. |
 | 2.2 | The saved page's JD body was only 87 chars | **Real ads are long. Read as much as there is — the cap comes off** (§2.11, §3.K). |
 | 2.3 | Session idle timeout | **Unknown, deferred.** Do not build renewal. Keep the pre-flight cheap so it can be re-run by hand. |
 | 2.4 | IT rate limits / audit logs | **Unknown, accepted risk.** Note it for the first test. |
@@ -606,14 +611,20 @@ Run by the owner on HR's computer (§2.6).
    resume stale artefacts (§1.6).
 5. Only then run a full-size job.
 
-Per-post sections are **not** part of this test plan: §2.1 records that prod is single-post for now.
+Per-post sections are **not** part of this test plan: §2.1 (as originally recorded) treated prod as
+single-post. **Superseded 2026-09-25:** prod pages do carry `Post applied for` on multi-post jobs —
+when the first real multi-post prod job is screened, verify the per-post groups against it.
 
 ## 5. Rollback — **guarantees verified 2026-09-25**
 
 - [x] Keep the demo profile working and selectable at all times (§2.8), so a failed prod test
   falls back to a known-good path in one switch. → verified: `site_profiles.json` carries both
-  profiles and **`"default": "demo"`** ships in the release package, so unset/`0`/`demo` is the
-  fallback with no code change.
+  profiles, so the demo is always reachable with no code change. **Superseded 2026-09-25
+  (v1.2.0, owner decision):** the shipped default is now **prod** — the installer writes
+  `JES_SITE_MODE=1` into fresh `.env` files and `site_profiles.json`'s `"default"` is `prod`,
+  so existing machines flip via auto-update too. The demo fallback is still one switch: write
+  `JES_SITE_MODE=0` (or `demo`, or an empty value) in `.env`, or set the environment variable.
+  `0`/`demo`/empty remain demo spellings in `site_mode.py` unchanged.
 - [x] Nothing in this plan changes the scoring engine, so scores are unaffected by the switch —
   but a full re-parse is not score-neutral, so do not mix demo and prod artifacts for the same
   refno (§1.6, §3.C). → verified against the working tree: no scorer / matching / taxonomy file is

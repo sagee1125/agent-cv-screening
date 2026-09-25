@@ -154,6 +154,15 @@ def test_shipped_profiles_match_builtins() -> None:
             assert builtin[key] == value, f"{mode}.{key} differs between the file and the built-in profile"
 
 
+# HR machines run prod out of the box: with no .env line and no environment variable, the
+# shipped file's default decides, and that default is prod since v1.2.0. (The file-default
+# resolution itself is pinned by test_resolve_site_mode_file_default; this pins the value
+# the package ships.)
+def test_shipped_default_is_prod() -> None:
+    shipped = json.loads((REPO_ROOT / site_mode.SITE_PROFILES_NAME).read_text(encoding="utf-8"))
+    assert shipped["default"] == site_mode.MODE_PROD
+
+
 # The records URL is built from the active profile, and the mode argument wins over the env var.
 def test_records_url_per_mode(monkeypatch) -> None:
     monkeypatch.setenv(site_mode.SITE_MODE_ENV, "1")
