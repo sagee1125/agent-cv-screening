@@ -504,6 +504,15 @@ Edits needed in each:
     race is still unknown (see the batch record and the daily log).
   - **The tag itself is left to the owner** (commit + tag `v1.1.8` + push; CI attaches the zip).
 
+**Follow-up fix, shipped in v1.1.9 (same day):** the update chain had one real hole — the pip
+re-run on changed requirements was `check=False` **and the version stamp was written before it**, so
+a PyPI failure was swallowed and a half-applied update (new engine code, missing deps) was reported
+as done and never retried. `apply_update` now runs the dependency step **before** advancing the
+stamp, and on failure **restores the previous stamp** (which must be captured before the copy —
+`copytree` itself overwrites `version.json` with the new one) so the next conversation retries the
+whole update. Pinned by `backend/tests/unit/test_update_engine.py`. Bootstrap note: the 1.1.8→1.1.9
+hop runs the old updater, which is safe because that hop carries no requirements change.
+
 ### H. Tests — **DONE 2026-09-25** (most landed with A–E)
 
 - [x] `backend/tests/unit/test_demo_mode.py` — rewrite for the site-profile resolver: precedence,

@@ -104,6 +104,10 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
     import setup_engine  # shipped beside this file
 
     root = engine_root()
+    # Captured before the copy below overwrites version.json with the new stamp:
+    # if the dependency step then fails, this is what gets restored so the next
+    # conversation retries the whole update.
+    previous_stamp = read_version_stamp(root)
     with tempfile.TemporaryDirectory(prefix="cvs-update-") as tmp:
         extract_dir = Path(tmp) / "payload"
         with zipfile.ZipFile(payload_zip) as archive:
@@ -134,12 +138,12 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
             setup_engine.install_expert(pkg, root, setup_engine.workbuddy_config_dir())
         setup_engine.install_launcher_files(pkg, root)
 
-        stamp = read_version_stamp(root)
-        stamp["version"] = new_version
-        if new_req.is_file():
-            stamp["requirements_sha256"] = setup_engine.sha256_of(new_req)
-        (root / "version.json").write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
-
+        # Dependencies are refreshed BEFORE the version stamp advances. The copy
+        # above is idempotent, so a failed dependency install is retried whole on
+        # the next conversation. Advancing the stamp first would report a
+        # half-applied update (new engine code, missing deps) as done -- the one
+        # failure that must not be silent, because nothing else retries it.
+        deps_ok = True
         if requirements_changed:
             venv_python = root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
             if venv_python.is_file():
@@ -148,12 +152,32 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
                 # binary the launcher left in <engine>/tools/.
                 uv = root / "tools" / ("uv.exe" if sys.platform == "win32" else "uv")
                 if uv.is_file():
-                    subprocess.run(
+                    pip_result = subprocess.run(
                         [str(uv), "pip", "install", "--python", str(venv_python), "-r", str(new_req)],
                         check=False,
                     )
                 else:
-                    subprocess.run([str(venv_python), "-m", "pip", "install", "-r", str(new_req)], check=False)
+                    pip_result = subprocess.run(
+                        [str(venv_python), "-m", "pip", "install", "-r", str(new_req)], check=False
+                    )
+                deps_ok = pip_result.returncode == 0
+
+        if not deps_ok:
+            # The copy above already dropped the new stamp into place; put the
+            # previous one back, or a half-applied update would be reported as
+            # done and never retried.
+            (root / "version.json").write_text(json.dumps(previous_stamp, indent=2) + "\n", encoding="utf-8")
+            log("[ERROR] the dependency update failed - the version stamp stays at "
+                f"{previous_stamp.get('version', '?')},")
+            log("        so the next run retries the update automatically. The screening engine")
+            log("        may not start until it succeeds.")
+            return
+
+        stamp = read_version_stamp(root)
+        stamp["version"] = new_version
+        if new_req.is_file():
+            stamp["requirements_sha256"] = setup_engine.sha256_of(new_req)
+        (root / "version.json").write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
 
         bust_score_caches(quiet)
         if not quiet:
