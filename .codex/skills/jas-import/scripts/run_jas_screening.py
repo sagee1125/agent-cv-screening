@@ -40,7 +40,14 @@ from screening_core.hr_output import (
     safe_pack_id,
 )
 from screening_core.job_state import load_job_state, record_screen_run, save_job_state, score_snapshot
-from screening_core.demo_mode import apply_demo_defaults
+from screening_core.jd_overrides import OVERRIDES_FILENAME
+from screening_core.site_mode import (
+    SiteModeError,
+    apply_site_defaults,
+    claim_pack_site,
+    default_state_dir,
+    resolve_site_mode,
+)
 from screening_core.posts import order_by_records_page, post_counts
 from screening_core.report_fingerprint import FINGERPRINTS_NAME
 from screening_core.input_policy import (
@@ -88,20 +95,21 @@ def _effective_allowed_hosts(args: argparse.Namespace) -> tuple[str, ...]:
     return merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), extra)
 
 
-# Build the records URL for a refno, honoring a demo --base-url.
+# Build the records URL for a refno, honoring an explicit demo --base-url.
 def build_records_url_for_refno(refno: str, base_url: str | None) -> str:
     if base_url:
         return f"{base_url.rstrip('/')}/records.html?refno={refno.strip()}"
     return records_url_for_refno(refno)
 
 
-# Resolve the job-state directory (default repo data/jas_state).
+# Resolve the job-state directory (default repo data/jas_state/<site>).
+# The site segment keeps a demo baseline from being read as a prod baseline for the same refno.
 def _resolve_state_dir(args: argparse.Namespace) -> Path:
-    raw = getattr(args, "state_dir", None) or "data/jas_state"
-    path = Path(raw)
-    if not path.is_absolute():
-        path = REPO_ROOT / path
-    return path
+    raw = getattr(args, "state_dir", None)
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else REPO_ROOT / path
+    return default_state_dir(REPO_ROOT, getattr(args, "site", None))
 
 
 # Prints a host-projectable need_input envelope and returns exit code 2.
@@ -375,8 +383,21 @@ def _run_screening(
     skip_reports = False
     job_dir = resolve_hr_job_dir(args.output_dir, refno, repo_root=REPO_ROOT)
     work_dir = pipeline_work_dir(job_dir)
-    # Reuse parse/score JSON on a later run of the same job folder.
-    if (work_dir / FINGERPRINTS_NAME).is_file() or (work_dir / "manifest.json").is_file() or (work_dir / "jas-manifest.json").is_file():
+    # Record which site owns this pack before deciding whether to resume it. _pipeline is keyed
+    # by refno alone, so a pack left by a run on the other site must be archived and re-scored:
+    # resuming it would score demo artifacts into a prod report and look like a normal run.
+    # HR's own answers (the conditions file) are never part of that archive.
+    pack_matches_site = claim_pack_site(
+        work_dir,
+        resolve_site_mode(getattr(args, "site", None), repo_root=REPO_ROOT),
+        keep=(OVERRIDES_FILENAME,),
+    )
+    # Reuse parse/score JSON on a later run of the same job folder on the same site.
+    if pack_matches_site and (
+        (work_dir / FINGERPRINTS_NAME).is_file()
+        or (work_dir / "manifest.json").is_file()
+        or (work_dir / "jas-manifest.json").is_file()
+    ):
         args.resume = True
     jd_text_path = work_dir / "jd.txt"
     jd_text_path.write_text(job.get("jd_text", ""), encoding="utf-8")
@@ -660,9 +681,16 @@ def main() -> int:
         help="Delete downloaded CVs from --scratch-dir after the run (default keeps them for reuse).",
     )
     parser.add_argument(
+        "--site",
+        choices=("demo", "prod"),
+        default=None,
+        help="Which site this run belongs to: prod = the internal JAS system, demo = the public demo. "
+        "Defaults to JES_SITE_MODE (1/prod = prod, unset/0/demo = demo).",
+    )
+    parser.add_argument(
         "--state-dir",
         default=None,
-        help="Directory for per-refno job state (run history + CV hashes; default repo data/jas_state).",
+        help="Directory for per-refno job state (run history + CV hashes; default repo data/jas_state/<site>).",
     )
     parser.add_argument("--scratch-dir", default="data/jas_scratch", help="Root directory for downloaded CVs.")
     parser.add_argument(
@@ -700,7 +728,13 @@ def main() -> int:
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure.")
     parser.add_argument("--max-retries", type=int, default=2, help="Extra attempts per candidate step.")
     args = parser.parse_args()
-    apply_demo_defaults(args, repo_root=REPO_ROOT)
+    try:
+        apply_site_defaults(args, repo_root=REPO_ROOT)
+    except SiteModeError as exc:
+        # Refuse an unrecognised switch instead of falling back to demo: a typo must not
+        # screen real applicants against the demo host and still produce a plausible report.
+        print(json.dumps({"status": "error", "error_code": "bad_site_mode", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return EXIT_ERROR
     if args.target:
         if args.jas_dir or args.records_url:
             parser.error("use either a positional folder/URL or --jas-dir/--records-url, not both")

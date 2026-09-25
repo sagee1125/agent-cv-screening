@@ -72,12 +72,29 @@ PY   = C:/agent-cv-screening/venv/Scripts/python.exe
 TOOL = C:/agent-cv-screening/.codex/skills/host-envelope/scripts/run_workbuddy_tool.py
 ```
 
+Site URLs — never compose or "fix" these; the envelope's `site` says which one a run used:
+
+```
+DEMO list   = https://jes-web-demo.vercel.app/
+DEMO record = https://jes-web-demo.vercel.app/records.html?refno=<refno>
+PROD list   = https://jobs.polyu.edu.hk/internal/records.php
+PROD record = https://jobs.polyu.edu.hk/internal/records.php?refno=<refno>
+```
+
+The CV link on prod is **scraped from the page, never assembled** — its `id=` is a
+composite the page owns, and the records table's columns are found by their table
+headers, not by position.
+
 Always use `PY`, never a bare `python` — only that venv has the required packages.
 All commands work from any directory; do not `cd` first.
 
 ## Commands
 
 ```bash
+# Readiness check — run BEFORE the first screen_refno of the conversation, and cheaply re-run
+# mid-flow whenever a run stalled on the browser (no CV download, no pipeline, no report):
+"$PY" "$TOOL" preflight
+
 # Screen a job by refno or records URL (opens the real browser so HR watches the flow)
 "$PY" "$TOOL" screen_refno "<refno-or-url>" --driver webbridge
 
@@ -92,6 +109,14 @@ All commands work from any directory; do not `cd` first.
 "$PY" "$TOOL" screen_refno "<folder>"
 ```
 
+- **Preflight comes first.** Before the first `screen_refno` of a conversation, run
+  `preflight` and read `checks[]`: `daemon` (both sites), `extension` (both sites),
+  `login` (prod only — a positive test: HR is inside `/internal/` **and** the records
+  table rendered). A failed check means **hand the run back to HR with the one fix it
+  names** (`daemon_unreachable` → start/open Chrome so the helper starts;
+  `extension_disabled` → re-enable the extension; `not_signed_in` → sign in to the
+  internal system) — do **not** run the screen anyway and do not retry silently. The
+  check is cheap: re-run it after HR fixes something instead of assuming.
 - `--driver webbridge` is the default and must stay default: HR watches the browser find
   the job, so you never silently fall back to `--driver http`. Use `--driver http` only
   when the user explicitly asks for the offline / public-demo HTTP path.
@@ -109,11 +134,26 @@ All commands work from any directory; do not `cd` first.
 - Add `--keep-browser` only when HR explicitly asks to keep the browser pages open. Without
   it, every page the run opened is closed automatically once the ranking report is on screen.
 
-## Diagnosing `need_input` / `jas_session` missing (do this before asking HR twice)
+## Readiness before a run, then diagnosing a failure (do this before asking HR twice)
 
-`auth.jas_session: "missing"` does **not** mean HR logged out — in demo mode there is no
-login at all. It only means the WebBridge link to Chrome is not up. Three cheap checks,
-all read-only:
+**Proactive, not reactive:** run `preflight` (see Commands) **before** the first screen of
+the conversation. Its `checks[]` is the same three checks this section diagnoses — daemon,
+extension, and on prod the sign-in — done in one cheap command with no CV download and no
+report. When a check fails, tell HR the one thing to fix, wait for her, then re-run
+`preflight` (it is cheap by design) instead of assuming the fix landed.
+
+**The one message to HR, in her language, said once** — never interrogate her item by item:
+
+- English: "Before we start: please make sure **Chrome is open**, the **Kimi extension is
+  enabled** in `chrome://extensions`, and — for internal jobs — that you are **signed in to
+  the internal recruitment system**. Tell me when ready."
+- 繁中：「開始前請確認：**Chrome 已開啟**、`chrome://extensions` 內 **Kimi 擴充功能已啟用**，
+  內部職位還要**已登入內部招聘系統**。好了請告訴我。」
+
+If HR says something is wrong anyway — or a run still dies on the browser — diagnose with
+the three checks below. `auth.jas_session: "missing"` does **not** mean HR logged out — on
+the demo there is no login at all. It only means the WebBridge link to Chrome is not up.
+Three cheap checks, all read-only:
 
 1. Daemon: `curl -s http://127.0.0.1:10086/status`
    → `running`, `extension_connected`, `version`, `update_available`.
@@ -122,11 +162,13 @@ all read-only:
 2. Real browser open? `tasklist /FI "IMAGENAME eq chrome.exe"` (and `msedge.exe`).
    Beware: `msedgewebview2.exe` also matches a loose `^msedge` grep — it is the desktop
    app's embedded webview, **not** a browser HR can use. Use the `/FI` form.
-3. Extension installed? search
-   `%LOCALAPPDATA%/Google/Chrome/User Data/Default/Extensions/**/manifest.json`
-   for `kimi|webbridge`. The folder name is the extension id, subfolders are its versions.
+3. Extension installed? search the Chrome profile's `Extensions/**/manifest.json` for
+   `kimi|webbridge` — Windows: `%LOCALAPPDATA%/Google/Chrome/User Data/Default/Extensions`;
+   macOS: `~/Library/Application Support/Google/Chrome/Default/Extensions`.
+   The folder name is the extension id, subfolders are its versions.
 
-Helper CLI: `%USERPROFILE%/.kimi-webbridge/bin/kimi-webbridge.exe status|restart|start|upgrade`.
+Helper CLI (status|restart|start|upgrade) — Windows:
+`%USERPROFILE%/.kimi-webbridge/bin/kimi-webbridge.exe`; macOS: `~/.kimi-webbridge/bin/kimi-webbridge`.
 
 **Where Chrome really stores extension state:** `Default/Preferences → extensions.settings`
 can be empty. The live store is **`Default/Secure Preferences → extensions.settings`**. Read
@@ -528,16 +570,35 @@ is a different outcome from a low score. Measured 2026-09-23: HR was told the mu
 scored low. Say **"required skills"**; say **"the conditions you set earlier"** rather than naming
 the file that stores them.
 
-## Demo mode (public demo platform)
+## Two modes — demo and prod (the `JES_SITE_MODE` switch)
 
-The repo-root `demo_mode.json` is currently `"enabled": true`, so a **bare refno** resolves
-to the public demo host `https://jes-web-demo.vercel.app` — no login, no cookies. Never ask
-HR for cookies or JAS access while demo mode is on. Working demo refnos: **2600827001**
-(4 candidates), **260806012** (3 candidates) and **260901004** (Research Assistant,
-7 candidates — last full WebBridge run 2026-09-02). Candidate counts on the demo host
-change when new applications are added (260901004 grew 4 → 6 → 7 during 2026-09-02), so
-treat these numbers as "last observed", not fixed — always report the count the envelope
-returns. Turn demo mode off by setting `demo_mode.json` to `"enabled": false`.
+The engine runs against one of two sites. The switch is `JES_SITE_MODE`, read from the
+environment, else the repo-root `.env`, else `site_profiles.json`'s `default`:
+`1`/`prod` = the internal PolyU system; unset, empty, `0` or `demo` = the public demo;
+**anything else refuses to start** rather than guessing. The envelope stamps which site a
+run used (`site: "demo"` / `"prod"`) — say which one a result came from when it could matter.
+
+- **Demo** — `https://jes-web-demo.vercel.app`. No login, no cookies, and the preflight
+  runs no sign-in check. Working demo refnos: **2600827001** (4 candidates),
+  **260806012** (3 candidates) and **260901004** (Research Assistant, 7 candidates —
+  last full WebBridge run 2026-09-02). Candidate counts on the demo host change when
+  new applications are added (260901004 grew 4 → 6 → 7 during 2026-09-02), so treat
+  these numbers as "last observed", not fixed — always report the count the envelope
+  returns.
+- **Prod** — `https://jobs.polyu.edu.hk/internal/` (records list:
+  `/internal/records.php`). Needs the campus network / VPN, HR signed in to the
+  internal system in the Chrome the run uses, and the preflight `login` check passing:
+  it passes only when the run lands inside `/internal/` **and** the records table
+  rendered — a positive test, never a guess from a redirect.
+
+Never ask HR for cookies, passwords or tokens in either mode — the browser session HR
+already has is the only credential this skill touches.
+
+**Prod limitation (say it honestly):** the internal records page has no "Post applied
+for" column and its JD text has no multi-post field, so **prod jobs are screened as
+single-post** — one ranking, no per-post groups, no `needs_confirmation` list. If HR
+asks about per-post support on prod, the honest answer is that the page does not show
+the post — the tool does support per-post on the demo, where the page states it.
 
 ## Scoring explained (HR will ask "why are the scores all so low?")
 

@@ -68,6 +68,29 @@ from cv_parser.prompts import (
 logger = logging.getLogger(__name__)
 PARSER_CACHE_VERSION = "pii-redaction-v4-p1-fields"
 
+# Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
+# (§2.11), so when this happens the failure must be legible: the recorded error names what was sent
+# so a human can judge it, and the model's own limit — if its error states one — travels through
+# verbatim in the exception text. A silent truncation here would quietly decide which part of the
+# job matters, which is exactly the decision the cap removal delegated away.
+_LENGTH_REJECTION_MARKERS = (
+    "context_length_exceeded",
+    "context length",
+    "maximum context",
+    "prompt too long",
+    "too many tokens",
+    "input too long",
+    "request too large",
+    "payload too large",
+    "length limit",
+    "token limit",
+)
+
+
+def _looks_like_length_rejection(exc: Exception) -> bool:
+    text = str(exc).casefold()
+    return any(marker in text for marker in _LENGTH_REJECTION_MARKERS)
+
 
 class CVParserService:
     # Keep the original private method API as aliases for compatibility.
@@ -223,6 +246,15 @@ class CVParserService:
                     }
                 except Exception as text_exc:
                     logger.exception("Text parse also failed; using rule-based contact fallback.")
+                    # An uncap'd JD can be refused for length. Name what was sent so the recorded
+                    # error says why instead of reading like a generic API failure; the model's own
+                    # limit, if its message states one, rides through inside text_exc.
+                    length_note = ""
+                    if _looks_like_length_rejection(text_exc):
+                        length_note = (
+                            "; prompt_rejected_for_length=true"
+                            f" cv_chars={len(masked_text)} jd_chars={len(jd_text or '')}"
+                        )
                     structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
                     structured = self._apply_content_fallback(raw_text, structured)
                     cache_payload = {
@@ -232,7 +264,7 @@ class CVParserService:
                         "extraction_seed": 42,
                         "status": "fallback",
                         "parse_path": "rule_fallback",
-                        "error_message": f"vision_error={image_exc}; text_error={text_exc}",
+                        "error_message": f"vision_error={image_exc}; text_error={text_exc}{length_note}",
                     }
         await self.cache.set(cache_key, cache_payload)
         return {

@@ -23,8 +23,8 @@ Reports: `Desktop\workbuddy-cv-screen\<refno>\ranking-overview.html`
 > For a **refno or URL** prefer `webridge-collect`: it drives the real browser via Kimi
 > WebBridge and shows the human flow, then calls this same pipeline. Use `jas-import`
 > directly only for HR-exported folders, or add `--driver http` when the WebBridge
-> daemon is unavailable. `demo_mode.json` supplies `--base-url` / `--allow-host` /
-> `--no-cookie` automatically.
+> daemon is unavailable. `site_profiles.json`, selected by `JES_SITE_MODE`, supplies the
+> active site's base URL, allowed host and no-cookie defaults automatically.
 
 Forbidden:
 

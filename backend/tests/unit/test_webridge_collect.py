@@ -71,10 +71,17 @@ DEMO_HTML = """
 ALLOWED = ("jes-web-demo.vercel.app",)
 
 
-# build_records_url honors --base-url for the public demo.
-def test_build_records_url_base_url() -> None:
+# build_records_url honors an explicit --base-url, and otherwise takes the URL from the
+# active site profile: the switch decides the host, not the absence of a base URL.
+def test_build_records_url_base_url(monkeypatch) -> None:
     assert collect.build_records_url("2600827001", DEMO_BASE_URL) == RECORDS_URL
-    assert collect.build_records_url("2600827001", None) == "https://jobs.polyu.edu.hk/internal/records.php?refno=2600827001"
+    monkeypatch.setenv("JES_SITE_MODE", "0")
+    assert collect.build_records_url("2600827001", None) == RECORDS_URL
+    monkeypatch.setenv("JES_SITE_MODE", "1")
+    assert (
+        collect.build_records_url("2600827001", None)
+        == "https://jobs.polyu.edu.hk/internal/records.php?refno=2600827001"
+    )
 
 
 # origin_of returns the scheme://host part of a URL.
@@ -113,6 +120,40 @@ def test_collect_http_driver_writes_folder(tmp_path, monkeypatch) -> None:
     # A single-post page gains the null post key and no post list (PRD Section 6).
     assert manifest["candidates"][0]["post"] is None
     assert "posts" not in manifest
+
+
+# §1.6: cvs/ starts empty, so a file left by an earlier run — possibly a run on the other site —
+# can never sit in the folder and be scored as one of this run's applicants.
+def test_collect_clears_stale_cvs_before_collecting(tmp_path, monkeypatch) -> None:
+    async def fake_fetch_html(url, cookie_file=None, allowed_hosts=None):
+        return DEMO_HTML
+
+    async def fake_download_to(url, dest, cookie_file=None, allowed_hosts=None):
+        Path(dest).write_bytes(b"%PDF")
+        return Path(dest)
+
+    monkeypatch.setattr(collect._jas_fetch, "fetch_html", fake_fetch_html)
+    monkeypatch.setattr(collect._jas_fetch, "download_to", fake_download_to)
+
+    folder = tmp_path / "job"
+    stale_dir = folder / "cvs"
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "9999999999.pdf").write_bytes(b"stale-from-an-earlier-run")
+    (stale_dir / "notes.txt").write_text("stray", encoding="utf-8")
+
+    manifest = collect.collect_job(
+        records_url=RECORDS_URL,
+        folder=folder,
+        driver="http",
+        base_url=DEMO_BASE_URL,
+        allowed_hosts=ALLOWED,
+    )
+
+    assert (folder / "cvs" / "2600827004.pdf").is_file()
+    assert not (folder / "cvs" / "9999999999.pdf").exists()
+    assert not (folder / "cvs" / "notes.txt").exists()
+    assert sorted(path.name for path in (folder / "cvs").iterdir()) == ["2600827004.pdf"]
+    assert manifest["cv_downloaded"] == ["2600827004"]
 
 
 # A multi-post page carries the post per candidate and the per-post counts (PRD Section 6).
@@ -453,7 +494,7 @@ def test_cli_http_driver_runs_pipeline(tmp_path, monkeypatch, capsys) -> None:
     def fake_collect_job(**kwargs):
         return manifest
 
-    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports, conditions=None):
+    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports, conditions=None, site=None):
         return 0, {"status": "success", "hr_files": "Desktop/workbuddy-cv-screen/2600827001"}
 
     monkeypatch.setattr(module, "collect_job", fake_collect_job)
@@ -655,7 +696,7 @@ def _run_cli(module, monkeypatch, tmp_path, extra_args, pipeline_exit=0, pipelin
         },
     )
 
-    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports, conditions=None):
+    def fake_run_pipeline(folder, *, report_dir, engine, no_open, skip_reports, conditions=None, site=None):
         return pipeline_exit, {"status": pipeline_status, "hr_files": "Desktop/workbuddy-cv-screen/2600827001"}
 
     monkeypatch.setattr(module, "run_pipeline", fake_run_pipeline)

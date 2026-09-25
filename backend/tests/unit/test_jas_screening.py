@@ -360,11 +360,33 @@ def test_main_need_input_when_refno_missing(monkeypatch, capsys) -> None:
 
 
 # Live URL/refno without a cookie jar asks for JAS session access.
+# Pinned to prod: only the internal site needs a session, and the demo profile is
+# deliberately cookie-free (see the companion test below).
 def test_main_need_input_when_jas_session_missing(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("JES_SITE_MODE", "1")
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "260818001"])
     assert module.main() == module.EXIT_NEED_INPUT
     payload = json.loads(capsys.readouterr().out)
     assert payload["missing"] == ["jas_session"]
+
+
+# In demo site mode a bare refno needs no session: the demo profile is cookie-free, so
+# asking HR for a JAS session there would be wrong.
+def test_main_demo_mode_is_cookie_free(monkeypatch, capsys) -> None:
+    captured: list[argparse.Namespace] = []
+
+    def fake_url(args: argparse.Namespace) -> int:
+        captured.append(args)
+        return 0
+
+    monkeypatch.setenv("JES_SITE_MODE", "0")
+    monkeypatch.setattr(module, "run_url_screening", fake_url)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "260818001"])
+    assert module.main() == 0
+    capsys.readouterr()
+    assert captured
+    assert captured[0].no_cookie is True
+    assert captured[0].site == "demo"
 
 
 # A bare refno is turned into the allowlisted records URL before live fetch.
@@ -442,4 +464,43 @@ def test_second_run_auto_enables_resume(tmp_path, monkeypatch, capsys) -> None:
     capsys.readouterr()
     assert "--resume" not in captured_cmd[0]
     assert "--resume" in captured_cmd[1]
+
+
+# §1.6 regression guard: _pipeline is keyed by refno alone, so a pack stamped by a run on the
+# other site must be archived and re-scored — resuming it would score demo artifacts into a prod
+# report (or the reverse) and the result would look like a normal run.
+def test_pack_from_other_site_is_archived_not_resumed(tmp_path, monkeypatch, capsys) -> None:
+    jas_dir = tmp_path / "job"
+    cvs = jas_dir / "cvs"
+    cvs.mkdir(parents=True)
+    (jas_dir / "records.html").write_text(JOB_HTML, encoding="utf-8")
+    (cvs / "123456.pdf").write_bytes(b"%PDF")
+    captured_cmd: list[list[str]] = []
+
+    def fake_run_pipeline(cmd):
+        captured_cmd.append(cmd)
+        return 0, {"status": "success", "candidates": []}
+
+    monkeypatch.setattr(module, "_run_pipeline", fake_run_pipeline)
+    module.run_jas_screening(jas_dir, _args(tmp_path, resume=False, no_open=True))
+    capsys.readouterr()
+    assert "--resume" not in captured_cmd[0]
+
+    # The next run claims the pack belongs to the other site: overwrite the marker and leave a
+    # stale cache where the archive must catch it. The pack lives under the HR output dir,
+    # keyed by the refno (190001010 in JOB_HTML), not under the JAS folder.
+    work_dir = tmp_path / "out" / "190001010" / "_pipeline"
+    (work_dir / "site.json").write_text(json.dumps({"site": "prod"}), encoding="utf-8")
+    (work_dir / "rows.json").write_text("{}", encoding="utf-8")
+
+    module.run_jas_screening(jas_dir, _args(tmp_path, resume=False, no_open=True))
+    capsys.readouterr()
+
+    # Not resumed: the caches went to the backup folder, and the run re-scores from scratch.
+    assert "--resume" not in captured_cmd[1]
+    backups = list(work_dir.glob("_backup-*"))
+    assert backups, "the other-site cache must be archived"
+    assert (backups[0] / "rows.json").is_file()
+    # The pack is re-stamped as this run's site.
+    assert json.loads((work_dir / "site.json").read_text(encoding="utf-8"))["site"] == "demo"
 

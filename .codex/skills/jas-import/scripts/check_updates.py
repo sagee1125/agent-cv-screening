@@ -14,7 +14,7 @@ from jas_import.errors import JobNotFoundError
 from jas_import.fetch import fetch_job_payload, validate_job_payload
 from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import is_jas_refno, refno_from_url
-from screening_core.demo_mode import apply_demo_defaults
+from screening_core.site_mode import SiteModeError, apply_site_defaults, default_state_dir
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
 from screening_core.posts import post_counts, post_of
 from screening_core.job_state import (
@@ -132,7 +132,14 @@ def main() -> int:
         help="Extra allowlisted URL host (repeatable).",
     )
     parser.add_argument("--cookie-file", default=None, help="Local Netscape cookies.txt for authenticated fetches.")
-    parser.add_argument("--state-dir", default=None, help="Job-state directory (default repo data/jas_state).")
+    parser.add_argument(
+        "--site",
+        choices=("demo", "prod"),
+        default=None,
+        help="Which site to check: prod = the internal JAS system, demo = the public demo. "
+        "Defaults to JES_SITE_MODE (1/prod = prod, unset/0/demo = demo).",
+    )
+    parser.add_argument("--state-dir", default=None, help="Job-state directory (default repo data/jas_state/<site>).")
     parser.add_argument("--no-store", action="store_true", help="Report changes without updating stored state.")
     parser.add_argument(
         "--driver",
@@ -148,7 +155,13 @@ def main() -> int:
         help="Keep the WebBridge tab open (default: close it once the check is done).",
     )
     args = parser.parse_args()
-    apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
+    try:
+        apply_site_defaults(args, repo_root=_bootstrap.REPO_ROOT)
+    except SiteModeError as exc:
+        # Refuse an unrecognised switch instead of falling back to demo: the check would then
+        # report on the wrong site's job and look like a normal answer.
+        print(json.dumps({"status": "error", "error_code": "bad_site_mode", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return EXIT_ERROR
 
     refno = args.refno
     records_url = args.records_url
@@ -215,7 +228,7 @@ def main() -> int:
 
 
     job_refno = str(job.get("refno") or refno or "job")
-    state_dir = Path(args.state_dir) if args.state_dir else (_bootstrap.REPO_ROOT / "data" / "jas_state")
+    state_dir = Path(args.state_dir) if args.state_dir else default_state_dir(_bootstrap.REPO_ROOT, args.site)
     state = load_job_state(state_dir, job_refno)
     # Prefer the last successful screen snapshot so a failed screening doesn't
     # mask still-pending changes; fall back to the last check when no screen ran.

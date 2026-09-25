@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from screening_core import site_mode
+
 # Display identity is always (refno, appno). Names are never shown.
 # First-letter masking (e.g. "C***") is not used: it is still identifying in a
 # small applicant pool and is not de-identification under PIPL/GDPR.
@@ -50,8 +52,10 @@ def refno_from_url(url: str | None) -> str | None:
 
 
 # Builds the allowlisted JAS records URL for a job reference number.
-def records_url_for_refno(refno: str) -> str:
-    return f"https://jobs.polyu.edu.hk/internal/records.php?refno={refno.strip()}"
+# The URL comes from the active site profile, so demo and prod each have exactly one
+# definition and no caller has to know which host is live.
+def records_url_for_refno(refno: str, mode: str | None = None) -> str:
+    return site_mode.records_url_for_refno(refno, mode)
 
 
 __all__ = [

@@ -8,17 +8,21 @@ from typing import Any
 
 from host_envelope.sanitize import looks_like_forbidden_payload, looks_like_secret_ask, sanitize_text
 from host_envelope.schema import (
+    ALLOWED_CHECK_REASONS,
+    ALLOWED_CHECKS,
     ALLOWED_ERROR_CODES,
     ALLOWED_FAILURE_STAGES,
     ALLOWED_HR_STATUS,
     ALLOWED_MISSING,
     ALLOWED_SESSION,
+    ALLOWED_SITES,
     ALLOWED_STATUS,
     ALLOWED_TOOLS,
     SCHEMA_VERSION,
     validate_envelope,
 )
 from screening_core.candidate_id import appno_from_filename
+from screening_core.site_mode import SiteModeError, resolve_site_mode
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -48,6 +52,8 @@ def rejected_envelope(tool: str, message: str) -> dict[str, Any]:
         "first_check": None,
         "changes": None,
         "posts": None,
+        "site": None,
+        "checks": None,
     }
 
 
@@ -67,6 +73,20 @@ def unwrap_skill_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
 def _status(value: object) -> str:
     text = str(value or "error")
     return text if text in ALLOWED_STATUS else "error"
+
+
+# Resolves which site an envelope describes: the payload's own value when the skill stated it,
+# otherwise the site this process would resolve. A wrong-site run must stay visible after the
+# fact, because the report it produced looks completely normal (decision 2.8).
+def _project_site(payload: dict[str, Any], fallback: str | None = None) -> str | None:
+    for candidate in (payload.get("site"), fallback):
+        value = str(candidate or "").strip().lower()
+        if value in ALLOWED_SITES:
+            return value
+    try:
+        return resolve_site_mode()
+    except SiteModeError:
+        return None
 
 
 # Picks a host error_code from status and skill error text.
@@ -575,6 +595,66 @@ def _payload_is_dirty(value: Any) -> bool:
     return False
 
 
+# Projects the readiness check: which checks ran, which failed, and what HR has to fix.
+#
+# The per-check reasons are kept rather than collapsed into one "something is wrong", because each
+# one needs a different sentence from HR (start the helper / enable the extension / sign in).
+def _project_preflight(payload: dict[str, Any]) -> dict[str, Any]:
+    status = _status(payload.get("status"))
+    checks: list[dict[str, Any]] = []
+    for item in list(payload.get("checks") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("check") or "")
+        if name not in ALLOWED_CHECKS:
+            continue
+        ok = item.get("ok") is True
+        reason = item.get("reason") if item.get("reason") in ALLOWED_CHECK_REASONS else None
+        version = sanitize_text(item.get("version"), 40) if item.get("version") else None
+        if version and looks_like_forbidden_payload(version):
+            version = None
+        checks.append({"check": name, "ok": ok, "reason": None if ok else reason, "version": version})
+    err_text = sanitize_text(payload.get("error_message"), 160) if payload.get("error_message") else None
+    if err_text and looks_like_forbidden_payload(err_text):
+        err_text = "readiness check failed"
+    # A signed-out session is reported as expired, which is the value the host enum already has for
+    # it; when the login check never ran (the demo needs no login, or an earlier check failed)
+    # auth stays null rather than claiming a session state that was never observed.
+    login = next((item for item in checks if item["check"] == "login"), None)
+    auth = None
+    if login is not None:
+        auth = {"jas_session": "granted" if login["ok"] else "expired", "cookie_file_present": False}
+    envelope = {
+        "schema_version": SCHEMA_VERSION,
+        "tool": "preflight",
+        "status": status,
+        "error_code": _project_error_code(payload, status, err_text),
+        "error_message": err_text if status == "error" else None,
+        "run_id": None,
+        "refno": None,
+        "post_title": None,
+        "engine": None,
+        "candidate_count": None,
+        "failed_count": None,
+        "auth": auth,
+        "ask": _project_ask(payload) if status == "need_input" else None,
+        "conditions": None,
+        "ranking": [],
+        "reports": None,
+        "scratch_retained": None,
+        "has_changes": None,
+        "first_check": None,
+        "changes": None,
+        "posts": None,
+        "site": _project_site(payload),
+        "checks": checks,
+    }
+    errors = validate_envelope(envelope)
+    if errors or _payload_is_dirty(envelope):
+        return rejected_envelope("preflight", "preflight envelope failed validation")
+    return envelope
+
+
 # Projects a check_updates stdout payload into the host envelope (no ranking, just change summary).
 def _project_check_updates(payload: dict[str, Any], jas_session: str | None, cookie_file_present: bool | None) -> dict[str, Any]:
     status = _status(payload.get("status"))
@@ -633,6 +713,8 @@ def _project_check_updates(payload: dict[str, Any], jas_session: str | None, coo
         "posts": _project_posts(payload.get("posts"), payload.get("needs_confirmation"))
         if status != "error"
         else None,
+        "site": _project_site(payload),
+        "checks": None,
     }
     errors = validate_envelope(envelope)
     if errors or _payload_is_dirty(envelope):
@@ -683,6 +765,8 @@ def project_host_return(
             "first_check": None,
             "changes": None,
             "posts": None,
+            "site": _project_site({}),
+            "checks": None,
         }
         if session != "granted":
             envelope["status"] = "need_input"
@@ -696,6 +780,11 @@ def project_host_return(
         if _payload_is_dirty(skill) or (payload and _payload_is_dirty(payload)):
             return rejected_envelope(safe_tool, "skill stdout contained a forbidden payload")
         return _project_check_updates(skill, jas_session, cookie_file_present)
+
+    if safe_tool == "preflight":
+        if payload and _payload_is_dirty(payload):
+            return rejected_envelope(safe_tool, "skill stdout contained a forbidden payload")
+        return _project_preflight(payload or {})
 
     skill = unwrap_skill_payload(payload)
     if _payload_is_dirty(skill) or _payload_is_dirty(payload):
@@ -748,6 +837,8 @@ def project_host_return(
         "posts": _project_posts(
             skill.get("posts"), skill.get("needs_confirmation"), skill.get("unmatched_posts")
         ),
+        "site": _project_site(skill),
+        "checks": None,
     }
     errors = validate_envelope(envelope)
     if errors or _payload_is_dirty(envelope):

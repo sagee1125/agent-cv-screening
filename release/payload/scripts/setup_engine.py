@@ -12,7 +12,7 @@ pages cannot garble it. The zip layout this script expects:
     |-- scripts/setup_engine.py        (this file)
     |-- scripts/update_engine.py
     |-- expert/hr-cv-screener/         (WorkBuddy expert package)
-    `-- engine/                        (.codex, data/taxonomy, demo_mode.json,
+    `-- engine/                        (.codex, data/taxonomy, site_profiles.json,
                                         requirements.txt, .env.example)
 
 After install, the engine root (default C:\\agent-cv-screening on Windows,

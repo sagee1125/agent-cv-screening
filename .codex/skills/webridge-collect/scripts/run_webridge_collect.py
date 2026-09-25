@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,9 +20,9 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
 from jas_import.errors import JobNotFoundError
 from screening_core.candidate_id import is_jas_refno, refno_from_url
-from screening_core.demo_mode import apply_demo_defaults
 from screening_core.hr_output import HR_PACK_FOLDER
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
+from screening_core.site_mode import SITE_MODE_ENV, SiteModeError, apply_site_defaults
 from webridge_collect.client import WebBridgeClient, WebBridgeError, close_session_tabs, ensure_webbridge_daemon
 from webridge_collect.collect import COLLECT_ROOT_NAME, build_records_url, collect_job
 
@@ -81,6 +82,7 @@ def run_pipeline(
     no_open: bool,
     skip_reports: bool,
     conditions: str | None = None,
+    site: str | None = None,
 ) -> tuple[int, dict]:
     script = _bootstrap.REPO_ROOT / ".codex" / "skills" / "jas-import" / "scripts" / "run_jas_import.py"
     cmd = [sys.executable, str(script), str(folder)]
@@ -94,7 +96,13 @@ def run_pipeline(
         cmd += ["--no-open"]
     if skip_reports:
         cmd += ["--skip-reports"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # Pin the site for the whole child chain (import -> screening -> pipeline). The switch is
+    # the env var, so passing --site on this CLI without it would let the child resolve demo
+    # and put the job state and the pack stamp under the wrong site.
+    env = dict(os.environ)
+    if site:
+        env[SITE_MODE_ENV] = "1" if site == "prod" else "0"
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     raw = proc.stdout.strip() or proc.stderr.strip()
     try:
         payload = json.loads(raw) if raw else {}
@@ -123,6 +131,13 @@ def main() -> int:
     parser.add_argument("--refno", default=None, help="Job reference number.")
     parser.add_argument("--records-url", default=None, help="JAS records page URL.")
     parser.add_argument("--driver", choices=("webbridge", "http"), default="webbridge", help="Collection driver (default webbridge).")
+    parser.add_argument(
+        "--site",
+        choices=("demo", "prod"),
+        default=None,
+        help="Which site to screen: prod = the internal JAS system, demo = the public demo. "
+        "Defaults to JES_SITE_MODE (1/prod = prod, unset/0/demo = demo).",
+    )
     parser.add_argument("--session", default="jes-demo-screen", help="WebBridge session (tab group) name.")
     parser.add_argument("--daemon-url", default="http://127.0.0.1:10086", help="WebBridge daemon URL.")
     parser.add_argument("--base-url", default=None, help="Base URL for CV links and refno URL building (public demo).")
@@ -148,7 +163,24 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    apply_demo_defaults(args, repo_root=_bootstrap.REPO_ROOT)
+    try:
+        profile = apply_site_defaults(args, repo_root=_bootstrap.REPO_ROOT)
+    except SiteModeError as exc:
+        # An unrecognised JES_SITE_MODE is refused outright: falling back to demo would screen
+        # real applicants against the wrong site and still look like a normal run.
+        return _emit({"status": "error", "error_code": "bad_site_mode", "error_message": str(exc)}, to_stderr=True)
+    # A prod run rides HR's browser session. An exported SSO cookie jar on disk is strictly
+    # worse for compliance, so it is refused rather than quietly used.
+    if profile["mode"] == "prod" and args.cookie_file:
+        return _emit(
+            {
+                "status": "error",
+                "error_code": "cookie_file_not_allowed",
+                "error_message": "Cookie-file authentication is not allowed for the internal system; "
+                "the run uses the browser session instead.",
+            },
+            to_stderr=True,
+        )
     refno = args.refno
     records_url = args.records_url
     if args.target:
@@ -166,7 +198,9 @@ def main() -> int:
 
     allowed_hosts = merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), tuple(args.allow_host))
     collect_root = Path(args.collect_dir) if args.collect_dir else (_bootstrap.REPO_ROOT / "data" / COLLECT_ROOT_NAME)
-    folder = collect_root / (refno or "job")
+    # One folder per site per refno. The same refno exists on both sites, so without the site
+    # segment a run would reuse the other site's records.html and CVs.
+    folder = collect_root / profile["mode"] / (refno or "job")
 
     # The browser human flow is the default: auto-start the daemon instead of degrading to HTTP.
     if args.driver == "webbridge" and not ensure_webbridge_daemon(daemon_url=args.daemon_url):
@@ -184,6 +218,7 @@ def main() -> int:
         manifest = collect_job(
             records_url=records_url,
             folder=folder,
+            profile=profile,
             driver=args.driver,
             base_url=args.base_url,
             refno=refno,
@@ -208,6 +243,9 @@ def main() -> int:
         "status": "success",
         "source": "webridge-collect",
         "driver": args.driver,
+        # Which site this run used, so a wrong-site run is visible in the envelope and not
+        # only in the report it produced.
+        "site": profile["mode"],
         "refno": manifest.get("refno", refno),
         "post_title": manifest.get("post_title"),
         "candidate_count": len(manifest.get("candidates", [])),
@@ -232,6 +270,7 @@ def main() -> int:
             no_open=args.no_open,
             skip_reports=args.skip_reports,
             conditions=args.conditions,
+            site=profile["mode"],
         )
         result["pipeline_status"] = pipeline_payload.get("status")
         if "hr_files" in pipeline_payload:

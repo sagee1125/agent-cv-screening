@@ -9,7 +9,7 @@ expects when it runs from the extracted zip):
     |-- START-HERE.txt
     |-- scripts/{setup_engine.py,update_engine.py}
     |-- expert/hr-cv-screener/     (WorkBuddy expert, TESTING.md excluded)
-    `-- engine/                    (.codex, data/taxonomy, demo_mode.json,
+    `-- engine/                    (.codex, data/taxonomy, site_profiles.json,
                                     requirements.txt, .env.example,
                                     version.json  <- build version stamp)
 
@@ -41,7 +41,7 @@ RELEASE_ROOT = Path(__file__).resolve().parent
 PAYLOAD = RELEASE_ROOT / "payload"
 LIVE_EXPERT = Path.home() / ".workbuddy-ai" / "plugins" / "marketplaces" / "my-experts" / "plugins" / "hr-cv-screener"
 
-ENGINE_COPY = (".codex", "data/taxonomy", "demo_mode.json", ".env.example")
+ENGINE_COPY = (".codex", "data/taxonomy", "site_profiles.json", ".env.example")
 EXPERT_EXCLUDE = ("TESTING.md",)
 IGNORE_DIRS = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "_backup-*")
 EXECUTABLE_NAMES = ("setup.command", "update_engine.command")
@@ -61,6 +61,42 @@ def sync_expert(live: Path, snapshot: Path) -> None:
         if doomed.exists():
             doomed.unlink()
     print(f"[ok] expert snapshot synced from {live}")
+
+
+# Derives the developer's local skill copy (#1) from the live expert copy (#2), so the two stop
+# drifting by hand: the content is byte-identical except that the installer's path placeholders
+# are resolved to this machine's real paths. #2 keeps the placeholders (setup_engine.py rewrites
+# them at install time); #1 is the copy a developer conversation actually executes.
+DEV_SKILL_TARGET = Path.home() / ".workbuddy-ai" / "skills" / "hr-cv-screening" / "SKILL.md"
+
+
+def dev_skill_substitutions() -> tuple[tuple[str, str], ...]:
+    engine_root = str(REPO_ROOT).replace("\\", "/")
+    local_app_data = str(Path.home() / "AppData" / "Local").replace("\\", "/")
+    home = str(Path.home()).replace("\\", "/")
+    return (
+        # The engine placeholder must be replaced longest-first, or the bare root would eat the
+        # prefix of the PY/TOOL lines before their longer forms are seen.
+        ("C:/agent-cv-screening/.codex", f"{engine_root}/.codex"),
+        ("C:/agent-cv-screening/venv", f"{engine_root}/venv"),
+        ("C:/agent-cv-screening", engine_root),
+        ("%LOCALAPPDATA%", local_app_data),
+        ("%USERPROFILE%", home),
+    )
+
+
+def sync_dev_skill(live: Path, target: Path = DEV_SKILL_TARGET) -> None:
+    source = live / "skills" / "hr-cv-screening" / "SKILL.md"
+    if not source.is_file():
+        raise SystemExit(f"[ERROR] live expert SKILL.md not found at {source}")
+    text = source.read_text(encoding="utf-8")
+    for placeholder, real in dev_skill_substitutions():
+        text = text.replace(placeholder, real)
+    if "%LOCALAPPDATA%" in text or "C:/agent-cv-screening" in text:
+        raise SystemExit("[ERROR] dev-skill derivation left unresolved placeholders")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8", newline="\n")
+    print(f"[ok] dev skill derived from {live} -> {target}")
 
 
 def stage_engine(stage: Path, version: str) -> str:
@@ -107,7 +143,7 @@ def sanity_checks(stage: Path) -> None:
         stage / "START-HERE.txt",
         stage / "engine" / ".codex" / "skills" / "jas-import" / "scripts" / "run_jas_screening.py",
         stage / "engine" / "data" / "taxonomy" / "skill_taxonomy.yaml",
-        stage / "engine" / "demo_mode.json",
+        stage / "engine" / "site_profiles.json",
         stage / "engine" / "requirements.txt",
         stage / "engine" / "version.json",
         stage / "expert" / "hr-cv-screener" / ".codebuddy-plugin" / "plugin.json",
@@ -153,11 +189,20 @@ def write_zip(stage: Path, output: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the CV screening release zip.")
-    parser.add_argument("version", help="Release version, e.g. 1.0.0 (no leading v).")
+    parser.add_argument("version", nargs="?", default=None, help="Release version, e.g. 1.0.0 (no leading v). Required unless --sync-dev-skill runs alone.")
     parser.add_argument("--expert-dir", type=Path, default=None, help="Expert source dir (default: the committed snapshot).")
     parser.add_argument("--sync-expert", action="store_true", help="Refresh the committed snapshot from the live WorkBuddy dir first.")
+    parser.add_argument("--sync-dev-skill", action="store_true", help="Derive the developer's local skill copy (~/.workbuddy-ai/skills) from the live expert copy first.")
     parser.add_argument("--output", type=Path, default=None, help="Output zip path (default release/dist/CV-Screening-Setup.zip).")
     args = parser.parse_args()
+
+    if args.sync_dev_skill:
+        sync_dev_skill(LIVE_EXPERT)
+        if not args.version:
+            # Derivation-only run: nothing was staged, so there is no version to stamp.
+            return 0
+    if not args.version:
+        raise SystemExit("[ERROR] a release version is required (or pass --sync-dev-skill alone).")
 
     expert_dir = args.expert_dir
     if args.sync_expert or expert_dir is None:

@@ -12,8 +12,11 @@ os.environ.setdefault("LLM_MODEL", "glm-4-flash")
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test_db")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("CV_LOCAL_NER_ENABLED", "false")
-# Unit tests assume internal JAS mode; demo-mode tests opt in explicitly.
-os.environ.setdefault("JES_DEMO_MODE", "0")
+# Tests exercise the public-demo profile by default (also the product default); a test that
+# needs the internal system passes --site prod or monkeypatches JES_SITE_MODE=1.
+# Forced, not setdefault: an exported JES_SITE_MODE=1 in a developer's shell would otherwise
+# put the whole suite in prod mode, where a stray fetch could reach the real internal host.
+os.environ["JES_SITE_MODE"] = "0"
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
@@ -34,11 +37,17 @@ os.chdir(REPO_ROOT)
 REPO_STATE_DIR = REPO_ROOT / "data" / "jas_state"
 
 
-# Fingerprint the repo job-state dir as {name: (mtime_ns, size)} so a change is cheap to spot.
+# Fingerprint the repo job-state dir as {relative path: (mtime_ns, size)} so a change is cheap
+# to spot. Recursive on purpose: state now lives under a per-site subdirectory
+# (data/jas_state/<site>/<refno>.json), so a top-level glob would miss it and silently stop
+# guarding anything.
 def _state_fingerprint() -> dict[str, tuple[int, int]]:
     if not REPO_STATE_DIR.is_dir():
         return {}
-    return {path.name: (path.stat().st_mtime_ns, path.stat().st_size) for path in REPO_STATE_DIR.glob("*.json")}
+    return {
+        str(path.relative_to(REPO_STATE_DIR)): (path.stat().st_mtime_ns, path.stat().st_size)
+        for path in REPO_STATE_DIR.rglob("*.json")
+    }
 
 
 @pytest.fixture(autouse=True)

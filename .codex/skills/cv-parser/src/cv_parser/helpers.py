@@ -989,7 +989,9 @@ def merge_fragmented_education_rows(rows: list[dict[str, Any]]) -> list[dict[str
     return merged
 
 
-def compress_cv_text(*, raw_text: str, max_chars: int) -> str:
+def compress_cv_text(*, raw_text: str, max_chars: int | None) -> str:
+    # max_chars=None keeps every line: the JD is read as fully as the page has it (§2.11), and a
+    # rejection for length must surface as an error, not as a cap quietly re-applied here.
     lines = [" ".join(line.split()) for line in raw_text.splitlines()]
     lines = [line for line in lines if line]
     if not lines:
@@ -1005,7 +1007,7 @@ def compress_cv_text(*, raw_text: str, max_chars: int) -> str:
         selected.append(line)
 
     joined = "\n".join(selected)
-    if len(joined) <= max_chars:
+    if max_chars is None or len(joined) <= max_chars:
         return joined
 
     priority_pattern = re.compile(
@@ -1037,7 +1039,11 @@ def build_compressed_prompt(*, raw_text: str, jd_text: str | None, max_chars: in
         f"CV Text (compressed):\n{compressed_cv_text}",
     ]
     if jd_text:
-        compressed_jd_text = compress_cv_text(raw_text=jd_text, max_chars=3000)
+        # The JD carries no cap: whatever the advertisement says, the fallback model is asked to
+        # read (decision §2.11, "有多少讀多少"). A model that cannot take the length must fail
+        # loudly — service.py names the JD length in the error — instead of this code silently
+        # deciding what part of the job matters.
+        compressed_jd_text = compress_cv_text(raw_text=jd_text, max_chars=None)
         segments.append(f"JD Context (compressed):\n{compressed_jd_text}")
     segments.append("Return valid JSON only.")
     return "\n\n".join(segments)

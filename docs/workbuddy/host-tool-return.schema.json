@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://iherd.local/schemas/workbuddy/host-tool-return.schema.json",
-  "$comment": "WorkBuddy host-LLM tool return whitelist; additionalProperties false; CV/JD bodies and identity never appear here.",
+  "$comment": "WorkBuddy host-LLM tool return whitelist; additionalProperties false; CV/JD bodies and identity never appear here. Kept in step with .codex/skills/host-envelope/src/host_envelope/schema.py.",
   "title": "WorkBuddy HostToolReturn",
   "type": "object",
   "additionalProperties": false,
@@ -10,11 +10,11 @@
     "schema_version": { "const": "1.0.0" },
     "tool": {
       "type": "string",
-      "enum": ["request_jas_access", "screen_refno", "get_run_status", "check_updates"]
+      "enum": ["request_jas_access", "screen_refno", "get_run_status", "check_updates", "preflight"]
     },
     "status": {
       "type": "string",
-      "enum": ["success", "partial_success", "need_input", "error"]
+      "enum": ["success", "partial_success", "need_input", "conditions_pending", "error"]
     },
     "error_code": {
       "type": ["string", "null"],
@@ -27,10 +27,16 @@
         "refno_invalid",
         "fetch_failed",
         "need_input",
+        "conditions_pending",
         "not_found",
+        "conditions_unreadable",
         "pipeline_error",
         "partial_failures",
-        "internal"
+        "internal",
+        "daemon_unreachable",
+        "extension_disabled",
+        "not_signed_in",
+        "bad_site_mode"
       ]
     },
     "error_message": {
@@ -81,7 +87,7 @@
           "maxItems": 8,
           "items": {
             "type": "string",
-            "enum": ["jas_session", "refno", "candidates", "jd", "position", "scope", "input"]
+            "enum": ["jas_session", "refno", "candidates", "jd", "position", "scope", "input", "conditions", "browser", "extension"]
           }
         },
         "questions": {
@@ -91,6 +97,64 @@
             "type": "string",
             "maxLength": 120,
             "pattern": "^[^\\r\\n]*$"
+          }
+        },
+        "conditions": {
+          "type": ["object", "null"],
+          "description": "The stored conditions the engine is holding back until HR answers; the conversation reads them back rather than asking 'reuse them?' without saying what 'them' is.",
+          "additionalProperties": false,
+          "properties": {
+            "must_skills": { "type": "array", "maxItems": 40, "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" } },
+            "preferred_skills": { "type": "array", "maxItems": 40, "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" } },
+            "languages": { "type": "array", "maxItems": 40, "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" } },
+            "must_skill_weights": {
+              "type": "array",
+              "maxItems": 40,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["skill", "weight"],
+                "properties": {
+                  "skill": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+                  "weight": { "type": "number", "minimum": 0.5, "maximum": 3.0 }
+                }
+              }
+            },
+            "rejected_weights": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["skill", "reason"],
+                "properties": {
+                  "skill": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+                  "weight": { "type": "string", "maxLength": 40, "pattern": "^[^\\r\\n]*$" },
+                  "reason": { "type": "string", "maxLength": 160, "pattern": "^[^\\r\\n]*$" }
+                }
+              }
+            },
+            "collected_at": { "type": "string", "maxLength": 40 },
+            "target_seniority": { "type": "string", "maxLength": 40 },
+            "min_relevant_years": { "type": "string", "maxLength": 40 },
+            "applied": { "type": "boolean" },
+            "changed": { "type": "integer", "minimum": 0, "maximum": 1000 }
+          }
+        },
+        "post_deltas": {
+          "type": "array",
+          "maxItems": 12,
+          "description": "Per-post derivations HR must confirm on a multi-post advertisement (FR-9); each carries the advertisement sentences the requirements were read from.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["post", "delta"],
+            "properties": {
+              "post": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+              "labels": { "type": "array", "maxItems": 4, "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" } },
+              "confirmed": { "type": "boolean" },
+              "delta": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 300, "pattern": "^[^\\r\\n]*$" } }
+            }
           }
         }
       }
@@ -118,6 +182,12 @@
           "failure_stage": {
             "type": ["string", "null"],
             "enum": [null, "cv-parse", "score", "match", "report-gen", "download"]
+          },
+          "post": {
+            "type": ["string", "null"],
+            "maxLength": 80,
+            "pattern": "^[^\\r\\n]*$",
+            "description": "Which post this row's rank is relative to. A rank is only meaningful inside its post, so the conversation cannot read the ranking correctly without it (FR-5, FR-11)."
           }
         }
       }
@@ -194,9 +264,105 @@
         "status_changed": {
           "type": "object",
           "additionalProperties": { "type": "string" }
+        },
+        "added_posts": {
+          "type": "object",
+          "description": "The post dimension of a change (FR-12): a re-assignment leaves the applicant count and every status unchanged, so without these keys it would be reported as no change at all.",
+          "additionalProperties": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+        },
+        "removed_posts": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+        },
+        "post_changed": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": { "type": ["string", "null"], "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+              "to": { "type": ["string", "null"], "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+            }
+          }
+        },
+        "posts_appeared": {
+          "type": "array",
+          "maxItems": 24,
+          "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+        },
+        "posts_disappeared": {
+          "type": "array",
+          "maxItems": 24,
+          "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+        }
+      }
+    },
+    "posts": {
+      "type": ["object", "null"],
+      "description": "The post dimension: per-post applicant counts with each post's top applicant, the applicants whose post the page never stated, and any post the advertisement's title never named (FR-3, FR-7, FR-11, FR-12).",
+      "additionalProperties": false,
+      "required": ["groups", "needs_confirmation", "unmatched_posts"],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["post"],
+            "properties": {
+              "post": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" },
+              "applicants": { "type": ["integer", "null"], "minimum": 0 },
+              "top_appno": { "type": ["string", "null"], "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$" },
+              "top_score": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "needs_confirmation": {
+          "type": "array",
+          "maxItems": 200,
+          "description": "The raw post value exactly as the page gave it, because that is what HR has to rule on; a guess is never substituted (FR-7).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["appno"],
+            "properties": {
+              "appno": { "type": "string", "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$" },
+              "post": { "type": ["string", "null"], "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+            }
+          }
+        },
+        "unmatched_posts": {
+          "type": "array",
+          "maxItems": 24,
+          "description": "Posts the records page named but the advertisement's title never did: a warning for HR to confirm, never a block (FR-3).",
+          "items": { "type": "string", "maxLength": 80, "pattern": "^[^\\r\\n]*$" }
+        }
+      }
+    },
+    "site": {
+      "type": ["string", "null"],
+      "enum": [null, "demo", "prod"],
+      "description": "Which site the run used. Without it a wrong-site run is undetectable after the fact, because the report it produced looks entirely normal (decision 2.8)."
+    },
+    "checks": {
+      "type": ["array", "null"],
+      "maxItems": 8,
+      "description": "The readiness check's per-check results. Each reason needs a different sentence from HR, so they are never collapsed into one generic failure.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "ok"],
+        "properties": {
+          "check": { "type": "string", "enum": ["daemon", "extension", "login"] },
+          "ok": { "type": "boolean" },
+          "reason": {
+            "type": ["string", "null"],
+            "enum": [null, "daemon_unreachable", "extension_disabled", "not_signed_in"]
+          },
+          "version": { "type": ["string", "null"], "maxLength": 40, "pattern": "^[^\\r\\n]*$" }
         }
       }
     }
   }
 }
-

@@ -316,16 +316,23 @@ def test_run_url_screening_auth_failure_is_need_input(tmp_path, monkeypatch, cap
 DEMO_BASE_URL = "https://jes-web-demo.vercel.app"
 
 
-# --base-url builds a demo records URL from a bare refno.
-def test_build_records_url_for_refno_base_url() -> None:
+# --base-url builds a demo records URL from a bare refno; without one the active site
+# profile decides, so the switch (not a missing base URL) picks prod or demo.
+def test_build_records_url_for_refno_base_url(monkeypatch) -> None:
     module = _import_screening_module()
     assert (
         module.build_records_url_for_refno("2600827001", DEMO_BASE_URL)
         == "https://jes-web-demo.vercel.app/records.html?refno=2600827001"
     )
+    monkeypatch.setenv("JES_SITE_MODE", "1")
     assert (
         module.build_records_url_for_refno("2600827001", None)
         == "https://jobs.polyu.edu.hk/internal/records.php?refno=2600827001"
+    )
+    monkeypatch.setenv("JES_SITE_MODE", "0")
+    assert (
+        module.build_records_url_for_refno("2600827001", None)
+        == "https://jes-web-demo.vercel.app/records.html?refno=2600827001"
     )
 
 

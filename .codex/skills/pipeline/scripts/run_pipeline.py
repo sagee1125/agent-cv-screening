@@ -64,6 +64,7 @@ from screening_core.post_jds import (
     post_slug,
 )
 from screening_core.posts import base_name, group_by_post, post_key, post_of, unmatched_posts
+from screening_core.site_mode import default_state_dir
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
     candidate_report_fingerprint,
@@ -1453,13 +1454,14 @@ def _effective_allowed_hosts(args: argparse.Namespace) -> tuple[str, ...]:
     return merge_allowed_hosts(ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env(), extra)
 
 
-# Resolve the job-state directory (default repo data/jas_state).
+# Resolve the job-state directory (default repo data/jas_state/<site>).
+# Scoped by site so a demo baseline is never read as a prod baseline for the same refno.
 def _resolve_state_dir(args: argparse.Namespace) -> Path:
-    raw = getattr(args, "state_dir", None) or "data/jas_state"
-    path = Path(raw)
-    if not path.is_absolute():
-        path = REPO_ROOT / path
-    return path
+    raw = getattr(args, "state_dir", None)
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else REPO_ROOT / path
+    return default_state_dir(REPO_ROOT, getattr(args, "site", None))
 
 
 def _resolve_url_inputs(args: argparse.Namespace, out_dir: Path) -> list[Path]:

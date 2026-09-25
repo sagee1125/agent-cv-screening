@@ -41,6 +41,7 @@ affected_modules:
 | ------- | ---------- | -------------------------- | ------------------------------------------------------------------------------ |
 | 1.0.0   | 2026-08-27 | HR Screening Product Owner | Initial host-visible tool envelope: field whitelist, denylist, ask/auth codes. |
 | 1.1.0   | 2026-08-27 | Engineering                | `host-envelope` projector CLI; pipeline identity is `refno`/`appno`/`display_label`. |
+| 1.2.0   | 2026-09-25 | Engineering                | Bring the document back in step with the code: `check_updates` and `preflight` tools, the post dimension (`posts`, `ranking[].post`, the `changes` post keys), `conditions_pending`, `conditions_unreadable`, `site`, and the readiness `checks`. |
 
 ---
 
@@ -102,6 +103,8 @@ Given a tool call (`request_jas_access`, `screen_refno`, `get_run_status`), the 
 | F1.1 | `host-envelope` CLI   | This repo prints the whitelist JSON so WorkBuddy never sees raw skill stdout. | Done        |
 | F1.2 | Strength token labels | Optional canonical skill tokens (taxonomy IDs), no free-text CV excerpts.     | Not Started |
 | F1.3 | Schema unit tests     | Reject fixtures that include `name`, `jd_text`, `Set-Cookie`, base64.         | Done        |
+| F1.4 | Readiness preflight   | `preflight` reports daemon / extension / sign-in state before a run starts.    | Done        |
+| F1.5 | Site stamping         | Every envelope names the site the run used, so a wrong-site run is detectable. | Done        |
 
 ### 2.3 Acceptance Criteria
 
@@ -121,6 +124,8 @@ Given a tool call (`request_jas_access`, `screen_refno`, `get_run_status`), the 
 | Host projection     | `.codex/skills/host-envelope`                                                   | Only `HostToolReturn` may enter the host model. |
 | Agent envelope      | `run_agent.py` `_final_payload` (nested `result`)    | Nested skill JSON is `disk_only`.              |
 | Planner ask keys    | `planner.py` `ALLOWED_MISSING`                       | Align with Section 5.2 `ask.missing`.          |
+| Readiness check     | `webridge-collect/scripts/run_preflight.py`          | Runs **before** `screen_refno`; a failure names the one thing HR must fix. |
+| Site resolution     | `screening_core/site_mode.py`                        | One switch decides demo/prod; every envelope is stamped. |
 
 ### 2.5 Requirements Traceability Matrix (RTM)
 
@@ -130,6 +135,9 @@ Given a tool call (`request_jas_access`, `screen_refno`, `get_run_status`), the 
 | F0.5 | AC0.1 | No identity keys in envelope    | Projector                      |
 | F0.4 | AC0.3 | Enum for `ask.missing`          | Projector + host               |
 | F0.6 | AC0.5 | Host policy: no Read of reports | WorkBuddy runtime              |
+| F1.3 | AC0.2 | Shipped schema == code whitelists | `test_host_envelope.py`      |
+| F1.4 | AC0.3 | Per-check reasons, not one generic failure | `test_preflight.py`   |
+| F1.5 | AC0.5 | `site` present on every envelope | Projector                      |
 
 ---
 
@@ -205,10 +213,16 @@ Canonical machine schema: [`docs/workbuddy/host-tool-return.schema.json`](host-t
 | Tool                 | Purpose                                                       | Typical `status`                                       |
 | -------------------- | ------------------------------------------------------------- | ------------------------------------------------------ |
 | `request_jas_access` | Ask runtime for JAS session; never scrape HTML into the model | `need_input` or `success` (auth only)                  |
-| `screen_refno`       | Fetch + parse + score + reports                               | `success` / `partial_success` / `need_input` / `error` |
+| `screen_refno`       | Fetch + parse + score + reports                               | `success` / `partial_success` / `need_input` / `conditions_pending` / `error` |
+| `check_updates`      | Report what changed since the last screen; writes no report    | `success` / `need_input` / `error`                     |
+| `preflight`          | Readiness check before a run: daemon, extension, sign-in       | `success` / `need_input` / `error`                     |
 | `get_run_status`     | Poll `run_id`                                                 | same                                                   |
 
 The host LLM **must not** be given a tool that returns raw HTML, PDF, or skill stdout.
+
+`preflight` is the one tool that must be called **before** `screen_refno`: a run that starts
+without a browser, an extension, or a sign-in cannot finish, and the check is what lets the reply
+name the single thing HR has to fix instead of failing halfway through.
 
 ### 5.2 Field whitelist (host LLM)
 
@@ -217,8 +231,8 @@ Top-level keys only. Nested objects may only use keys listed under them.
 | Key                | Type            | Allowed values / notes                                                                      |
 | ------------------ | --------------- | ------------------------------------------------------------------------------------------- |
 | `schema_version`   | string          | `"1.0.0"`                                                                                   |
-| `tool`             | string          | `request_jas_access` \| `screen_refno` \| `get_run_status`                                  |
-| `status`           | string          | `success` \| `partial_success` \| `need_input` \| `error`                                   |
+| `tool`             | string          | `request_jas_access` \| `screen_refno` \| `check_updates` \| `preflight` \| `get_run_status` |
+| `status`           | string          | `success` \| `partial_success` \| `need_input` \| `conditions_pending` \| `error`           |
 | `error_code`       | string or null  | See 5.2.1; required when `status=error`                                                     |
 | `error_message`    | string or null  | Max 160 chars; sanitizer in 5.5; no paths/PII                                               |
 | `run_id`           | string or null  | Opaque id (`[a-zA-Z0-9_-]{1,64}`)                                                           |
@@ -228,17 +242,28 @@ Top-level keys only. Nested objects may only use keys listed under them.
 | `candidate_count`  | integer or null | Count of ranked rows                                                                        |
 | `failed_count`     | integer or null | Count of failed candidates (no identities)                                                  |
 | `auth`             | object or null  | See 5.2.2                                                                                   |
-| `ask`              | object or null  | See 5.2.3; set when `status=need_input`                                                     |
+| `ask`              | object or null  | See 5.2.3; set when `status=need_input` or `conditions_pending`                             |
 | `ranking`          | array           | Max 200 items; see 5.2.4                                                                    |
 | `reports`          | object or null  | **Opaque paths for the UI**, see 5.2.5. Model may show “report ready”, must not read files. |
 | `conditions`       | object or null  | Accepted/rejected must-have weight outcomes; see 5.2.6                                      |
 | `scratch_retained` | boolean or null | Whether downloaded CVs were retained (kept by default); never list files                                      |
+| `has_changes`      | boolean or null | `check_updates` only: whether anything changed since the stored baseline                    |
+| `first_check`      | boolean or null | `check_updates` only: no baseline existed, so nothing can have changed                      |
+| `changes`          | object or null  | `check_updates` only; see 5.2.7                                                             |
+| `posts`            | object or null  | The post dimension of a multi-post advertisement; see 5.2.8                                 |
+| `site`             | string or null  | `demo` \| `prod`; see 5.2.9                                                                 |
+| `checks`           | array or null   | `preflight` only, max 8; see 5.2.9                                                          |
 
 #### 5.2.1 `error_code` enum
 
-`envelope_rejected` | `unauthorized` | `session_expired` | `host_not_allowlisted` | `refno_invalid` | `fetch_failed` | `need_input` | `pipeline_error` | `partial_failures` | `internal`
+`envelope_rejected` | `unauthorized` | `session_expired` | `host_not_allowlisted` | `refno_invalid` | `fetch_failed` | `need_input` | `conditions_pending` | `not_found` | `conditions_unreadable` | `pipeline_error` | `partial_failures` | `internal` | `daemon_unreachable` | `extension_disabled` | `not_signed_in` | `bad_site_mode`
 
 Do not put HTTP bodies, HTML, or exception strings into `error_code`.
+
+The last four are the readiness and switch reasons. They also travel as `checks[].reason` (§5.2.9);
+they are whitelisted here as well because a whitelist that does not know a value is the trap this
+document exists to close — the value would be swallowed and HR told “something went wrong”
+instead of what to fix.
 
 #### 5.2.2 `auth`
 
@@ -249,14 +274,23 @@ Do not put HTTP bodies, HTML, or exception strings into `error_code`.
 
 Forbidden in `auth`: `cookie`, `cookies`, `set_cookie`, `token`, `cookie_file`, `sso`.
 
+A `preflight` envelope reports `expired` for a signed-out browser. When the login probe never ran
+(the demo needs no sign-in, or an earlier check failed) `auth` is **null** rather than claiming a
+session state that was never observed.
+
 #### 5.2.3 `ask`
 
-| Key         | Type     | Allowed                                                                                         |
-| ----------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `missing`   | string[] | Subset of: `jas_session` \| `refno` \| `candidates` \| `jd` \| `position` \| `scope` \| `input` |
-| `questions` | string[] | Max 6 items, each max 120 chars, already written for HR; sanitizer 5.5                          |
+| Key          | Type     | Allowed                                                                                         |
+| ------------ | -------- | ----------------------------------------------------------------------------------------------- |
+| `missing`    | string[] | Subset of: `jas_session` \| `refno` \| `candidates` \| `jd` \| `position` \| `scope` \| `input` \| `conditions` \| `browser` \| `extension` |
+| `questions`  | string[] | Max 6 items, each max 120 chars, already written for HR; sanitizer 5.5                          |
+| `conditions` | object   | `conditions_pending` only: the stored conditions HR is being asked about, see 5.2.6             |
+| `post_deltas`| array    | `conditions_pending` only, max 12: per-post derivations HR must confirm, each `{post, labels[], confirmed, delta[]}` |
 
-Host must not invent extra missing keys (align with screening-agent planner allowlist, plus `jas_session` / `scope` / `refno`).
+Host must not invent extra missing keys (align with screening-agent planner allowlist, plus `jas_session` / `scope` / `refno` / `browser` / `extension`).
+
+`conditions` exists so the reply can read the stored conditions **back** to HR. Asking “reuse
+them?” without saying what “them” is is not a question she can answer.
 
 #### 5.2.4 `ranking[]` item
 
@@ -272,6 +306,11 @@ Host must not invent extra missing keys (align with screening-agent planner allo
 | `eligible`      | boolean or null | Hard-filter pass/fail                                          |
 | `parse_failed`  | boolean         | True if this appno did not produce a score                     |
 | `failure_stage` | string or null  | `cv-parse` \| `score` \| `match` \| `report-gen` \| `download` |
+| `post`          | string or null  | Which post this rank is relative to; null on a single-post job |
+
+`post` is not decoration: a rank is only meaningful **inside** its post, so a reply that reads the
+ranking without it will invite a comparison between applicants who were assessed against different
+requirements.
 
 Forbidden on ranking rows: `name`, `email`, `phone`, `source` (raw filename), `extracted_json`, `score_json`, `detail_json`, `report_pdf`, `reasoning`, `evidence`, `interview_questions`, `radar_dimensions` (free text).
 
@@ -293,6 +332,84 @@ Set only when a screening run has per-skill weight metadata. `must_skill_weights
 accepted `{skill, weight}` records; `rejected_weights[]` contains bounded
 `{skill, weight, reason}` records for values HR supplied but the engine refused. Names,
 emails, phones, and other candidate identity are never allowed here.
+
+#### 5.2.7 `changes` (`check_updates` only)
+
+Present when `status != error`; `null` otherwise. All keys are always emitted, so the host never has
+to distinguish "no change" from "key absent".
+
+| Key                  | Type                      | Allowed                                                          |
+| -------------------- | ------------------------- | ---------------------------------------------------------------- |
+| `jd_changed`         | boolean                   | The advertisement text differs from the stored baseline          |
+| `added`              | string[]                  | New `appno`s, max 200                                            |
+| `removed`            | string[]                  | `appno`s no longer on the page, max 200                          |
+| `status_changed`     | object                    | `{appno: status}`; `appno` only, max 200                         |
+| `added_posts`        | object                    | `{appno: post}` — applicants newly seen under a post, max 200    |
+| `removed_posts`      | object                    | `{appno: post}` — applicants no longer under that post, max 200  |
+| `post_changed`       | object                    | `{appno: {from, to}}` — the applicant moved post, max 200        |
+| `posts_appeared`     | string[]                  | Post labels now on the page but not in the baseline, max 24      |
+| `posts_disappeared`  | string[]                  | Post labels in the baseline but no longer on the page, max 24    |
+
+The five post keys are not decoration. A re-assignment changes no applicant count and no
+`hr_status`, so without them a genuine change would be reported as "nothing changed" — the one
+outcome HR would act on wrongly. `post_changed` is the change HR most needs to see: an applicant
+who moved post now sits in a different ranking, and their previous rank no longer means anything.
+
+`from`/`to` are post labels or `null`; a record where both are `null` is dropped rather than shown
+as an empty move.
+
+#### 5.2.8 `posts`
+
+The post dimension of a multi-post advertisement. `null` on a single-post job, and on any envelope
+where no post could be read.
+
+| Key                 | Type     | Allowed                                                                    |
+| ------------------- | -------- | -------------------------------------------------------------------------- |
+| `groups`            | array    | Max 24; one record per post: `{post, applicants, top_appno, top_score}`     |
+| `needs_confirmation`| array    | Max 200; `{appno, post}` — the post could not be read, HR must rule on it   |
+| `unmatched_posts`   | string[] | Max 24; post labels the records page names but the advertisement's title never did |
+
+In `groups`, `post` is the raw `Post applied for` string from the page — a proper name from the
+advertisement, never translated, and never normalised into a slug. `applicants`, `top_appno` and
+`top_score` are `null` when absent. A score here is only meaningful **inside its own post**; the
+host must not compare `top_score` between two records, because each applicant was assessed against
+the requirements of the post they applied for.
+
+`needs_confirmation` carries the **raw** value the page gave, because that value is exactly what HR
+has to rule on. These applicants are not ranked anywhere — placing them by guessing would put
+someone in a ranking they never applied for.
+
+`unmatched_posts` is a warning, not a failure: it asks HR to confirm that the advertisement and the
+records page describe the same posts. Every applicant was still scored against their own post's
+requirements.
+
+#### 5.2.9 `site` and `checks`
+
+`site` (`"demo"` | `"prod"`) is stamped on **every** envelope. Without it a wrong-site run is
+undetectable after the fact: the report it produced looks entirely normal, and the only clue would
+be that the candidates are not the company's own. It is `null` only when the mode could not be
+resolved at all.
+
+`checks` is `preflight` only (`null` on every other tool), max 8 records:
+
+| Key       | Type            | Allowed                                                            |
+| --------- | --------------- | ------------------------------------------------------------------ |
+| `check`   | string          | `daemon` \| `extension` \| `login`                                  |
+| `ok`      | boolean         | Pass/fail                                                           |
+| `reason`  | string or null  | `null` when `ok`; else `daemon_unreachable` \| `extension_disabled` \| `not_signed_in` |
+| `version` | string or null  | Extension version, max 40 chars, when the check could read one      |
+
+The identifier key is `check`, **not** `name`. `name` is denylisted here because it is the
+candidate-name field; a check record that borrowed it would be rejected as a PII leak by the same
+guard that protects applicants. The guard was kept and the key renamed.
+
+Which checks run depends on the site: `daemon` and `extension` run on **both**, `login` only where
+the site expects a sign-in. A per-check `reason` is preserved rather than collapsed into one generic
+"something is wrong", because each one needs a different sentence from HR — start the helper,
+enable the extension, or sign in.
+
+`auth` is derived from the `login` check: `granted` when it passed, `expired` when it failed, and
+`null` when the check never ran (the demo needs no sign-in, or an earlier check failed first).
 
 ### 5.3 Example (success)
 
@@ -479,14 +596,23 @@ WorkBuddy must not implement a second scorer. It must not pass `jd_text` into `c
 | `reports.screening_board_html` path | `reports.html_ready: true` |
 | `jd_overrides.must_skill_weights` | `conditions.must_skill_weights` (`skill` + numeric weight only) |
 | `jd_overrides.rejected_weights` | `conditions.rejected_weights` (`skill` + bounded reason only) |
-| `ask.missing` | intersect with enum (`jas_session` / `refno` / `candidates` / `jd` / `position` / `scope` / `input`) |
+| `ask.missing` | intersect with enum (`jas_session` / `refno` / `candidates` / `jd` / `position` / `scope` / `input` / `conditions` / `browser` / `extension`) |
 | `error_message` | sanitize; HTML / `Set-Cookie` / base64 → `envelope_rejected` |
+| run's resolved site mode | `site` on **every** envelope (`demo` / `prod`; `null` if unresolvable) |
+| `posts.groups` / `needs_confirmation` / `unmatched_posts` | `posts` (labels kept raw; `top_appno` dropped when it is not an appno) |
+| `changes.*_posts` / `post_changed` / `posts_appeared` / `posts_disappeared` | the post half of `changes` (FR-12) |
+| `checks[].check` / `ok` / `reason` / `version` | `checks` (unknown check names and reasons dropped, not passed through) |
+| `checks[login].ok` | `auth.jas_session` (`granted` / `expired`; `null` when the probe never ran) |
 
 ### 12.3 Test gates
 
 - Schema validate positive fixture (`test_project_strips_name_and_uses_appno`).
 - Negative: pipeline-like JSON with `name` → strip-and-pass (`test_name_is_not_used_as_appno`).
 - Negative: HTML / `Set-Cookie` string in skill stdout → `envelope_rejected`.
+- Negative: a `checks[]` record keyed `name` → rejected by the PII scan; the identifier is `check`.
+- `test_published_schema_matches_the_code_whitelists` — the shipped
+  `host-tool-return.schema.json` enums must equal the code's frozensets, so the document cannot
+  drift from `schema.py` again.
 
 ### 12.7 Open review decisions
 

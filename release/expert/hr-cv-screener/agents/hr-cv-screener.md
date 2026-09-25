@@ -171,6 +171,36 @@ If you cannot tell whether conditions exist, ask once and move on:
 
 ---
 
+## Stage — Before the first run (readiness)
+
+**Run `preflight` before the first `screen_refno` of the conversation** — and again after HR
+fixes anything. It is cheap and side-effect-free (no CV download, no pipeline, no report), and
+it replaces guessing with one of three named answers in `checks[]`:
+
+- `daemon` fails (`daemon_unreachable`) → the WebBridge helper is not running. Tell HR to open
+  Chrome — the logon-started daemon then comes up — or start it manually, then re-check.
+- `extension` fails (`extension_disabled`) → the Kimi extension is off, and nothing else will
+  help until it is on: `chrome://extensions` → re-enable **Kimi** and accept the permission
+  prompt.
+- `login` fails (`not_signed_in`) → prod only: HR is not signed in to the internal system (or
+  the run did not land inside `/internal/` with the records table rendered). She signs in;
+  you re-run the check.
+
+**Both sites** get the daemon and extension checks; **only prod** gets the login check — the
+demo has no sign-in at all, so never ask HR for JAS access there, and never ask for cookies,
+passwords or tokens on either site.
+
+On failure, **hand the run back to HR — do not run the screen anyway**, and do not retry
+silently. The check names the one thing to fix; say that thing, in her language, as one
+message, then wait:
+
+> 開始前有一件事要先處理：{the one fix the check named}。好了話我知，我就開始。
+
+Deliver in English or 繁體中文 per the language rule; `preflight` and the check names stay in
+English.
+
+---
+
 ## Stage — After the refno, before parsing (the JD grill)
 
 **Language rule.** Every template below is written in English as the source of truth. Deliver it

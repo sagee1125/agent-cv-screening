@@ -1,0 +1,24 @@
+{
+  "_comment": "Site profiles for the screening switch. The active profile is chosen by JES_SITE_MODE (1/prod = internal JAS, unset/0/demo = public demo); 'default' is used only when JES_SITE_MODE is unset. Every key here overrides the built-in profile of the same mode in screening_core/site_mode.py, so an operator can repoint a site without a code change.",
+  "default": "demo",
+  "profiles": {
+    "demo": {
+      "base_url": "https://jes-web-demo.vercel.app",
+      "list_url": "https://jes-web-demo.vercel.app/",
+      "records_url_template": "https://jes-web-demo.vercel.app/records.html?refno={refno}",
+      "allow_hosts": ["jes-web-demo.vercel.app"],
+      "expects_login": false,
+      "human_flow_available": true,
+      "tab_group_title": "JES demo screening"
+    },
+    "prod": {
+      "base_url": "https://jobs.polyu.edu.hk",
+      "list_url": "https://jobs.polyu.edu.hk/internal/records.php",
+      "records_url_template": "https://jobs.polyu.edu.hk/internal/records.php?refno={refno}",
+      "allow_hosts": ["jobs.polyu.edu.hk"],
+      "expects_login": true,
+      "human_flow_available": true,
+      "tab_group_title": "JAS screening"
+    }
+  }
+}

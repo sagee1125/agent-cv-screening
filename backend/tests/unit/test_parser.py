@@ -9,6 +9,7 @@ import pytest
 
 from cv_parser import local_ner as local_ner_module
 from cv_parser import CVParserService
+from cv_parser.helpers import build_compressed_prompt, compress_cv_text
 from cv_parser.pdf_utils import (
     extract_with_pymupdf,
     render_redacted_pdf_pages_as_data_urls,
@@ -589,3 +590,71 @@ def test_local_ner_returns_unique_names_in_document_order(monkeypatch: pytest.Mo
 
     assert local_pii.names == ("Alice Chan", "Bob Lee")
     assert local_pii.sensitive_values == ("1 Example Road",)
+
+
+# §2.11: the JD carries no cap, so a long advertisement reaches the fallback model in full.
+def test_compressed_prompt_keeps_jd_longer_than_the_old_cap() -> None:
+    jd_text = "\n".join(f"Requirement line {index}: duty and skill block {index}" for index in range(400))
+    assert len(jd_text) > 3000
+
+    prompt = build_compressed_prompt(raw_text="Skills\nPython", jd_text=jd_text)
+
+    assert "JD Context (compressed):" in prompt
+    # The tail of the JD survives: nothing was cut at the old 3,000-character cap.
+    assert "Requirement line 399" in prompt
+
+
+# The cap is gone for the JD, not for the compressor: an explicit limit still truncates.
+def test_compress_cv_text_still_caps_when_asked() -> None:
+    jd_text = "\n".join(f"Requirement line {index}: duty and skill block {index}" for index in range(400))
+
+    compressed = compress_cv_text(raw_text=jd_text, max_chars=300)
+
+    assert len(compressed) <= 300
+    assert "Requirement line 0" in compressed
+
+
+class LengthRejectingLLM:
+    """Refuses the text call the way a real model refuses an over-long prompt."""
+
+    def __init__(self) -> None:
+        self.user_prompt: str | None = None
+
+    async def chat_completion(self, _: str, user_prompt: str, **__: Any) -> dict[str, Any]:
+        self.user_prompt = user_prompt
+        raise RuntimeError("This model's maximum context length is 8192 tokens")
+
+
+# §2.11: with the JD cap removed, a model that cannot take the length must fail loudly and say so,
+# rather than the parser silently deciding which part of the job matters.
+@pytest.mark.asyncio
+async def test_text_fallback_length_rejection_names_the_jd_length() -> None:
+    llm = LengthRejectingLLM()
+    service = CVParserService(llm_client=llm, cache=DummyCache())
+
+    async def fake_extract(_: str) -> LocalCVDocument:
+        return LocalCVDocument(
+            raw_text="Alice Local\nalice.local@example.com\n+852 6123 4567\nSkills\nPython",
+            page_texts=(),
+            ocr_lines=(),
+            ocr_page_indexes=frozenset(),
+        )
+
+    service._extract_local_document = fake_extract  # type: ignore[method-assign]
+    jd_text = "\n".join(f"Requirement line {index}: duty and skill block {index}" for index in range(400))
+
+    result = await service.parse_cv("resume.pdf", jd_text=jd_text)
+
+    # The whole JD was sent, not a truncated one.
+    assert llm.user_prompt is not None
+    assert "Requirement line 399" in llm.user_prompt
+    # The model refused it, so the run falls back to rules — and the recorded failure names the
+    # length it was sent instead of reading like a generic API error.
+    assert result["status"] == "fallback"
+    assert result["parse_path"] == "rule_fallback"
+    error_message = result["error_message"] or ""
+    assert "prompt_rejected_for_length=true" in error_message
+    assert f"jd_chars={len(jd_text)}" in error_message
+    assert "cv_chars=" in error_message
+    # The model's own limit travels through verbatim inside the original exception text.
+    assert "maximum context length" in error_message

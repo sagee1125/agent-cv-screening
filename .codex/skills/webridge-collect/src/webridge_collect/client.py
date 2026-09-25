@@ -45,6 +45,43 @@ def _extension_connected(daemon_url: str, *, timeout: float = 2.0) -> bool:
     return False
 
 
+# Read the daemon's /status body: reachability plus the extension state and version.
+#
+# Unlike _extension_connected this hands back the whole status object, so the readiness check
+# can report "the daemon is down" and "no extension is attached" as two separate problems with
+# two separate instructions. Returns None when the daemon does not answer at all.
+def webbridge_status(daemon_url: str = DEFAULT_DAEMON_URL, *, timeout: float = 2.0) -> dict[str, Any] | None:
+    url = f"{daemon_url.rstrip('/')}/status"
+    for method in (httpx.get, httpx.post):
+        try:
+            response = method(url, timeout=timeout)
+        except httpx.HTTPError:
+            continue
+        if response.status_code >= 400:
+            continue
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            continue
+        return data if isinstance(data, dict) else {}
+    return None
+
+
+# The browser extension's version as reported by /status, or None when it is not stated.
+#
+# Only meaningful while an extension is actually attached: the status object carries a single
+# "version" field and there is no way to tell a daemon version from an extension one, so an
+# unconnected daemon reports no version rather than a misleading one.
+def extension_version(status: dict[str, Any] | None) -> str | None:
+    if not isinstance(status, dict) or not status.get("extension_connected"):
+        return None
+    for key in ("extension_version", "extensionVersion", "version"):
+        value = status.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:40]
+    return None
+
+
 # Best-effort start of the local Kimi WebBridge daemon process (non-blocking).
 def _start_daemon_process() -> bool:
     candidates = [
@@ -63,6 +100,15 @@ def _start_daemon_process() -> bool:
         except OSError:
             continue
     return False
+
+
+# Best-effort start of the local daemon, for callers running their own wait loop.
+#
+# ensure_webbridge_daemon owns the start-and-wait policy for a screening run and answers a single
+# yes/no. The readiness check needs the same start but a two-step wait, so that it can say which
+# step failed; this exposes the start half without changing the run's behaviour.
+def start_webbridge_daemon() -> bool:
+    return _start_daemon_process()
 
 
 # Ensure the WebBridge daemon is running and a browser extension is attached to it.
@@ -261,10 +307,15 @@ def close_session_tabs(
 
 __all__ = [
     "CV_CHUNK_BYTES",
+    "DAEMON_START_WAIT",
     "DEFAULT_DAEMON_URL",
     "DEFAULT_SESSION",
+    "EXTENSION_CONNECT_WAIT",
     "WebBridgeClient",
     "WebBridgeError",
     "close_session_tabs",
     "ensure_webbridge_daemon",
+    "extension_version",
+    "start_webbridge_daemon",
+    "webbridge_status",
 ]

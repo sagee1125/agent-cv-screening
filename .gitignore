@@ -24,3 +24,6 @@ release/dist/
 
 # Local caches for the release self-test simulation.
 release/tests/.cache/
+
+# Local backups of the expert package (not for version control)
+_expert-backup-*/

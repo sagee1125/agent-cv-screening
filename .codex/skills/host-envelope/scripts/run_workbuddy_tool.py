@@ -187,6 +187,24 @@ def _run_check_updates(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# Runs the readiness check and projects it: no ranking, just the per-check results.
+def _run_preflight(args: argparse.Namespace) -> int:
+    script = _skill_script("webridge-collect", "run_preflight.py")
+    cmd = [PYTHON, str(script), "--driver", args.driver]
+    if args.site:
+        cmd += ["--site", args.site]
+    if args.keep_browser:
+        cmd.append("--keep-browser")
+    exit_code, payload = _run_skill(cmd)
+    envelope = project_host_return(tool="preflight", payload=payload)
+    print(json.dumps(envelope, ensure_ascii=False, indent=2))
+    if envelope["status"] == "need_input":
+        return EXIT_NEED_INPUT
+    if envelope["status"] == "error":
+        return EXIT_ERROR
+    return EXIT_OK
+
+
 # Returns the request_jas_access envelope without running any skill.
 def _run_request_jas_access(args: argparse.Namespace) -> int:
     envelope = project_host_return(
@@ -246,6 +264,28 @@ def main() -> int:
         help="Keep the WebBridge tab open after the check (default: close it when the check is done).",
     )
     check_parser.set_defaults(func=_run_check_updates)
+
+    preflight_parser = subparsers.add_parser(
+        "preflight", help="Check that the screening browser is ready before a run."
+    )
+    preflight_parser.add_argument(
+        "--driver",
+        choices=("webbridge", "http"),
+        default="webbridge",
+        help="The driver the run will use; http needs no browser, so it reports no checks.",
+    )
+    preflight_parser.add_argument(
+        "--site",
+        choices=("demo", "prod"),
+        default=None,
+        help="Which site to check. Defaults to JES_SITE_MODE (1/prod = prod, unset/0/demo = demo).",
+    )
+    preflight_parser.add_argument(
+        "--keep-browser",
+        action="store_true",
+        help="Keep the WebBridge tab the check opened (default: close it once the check is done).",
+    )
+    preflight_parser.set_defaults(func=_run_preflight)
 
     access_parser = subparsers.add_parser("request_jas_access", help="Return the JAS session auth envelope.")
     access_parser.add_argument(

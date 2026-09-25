@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -10,10 +11,11 @@ from urllib.parse import urlparse
 from jas_import import fetch as _jas_fetch
 from jas_import.errors import JobNotFoundError
 from jas_import.skill import job_payload_from_html
-from screening_core.candidate_id import refno_from_url
+from screening_core.candidate_id import records_url_for_refno, refno_from_url
 from screening_core.hr_output import safe_pack_id
 from screening_core.input_policy import validate_reference
 from screening_core.posts import post_counts
+from screening_core.site_mode import site_profile
 
 from webridge_collect.client import WebBridgeClient
 
@@ -69,11 +71,12 @@ GHOST_CURSOR_JS = """(async () => {
 })()"""
 
 
-# Build the records URL for a refno from a base URL or the default JAS host.
+# Build the records URL for a refno: an explicit base URL wins (a non-standard deployment),
+# otherwise the active site profile supplies it, so no caller has to know which host is live.
 def build_records_url(refno: str, base_url: str | None) -> str:
     if base_url:
         return f"{base_url.rstrip('/')}/records.html?refno={refno.strip()}"
-    return f"https://jobs.polyu.edu.hk/internal/records.php?refno={refno.strip()}"
+    return records_url_for_refno(refno)
 
 
 # Return the scheme://host origin of a URL, used as the CV-link base.
@@ -92,11 +95,12 @@ def _focus_current_tab(browser: WebBridgeClient) -> None:
 
 
 # Search the list page like a human: return (target URL, flow label) or (None, not_found).
+# The list URL and the tab-group label come from the active site profile, not from a
+# hard-coded demo shape, so the same flow drives the internal system unchanged.
 def navigate_like_human(
-    browser: WebBridgeClient, *, refno: str, base_url: str, records_url: str
+    browser: WebBridgeClient, *, refno: str, list_url: str, records_url: str, tab_group_title: str
 ) -> tuple[str | None, str]:
-    list_url = f"{base_url.rstrip('/')}/"
-    browser.navigate(list_url, new_tab=True, group_title="JES demo screening")
+    browser.navigate(list_url, new_tab=True, group_title=tab_group_title)
     _focus_current_tab(browser)
     try:
         found = browser.evaluate(GHOST_CURSOR_JS % refno)
@@ -117,6 +121,7 @@ def collect_job(
     *,
     records_url: str,
     folder: Path,
+    profile: dict[str, Any] | None = None,
     driver: str = "webbridge",
     base_url: str | None = None,
     refno: str | None = None,
@@ -124,9 +129,16 @@ def collect_job(
     cookie_file: str | None = None,
     client: WebBridgeClient | None = None,
 ) -> dict[str, Any]:
+    profile = profile or site_profile()
     folder = Path(folder)
-    (folder / "cvs").mkdir(parents=True, exist_ok=True)
-    effective_base = base_url or origin_of(records_url)
+    # Start from an empty cvs/ so a CV left behind by an earlier run — possibly a run on the
+    # other site — can never be scored as one of this run's applicants.
+    cvs_dir = folder / "cvs"
+    if cvs_dir.is_dir():
+        shutil.rmtree(cvs_dir)
+    cvs_dir.mkdir(parents=True, exist_ok=True)
+    effective_base = base_url or str(profile.get("base_url") or "") or origin_of(records_url)
+    tab_group_title = str(profile.get("tab_group_title") or "")
     if not refno:
         refno = refno_from_url(records_url)
     if driver == "http":
@@ -134,18 +146,24 @@ def collect_job(
     else:
         browser = client or WebBridgeClient()
         human_flow: str | None = None
-        if base_url and refno:
+        # The visible human flow is a property of the site profile, not of whether a
+        # demo-shaped base URL happened to be passed in — prod needs it too.
+        if profile.get("human_flow_available") and refno:
             # Human-like flow: find the job on the list page, then open its View link.
             target, human_flow = navigate_like_human(
-                browser, refno=refno, base_url=base_url, records_url=records_url
+                browser,
+                refno=refno,
+                list_url=str(profile.get("list_url") or ""),
+                records_url=records_url,
+                tab_group_title=tab_group_title,
             )
             if target is None:
                 # The list-page search found no matching row; keep the page open and report not found.
                 raise JobNotFoundError(f"no JAS job found for refno {refno} (no matching row in the records list)")
-            browser.navigate(target, new_tab=False, group_title="JES demo screening")
+            browser.navigate(target, new_tab=False, group_title=tab_group_title)
             _focus_current_tab(browser)
         else:
-            browser.navigate(records_url, new_tab=True, group_title="JES demo screening")
+            browser.navigate(records_url, new_tab=True, group_title=tab_group_title)
             _focus_current_tab(browser)
         html = browser.page_html()
     (folder / "records.html").write_text(html, encoding="utf-8")
@@ -167,7 +185,7 @@ def collect_job(
         cv_url = str(candidate.get("cv_url") or "").strip()
         if not appno or not cv_url:
             continue
-        dest = folder / "cvs" / f"{safe_pack_id(appno, fallback='unknown')}.pdf"
+        dest = cvs_dir / f"{safe_pack_id(appno, fallback='unknown')}.pdf"
         try:
             if driver == "http":
                 validate_reference(cv_url, flag="candidate cv_url", allowed_hosts=allowed_hosts)
@@ -182,6 +200,9 @@ def collect_job(
     manifest = {
         "source": "webridge-collect",
         "driver": driver,
+        # Which site these CVs came from: the pack carries it so a later run can tell that
+        # its cached artifacts belong to the other site.
+        "site": profile["mode"],
         "refno": job.get("refno", ""),
         "post_title": (job.get("job") or {}).get("post_title", ""),
         # The post applied for travels with each candidate (PRD Section 6); it is None on a

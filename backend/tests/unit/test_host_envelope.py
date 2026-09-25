@@ -10,6 +10,7 @@ from host_envelope.schema import validate_envelope
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_STDOUT = REPO_ROOT / ".codex" / "skills" / "host-envelope" / "examples" / "sample-pipeline-stdout.json"
 EXAMPLE_JAS = REPO_ROOT / ".codex" / "skills" / "host-envelope" / "examples" / "sample-jas-manifest.json"
+SCHEMA_PATH = REPO_ROOT / "docs" / "workbuddy" / "host-tool-return.schema.json"
 
 
 # Successful projection drops name/paths and keys the row by appno.
@@ -675,3 +676,147 @@ def test_project_single_post_has_no_cross_check() -> None:
     )
 
     assert envelope["posts"] is None
+
+
+# The envelope states which site the run used: a wrong-site run must stay visible afterwards,
+# because the report it produced looks entirely normal (decision 2.8).
+def test_project_stamps_the_site_from_the_payload() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={"status": "success", "refno": "260901004", "site": "prod"},
+        jas_session="granted",
+    )
+    assert envelope["site"] == "prod"
+
+
+# With no site in the payload the envelope reports the site this process would use, so the key is
+# never silently absent (the suite runs in demo mode).
+def test_project_falls_back_to_the_resolved_site() -> None:
+    envelope = project_host_return(
+        tool="check_updates",
+        payload={"status": "success", "refno": "260901004"},
+        jas_session="granted",
+    )
+    assert envelope["site"] == "demo"
+
+
+# An unrecognised site is dropped rather than passed through to the host.
+def test_project_drops_an_unknown_site() -> None:
+    envelope = project_host_return(
+        tool="screen_refno",
+        payload={"status": "success", "refno": "260901004", "site": "staging"},
+        jas_session="granted",
+    )
+    assert envelope["site"] == "demo"
+
+
+# The readiness check keeps one record per check, with the specific reason HR has to act on.
+def test_project_preflight_keeps_each_reason() -> None:
+    envelope = project_host_return(
+        tool="preflight",
+        payload={
+            "status": "need_input",
+            "site": "prod",
+            "checks": [
+                {"check": "daemon", "ok": True, "reason": None, "version": None},
+                {"check": "extension", "ok": False, "reason": "extension_disabled", "version": None},
+            ],
+            "missing": ["extension"],
+            "questions": ["Please enable the browser extension."],
+            "ask": {"missing": ["extension"], "questions": ["Please enable the browser extension."]},
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["tool"] == "preflight"
+    assert envelope["site"] == "prod"
+    assert [item["check"] for item in envelope["checks"]] == ["daemon", "extension"]
+    assert envelope["checks"][1]["reason"] == "extension_disabled"
+    assert envelope["ask"]["missing"] == ["extension"]
+
+
+# A check name or reason the whitelist does not know is dropped, never forwarded.
+def test_project_preflight_drops_unknown_check_and_reason() -> None:
+    envelope = project_host_return(
+        tool="preflight",
+        payload={
+            "status": "need_input",
+            "checks": [
+                {"check": "printer", "ok": False, "reason": "out_of_paper", "version": None},
+                {"check": "daemon", "ok": False, "reason": "made_up", "version": None},
+            ],
+            "missing": ["browser"],
+            "questions": ["Please start the browser helper."],
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert [item["check"] for item in envelope["checks"]] == ["daemon"]
+    assert envelope["checks"][0]["reason"] is None
+
+
+# The auth block follows the login check: a signed-out session is reported as expired, while a
+# check that never ran the login probe claims nothing about the session.
+def test_project_preflight_auth_follows_the_login_check() -> None:
+    signed_out = project_host_return(
+        tool="preflight",
+        payload={
+            "status": "need_input",
+            "checks": [{"check": "login", "ok": False, "reason": "not_signed_in", "version": None}],
+            "missing": ["jas_session"],
+            "questions": ["Please sign in to the internal system."],
+        },
+    )
+    assert signed_out["auth"] == {"jas_session": "expired", "cookie_file_present": False}
+
+    no_probe = project_host_return(
+        tool="preflight",
+        payload={"status": "success", "checks": [{"check": "daemon", "ok": True, "reason": None, "version": None}]},
+    )
+    assert no_probe["auth"] is None
+
+
+# `name` is the candidate-name field in the denylist, so no envelope may carry it — a check record
+# that used it as its identifier is dropped rather than allowed to trip the PII scan.
+def test_project_preflight_never_carries_a_name_key() -> None:
+    envelope = project_host_return(
+        tool="preflight",
+        payload={
+            "status": "success",
+            "checks": [{"check": "extension", "ok": True, "reason": None, "version": "2.0.17"}],
+        },
+    )
+    assert "name" not in json.dumps(envelope)
+    assert envelope["checks"][0]["version"] == "2.0.17"
+
+    name_keyed = project_host_return(
+        tool="preflight",
+        payload={"status": "success", "checks": [{"name": "daemon", "ok": True}]},
+    )
+    assert name_keyed["checks"] == []
+
+
+# The published JSON schema must agree with the code's whitelists. Without this the document
+# silently becomes a lie, and the next new value gets added in one of the two places only — which
+# is the exact failure this whole whitelist exists to prevent.
+def test_published_schema_matches_the_code_whitelists() -> None:
+    from host_envelope import schema as code
+
+    published = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    props = published["properties"]
+
+    assert set(props) == code.TOP_KEYS
+    assert set(props["tool"]["enum"]) == code.ALLOWED_TOOLS
+    assert set(props["status"]["enum"]) == code.ALLOWED_STATUS
+    assert set(props["error_code"]["enum"]) - {None} == code.ALLOWED_ERROR_CODES
+    assert set(props["ask"]["properties"]["missing"]["items"]["enum"]) == code.ALLOWED_MISSING
+    assert set(props["auth"]["properties"]["jas_session"]["enum"]) == code.ALLOWED_SESSION
+    assert set(props["site"]["enum"]) - {None} == code.ALLOWED_SITES
+    assert set(props["ranking"]["items"]["properties"]) == code.RANKING_KEYS
+    ranking_props = props["ranking"]["items"]["properties"]
+    assert set(ranking_props["hr_status"]["enum"]) - {None} == code.ALLOWED_HR_STATUS
+    assert set(ranking_props["failure_stage"]["enum"]) - {None} == code.ALLOWED_FAILURE_STAGES
+
+    checks = props["checks"]["items"]
+    assert set(checks["properties"]) == code.CHECK_KEYS
+    assert set(checks["properties"]["check"]["enum"]) == code.ALLOWED_CHECKS
+    assert set(checks["properties"]["reason"]["enum"]) - {None} == code.ALLOWED_CHECK_REASONS
+

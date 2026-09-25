@@ -91,6 +91,21 @@ only in the local configuration file inside this folder - never share it,
 and never paste it into a chat conversation.
 
 
+INTERNAL POLYU JOBS (optional)
+------------------------------
+Out of the box the engine screens the public demo jobs. To screen the
+University's internal job pages instead, open the file named  .env  inside the
+agent-cv-screening folder (Notepad on Windows, TextEdit on Mac) and add this
+line at the end:
+
+    JES_SITE_MODE=1
+
+Save the file. Every screening from then on uses the internal pages - you must
+already be signed in to them in Chrome, and you must be on the campus network
+or connected to the University VPN. Change the line to  JES_SITE_MODE=0  (or
+delete it) to go back to the demo jobs.
+
+
 TROUBLESHOOTING
 ---------------
 - Setup could not download something: check the internet connection (the

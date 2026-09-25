@@ -164,8 +164,9 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
 - Only if HR explicitly asks for the offline/HTTP path, or hands over an **already exported
   folder** (`records.html` + `cvs/`), run jas-import directly:
   `venv/Scripts/python.exe .codex/skills/jas-import/scripts/run_jas_import.py "<folder>"`
-- `demo_mode.json` at the repo root supplies `--base-url` / `--allow-host` /
-  `--no-cookie` automatically, so do not pass them by hand.
+- `site_profiles.json` at the repo root (selected by `JES_SITE_MODE`) supplies the active
+  site's base URL, allowed host and no-cookie defaults automatically, so do not pass them
+  by hand.
 - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
 - **Browser cleanup is automatic**: when a run succeeds and `ranking-overview.html` has
   been opened, the collector calls WebBridge `close_session`, so every page it opened is

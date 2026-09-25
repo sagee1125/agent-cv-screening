@@ -5,19 +5,22 @@ Reply in the language HR used (中文或 English). Do not invent tools; only use
 commands in this file. Run every command from the repo root:
 `C:\Users\User\Desktop\IHERD\agent-cv-screening`.
 
-## Demo mode (public demo platform) — currently ON
+## Site mode (which job site the engine screens)
 
-The repo-root `demo_mode.json` has `"enabled": true`, so a **bare refno** (e.g. 筛 2600827001)
-automatically uses the public demo host `https://jes-web-demo.vercel.app` — no cookie, no JAS
-login, and you must NOT ask HR for cookies or JAS access.
+The switch is `JES_SITE_MODE`, read from the process environment or from `.env` at the repo
+root (the real environment wins). It replaces the old `JES_DEMO_MODE` / `demo_mode.json`.
 
-- Just run the command with the refno, no extra flags. Demo mode adds
-  `--base-url https://jes-web-demo.vercel.app --allow-host jes-web-demo.vercel.app --no-cookie`
-  automatically.
-- If HR gives an explicit internal records URL or folder, demo mode is ignored and the
-  internal flow (cookie/session) applies.
-- Demo refnos that work today: **2600827001** and **260806012**.
-- To turn demo mode off later: set `demo_mode.json` -> `"enabled": false` (or delete the file).
+- **unset / empty / `0` / `demo` — the public demo platform.** A **bare refno**
+  (e.g. 筛 2600827001) is enough: no cookie, no JAS login, and you must NOT ask HR for
+  cookies or JAS access. The profile in `site_profiles.json` adds the demo host and its
+  allowed host automatically, and no cookie is sent.
+- **`1` / `prod` — the internal PolyU JAS pages** at `https://jobs.polyu.edu.hk/internal/`.
+  HR must already be signed in to them in their own Chrome, and be on the campus network or
+  the University VPN. Never pass `--cookie-file` here — the collector refuses it outright.
+- **anything else — the run refuses to start** (non-zero exit). Deliberate: a typo must not
+  silently screen real applicants against the demo host.
+
+Demo refnos that work today: **2600827001** and **260806012**.
 
 ## Main screening command
 
@@ -50,7 +53,8 @@ venv/Scripts/python.exe .codex/skills/host-envelope/scripts/run_host_envelope.py
 ```
 
 - Never `--skip-reports`. Never `--output-dir` inside this repo or the export folder.
-- Live URL or refno for the internal JAS: add `--cookie-file` only after JAS access is granted.
+- Live URL or refno for the internal JAS: the login lives in HR's own browser session, so no
+  cookie file is needed — and in `prod` mode the collector refuses `--cookie-file` outright.
 - The wrapper auto-starts the Kimi WebBridge daemon when it is down; never silently fall
   back to `--driver http` for a refno/URL — the visible browser human flow is the default.
   Use `--driver http` only when HR explicitly asks for the offline/public-demo HTTP path.
@@ -97,9 +101,9 @@ Only the "safe to quote" fields may enter this conversation. Everything else sta
 - `need_input(missing: refno)` -> ask (do not run anything):
   > 請發送崗位參考編號，或貼上內部招聘記錄頁的連結。
   > Please send the job reference number, or paste the internal job records page link.
-- `need_input(missing: jas_session)` while demo mode is ON -> do NOT ask for cookies. It means
-  an explicit internal URL was used (or demo mode is off); tell HR the demo platform is active
-  and to give a bare refno, or switch demo mode off for internal JAS.
+- `need_input(missing: jas_session)` in demo site mode -> do NOT ask for cookies. It means
+  an explicit internal URL was used; tell HR the demo platform is active and to give a bare
+  refno, or set `JES_SITE_MODE=1` for the internal JAS.
 - `need_input(missing: candidates)` -> tell HR no CVs were found for this job.
 
 ## not_found handling
