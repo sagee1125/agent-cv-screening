@@ -30,6 +30,10 @@ from typing import Any
 # store id, which is also the folder name the browser uses under `Extensions/`.
 EXTENSION_ID = "fldmhceldgbpfpkbgopacenieobmligc"
 STORE_URL = f"https://chromewebstore.google.com/detail/kimi/{EXTENSION_ID}"
+# Where HR is told to get the extension. Both links travel in the ask: the store listing is the
+# one-click path, and the vendor's own page is the fallback for a computer that cannot reach the
+# Web Store (or a network that blocks it).
+PRODUCT_URL = "https://www.kimi.com/products/kimi-browser-extension"
 
 # Fallback for an extension the browser installed by hand (unpacked): it has no `Extensions/<id>`
 # folder, so it is only recognisable by the name in its own manifest.
@@ -250,6 +254,7 @@ __all__ = [
     "BROWSERS",
     "EXTENSION_ID",
     "NAME_HINTS",
+    "PRODUCT_URL",
     "STORE_URL",
     "browser_running",
     "diagnose",

@@ -773,12 +773,16 @@ def test_project_preflight_keeps_the_specific_extension_reasons() -> None:
         assert envelope["checks"][1]["reason"] == reason
 
 
-# An ask that has to carry a URL must arrive whole. The limit used to be 120, which cut the longer
-# readiness sentences mid-clause - HR was handed "Please start it, then a".
-def test_project_ask_keeps_a_sentence_with_a_url_whole() -> None:
+# An ask that has to carry two URLs must arrive whole. The limit used to be 120, which cut the
+# longer readiness sentences mid-clause - HR was handed "Please start it, then a".
+def test_project_ask_keeps_a_sentence_with_two_urls_whole() -> None:
     store = "https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc"
-    question = f"The Kimi browser extension is not installed on this computer. Install it: {store}"
-    assert len(question) > 120
+    page = "https://www.kimi.com/products/kimi-browser-extension"
+    question = (
+        "The Kimi browser extension is not installed on this computer. Install it from the Chrome "
+        f"Web Store ({store}), or from Kimi's own page ({page}), then ask me again."
+    )
+    assert len(question) > 240
     envelope = project_host_return(
         tool="preflight",
         payload={

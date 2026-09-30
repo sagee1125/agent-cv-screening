@@ -224,20 +224,23 @@ def _extension_failure(module, monkeypatch, capsys, **diagnosis) -> tuple[dict, 
 
 
 # An extension that is not installed is a different instruction from one that is switched off, and
-# it carries the store link: a computer that never had the extension has no other way to be told
-# where to get it.
-def test_cli_extension_not_installed_carries_the_store_link(monkeypatch, capsys) -> None:
+# it carries both links: a computer that never had the extension has no other way to be told where
+# to get it, and the vendor page is the fallback when the Web Store cannot be reached.
+def test_cli_extension_not_installed_carries_both_links(monkeypatch, capsys) -> None:
     module = _import_cli()
     payload, _ = _extension_failure(module, monkeypatch, capsys, installed=False)
     assert payload["checks"][1]["reason"] == "extension_not_installed"
     question = " ".join(payload["questions"])
     assert module.STORE_URL in question
-    # And the link survives the host projection's sanitizing, which is what HR actually receives.
+    assert module.PRODUCT_URL in question
+    # And both survive the host projection's sanitizing, which is what HR actually receives.
     from host_envelope.project import project_host_return
 
     envelope = project_host_return(tool="preflight", payload=payload)
     assert envelope["status"] == "need_input"
-    assert module.STORE_URL in " ".join(envelope["ask"]["questions"])
+    projected = " ".join(envelope["ask"]["questions"])
+    assert module.STORE_URL in projected
+    assert module.PRODUCT_URL in projected
 
 
 # Installed but switched off is its own sentence: "enable it" is not "install it".

@@ -6,10 +6,14 @@ sent you), and about 15 minutes.
 
 For internal University jobs you also need Google Chrome on this computer, with
 the Kimi browser extension installed and enabled - see "Which jobs are
-screened" below. If chrome://extensions does not list Kimi, install it from the
-Chrome Web Store first:
+screened" below. If chrome://extensions does not list Kimi, install it
+yourself first, from either of these:
 
+    Chrome Web Store
     https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc
+
+    Kimi's own page (use this if the Web Store is blocked or will not open)
+    https://www.kimi.com/products/kimi-browser-extension
 
 (The extension is the one formerly called Kimi WebBridge. Vera checks all of
 this before her first screening and tells you which piece is missing.)
@@ -133,16 +137,19 @@ Screening them needs three things at the time of a run:
 
   1. Chrome is open on this computer.
   2. The Kimi browser extension is installed and ENABLED
-     (check chrome://extensions - if it is greyed out or off, switch it on;
-     if Kimi is not listed at all, install it from
-     https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc ).
+     (check chrome://extensions - if it is greyed out or off, switch it on).
+     If Kimi is not listed at all, install it yourself:
+         https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc
+     or, if that page will not open, Kimi's own page:
+         https://www.kimi.com/products/kimi-browser-extension
   3. You are signed in to the internal job system in Chrome, and the computer
      is on the campus network or connected to the University VPN.
 
 Before the first screening Vera checks all three and tells you exactly which
 one is missing - if it says the extension is not installed it also gives you
-the store link, and if it says you are not signed in, sign in to the internal
-system in Chrome and ask again. Nothing is screened until the checks pass.
+both download links, and if it says you are not signed in, sign in to the
+internal system in Chrome and ask again. Nothing is screened until the checks
+pass.
 
 To screen the public DEMO jobs instead (no sign-in, no VPN, no extension
 needed), open the file named  .env  inside the agent-cv-screening folder

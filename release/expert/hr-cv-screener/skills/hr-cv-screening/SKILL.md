@@ -159,7 +159,7 @@ her language rather than inventing your own:
 
 | `checks[].reason` | What is actually wrong | What HR does |
 |---|---|---|
-| `extension_not_installed` | the browser's profile holds no Kimi extension | install it from the Chrome Web Store (formerly Kimi WebBridge): `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc` |
+| `extension_not_installed` | the browser's profile holds no Kimi extension | install it (formerly Kimi WebBridge) — Chrome Web Store: `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc`, or Kimi's own page when the store is blocked: `https://www.kimi.com/products/kimi-browser-extension` |
 | `extension_off` | installed, but the browser disabled it | `chrome://extensions` → switch **Kimi** on and accept the permission prompt |
 | `browser_not_running` | installed and enabled, but no browser is open | open Chrome |
 | `extension_disabled` | **not determined**: the profile could not be read, or it is installed and on and still not attaching | the generic sentence — open Chrome (or Edge) with Kimi enabled |

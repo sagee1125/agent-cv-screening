@@ -42,7 +42,7 @@ affected_modules:
 | 1.0.0   | 2026-08-27 | HR Screening Product Owner | Initial host-visible tool envelope: field whitelist, denylist, ask/auth codes. |
 | 1.1.0   | 2026-08-27 | Engineering                | `host-envelope` projector CLI; pipeline identity is `refno`/`appno`/`display_label`. |
 | 1.2.0   | 2026-09-25 | Engineering                | Bring the document back in step with the code: `check_updates` and `preflight` tools, the post dimension (`posts`, `ranking[].post`, the `changes` post keys), `conditions_pending`, `conditions_unreadable`, `site`, and the readiness `checks`. |
-| 1.3.0   | 2026-09-30 | Engineering                | The readiness check names *why* no extension is attached: `extension_not_installed`, `extension_off`, `browser_not_running`, with `extension_disabled` kept as the undetermined fallback. `ask.questions` items may now be 240 chars, so a sentence can carry the Chrome Web Store link. Header version brought back in step with this table. |
+| 1.3.0   | 2026-09-30 | Engineering                | The readiness check names *why* no extension is attached: `extension_not_installed`, `extension_off`, `browser_not_running`, with `extension_disabled` kept as the undetermined fallback. `ask.questions` items items were raised from 120 chars to 320, so a sentence can carry both the Chrome Web Store link and the vendor page. Header version brought back in step with this table. |
 
 ---
 
@@ -284,7 +284,7 @@ session state that was never observed.
 | Key          | Type     | Allowed                                                                                         |
 | ------------ | -------- | ----------------------------------------------------------------------------------------------- |
 | `missing`    | string[] | Subset of: `jas_session` \| `refno` \| `candidates` \| `jd` \| `position` \| `scope` \| `input` \| `conditions` \| `browser` \| `extension` |
-| `questions`  | string[] | Max 6 items, each max 240 chars, already written for HR; sanitizer 5.5                          |
+| `questions`  | string[] | Max 6 items, each max 320 chars, already written for HR; sanitizer 5.5                          |
 | `conditions` | object   | `conditions_pending` only: the stored conditions HR is being asked about, see 5.2.6             |
 | `post_deltas`| array    | `conditions_pending` only, max 12: per-post derivations HR must confirm, each `{post, labels[], confirmed, delta[]}` |
 

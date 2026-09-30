@@ -33,7 +33,7 @@ import time
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
 from screening_core.site_mode import SiteModeError, apply_site_defaults
-from webridge_collect.browser_ext import STORE_URL, browser_running, diagnose
+from webridge_collect.browser_ext import PRODUCT_URL, STORE_URL, browser_running, diagnose
 from webridge_collect.client import (
     DAEMON_START_WAIT,
     EXTENSION_CONNECT_WAIT,
@@ -76,8 +76,9 @@ ASK_DAEMON = (
 # The four extension sentences. Which one HR gets is decided by `_extension_reason`, so she is
 # never told to install something she already has, nor to re-enable something that is already on.
 #
-# The store link travels in the sentence itself: an HR computer that has never had the extension
-# has no other way to be told where to get it, and "contact us" costs a round trip.
+# The two links travel in the sentence itself: a computer that has never had the extension has no
+# other way to be told where to get it, and "contact us" costs a round trip. The store listing is
+# the one-click path; the vendor's own page is the fallback when the Web Store is unreachable.
 ASK_EXTENSION = (
     "Kimi WebBridge is running, but no browser extension is connected. Please open Chrome (or "
     "Edge) with the Kimi browser extension enabled, then ask me again.",
@@ -86,8 +87,9 @@ ASK_EXTENSION = (
 )
 ASK_EXTENSION_MISSING = (
     "The Kimi browser extension is not installed on this computer. Install it from the Chrome Web "
-    f"Store, then ask me again: {STORE_URL}",
-    f"這台電腦尚未安裝 Kimi 瀏覽器擴充功能。請先從 Chrome 線上應用程式商店安裝，然後再叫我：{STORE_URL}",
+    f"Store ({STORE_URL}), or from Kimi's own page ({PRODUCT_URL}), then ask me again.",
+    f"這台電腦尚未安裝 Kimi 瀏覽器擴充功能。請從 Chrome 線上應用程式商店安裝（{STORE_URL}），"
+    f"或到 Kimi 官方頁面下載（{PRODUCT_URL}），然後再叫我。",
 )
 ASK_EXTENSION_OFF = (
     "The Kimi browser extension is installed but switched off. Please open chrome://extensions "

@@ -182,9 +182,10 @@ it replaces guessing with one of three named answers in `checks[]`:
 - `extension` fails → read `checks[].reason` before saying anything. The check reads the
   browser's own profile, so the reason names *which* of the four things to fix, and
   `ask.questions` already holds the sentence for it:
-  - `extension_not_installed` → the Kimi browser extension is not on this computer. Give HR the
-    Chrome Web Store link from the question. Do **not** tell her to enable it — there is nothing
-    there to enable.
+  - `extension_not_installed` → the Kimi browser extension is not on this computer. Give HR both
+    download links from the question — the Chrome Web Store and, as the fallback when the store
+    is blocked, Kimi's own page. Do **not** tell her to enable it — there is nothing there to
+    enable.
   - `extension_off` → installed, but the browser switched it off: `chrome://extensions` → switch
     **Kimi** on and accept the permission prompt.
   - `browser_not_running` → installed and enabled, but no browser is open: tell her to open
