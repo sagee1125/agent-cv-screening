@@ -18,6 +18,7 @@ from screening_core.posts import post_counts
 from screening_core.site_mode import site_profile
 
 from webridge_collect.client import WebBridgeClient
+from webridge_collect.login import ensure_signed_in
 
 COLLECT_ROOT_NAME = "jes_webridge"
 MANIFEST_NAME = "_webridge-manifest.json"
@@ -165,6 +166,11 @@ def collect_job(
         else:
             browser.navigate(records_url, new_tab=True, group_title=tab_group_title)
             _focus_current_tab(browser)
+        # A site that requires a login must actually be signed in before we read the page.
+        # Without this gate a logged-out run reads the identity provider's page, which parses as
+        # "no job" and reports a missing job for what is really a missing session — the one
+        # failure HR would chase in the wrong direction. Sites that expect no login are unaffected.
+        ensure_signed_in(browser, profile)
         html = browser.page_html()
     (folder / "records.html").write_text(html, encoding="utf-8")
     job = job_payload_from_html(html, base_url=effective_base)

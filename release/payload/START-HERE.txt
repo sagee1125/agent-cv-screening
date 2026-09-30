@@ -4,6 +4,11 @@ CV Screening - Setup Instructions (Windows and Mac)
 You need: this folder, your personal API key (in the encrypted spreadsheet we
 sent you), and about 15 minutes.
 
+For internal University jobs you also need Google Chrome on this computer, with
+the Kimi WebBridge extension installed and enabled - see "Which jobs are
+screened" below. If chrome://extensions does not list Kimi at all, contact us
+before your first screening.
+
 Nothing else has to be installed first. The installer brings its own private
 copy of Python 3.12 - it never uses or changes the Python already on this
 computer (Apple M1/M2/M3/M4 and Intel are all handled automatically), needs no
@@ -35,8 +40,10 @@ WINDOWS
 5. Open  Experts -> My Experts -> Vera  and give it a real internal job
    number, for example:
        screen refno 26xxxxxxxxx
-   This screens the University's internal job pages - stay on the campus
-   network (or VPN) and stay signed in to the internal job system in Chrome.
+   This screens the University's internal job pages. Before it starts, make
+   sure Chrome is open with the Kimi extension enabled, that you are signed in
+   to the internal job system in Chrome, and that you are on the campus network
+   (or VPN). Vera tells you if one of these is missing.
    Reports appear on your Desktop in the folder  workbuddy-cv-screen.
    (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
    file as described in "Which jobs are screened" below, then say:
@@ -61,8 +68,10 @@ MAC - TRY THIS FIRST: double-click  setup.command
 5. Quit WorkBuddy completely and open it again, then open Vera and give it a
    real internal job number, for example:
        screen refno 26xxxxxxxxx
-   This screens the University's internal job pages - stay on the campus
-   network (or VPN) and stay signed in to the internal job system in Chrome.
+   This screens the University's internal job pages. Before it starts, make
+   sure Chrome is open with the Kimi extension enabled, that you are signed in
+   to the internal job system in Chrome, and that you are on the campus network
+   (or VPN). Vera tells you if one of these is missing.
    Reports appear on your Desktop in the folder  workbuddy-cv-screen.
    (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
    file as described in "Which jobs are screened" below, then say:
@@ -86,8 +95,10 @@ MAC - NO TERMINAL AT ALL: let WorkBuddy install it for you
 5. Open  Experts -> My Experts -> Vera  and give it a real internal job
    number, for example:
        screen refno 26xxxxxxxxx
-   This screens the University's internal job pages - stay on the campus
-   network (or VPN) and stay signed in to the internal job system in Chrome.
+   This screens the University's internal job pages. Before it starts, make
+   sure Chrome is open with the Kimi extension enabled, that you are signed in
+   to the internal job system in Chrome, and that you are on the campus network
+   (or VPN). Vera tells you if one of these is missing.
    Reports appear on your Desktop in the folder  workbuddy-cv-screen.
    (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
    file as described in "Which jobs are screened" below, then say:
@@ -113,13 +124,21 @@ and never paste it into a chat conversation.
 WHICH JOBS ARE SCREENED
 -----------------------
 Out of the box this package screens the University's INTERNAL job pages.
-Screening them needs two things at the time of a run: you are signed in to the
-internal job system in Chrome, and the computer is on the campus network or
-connected to the University VPN.
+Screening them needs three things at the time of a run:
 
-To screen the public DEMO jobs instead (no sign-in or VPN needed), open the
-file named  .env  inside the agent-cv-screening folder (Notepad on Windows,
-TextEdit on Mac) and make its  JES_SITE_MODE  line read:
+  1. Chrome is open on this computer.
+  2. The Kimi WebBridge extension is installed and ENABLED
+     (check chrome://extensions - if it is greyed out or off, switch it on).
+  3. You are signed in to the internal job system in Chrome, and the computer
+     is on the campus network or connected to the University VPN.
+
+Before the first screening Vera checks all three and tells you exactly which
+one is missing - if it says you are not signed in, sign in to the internal
+system in Chrome and ask again. Nothing is screened until the checks pass.
+
+To screen the public DEMO jobs instead (no sign-in, no VPN, no extension
+needed), open the file named  .env  inside the agent-cv-screening folder
+(Notepad on Windows, TextEdit on Mac) and make its  JES_SITE_MODE  line read:
 
     JES_SITE_MODE=0
 
@@ -138,7 +157,9 @@ TROUBLESHOOTING
   ZAI_API_KEY line in the .env file inside the agent-cv-screening folder.
 - Expert missing in WorkBuddy: restart WorkBuddy; if it is still missing,
   run setup again.
-- Screening the internal pages fails: check the campus network / VPN, and
-  that you are signed in to the internal job system in Chrome. To fall back
-  to the public demo jobs while troubleshooting, set  JES_SITE_MODE=0  in the
-  .env file (see "Which jobs are screened").
+- Screening the internal pages fails: Vera's message names the one thing to
+  fix. In order, check that Chrome is open, that the Kimi extension is enabled
+  in chrome://extensions, that you are signed in to the internal job system in
+  Chrome, and that you are on the campus network / VPN. To fall back to the
+  public demo jobs while troubleshooting, set  JES_SITE_MODE=0  in the .env
+  file (see "Which jobs are screened").

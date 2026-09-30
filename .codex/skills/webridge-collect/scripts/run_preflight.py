@@ -37,6 +37,7 @@ from webridge_collect.client import (
     start_webbridge_daemon,
     webbridge_status,
 )
+from webridge_collect.login import probe_sign_in
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -73,25 +74,22 @@ ASK_LOGIN = (
     "你尚未登入內部招聘系統。請先在 Chrome 登入內部系統，然後再叫我。",
 )
 
-# JS run in the browser: report where we landed and whether the records table rendered.
-# The selectors are the ones the parser itself looks for, so a page this accepts is a page the
-# screening run can actually read.
-LOGIN_PROBE_JS = """(() => {
-  const table = document.querySelector('table#f-list, table.job-table, table.job-detail-table');
-  return {
-    path: String(location.pathname || '').slice(0, 200),
-    has_table: !!table,
-    title: String(document.title || '').slice(0, 120)
-  };
-})()"""
-
-
 # Build one check record; `reason` is set only when the check failed.
 #
 # The identifier key is `check`, never `name`: `name` is the candidate-name field in the host
 # denylist, so a check record that used it would be rejected as a PII leak.
 def _check(name: str, ok: bool, *, reason: str | None = None, version: str | None = None) -> dict:
     return {"check": name, "ok": ok, "reason": None if ok else reason, "version": version}
+
+
+# Decide whether the browser is signed in: inside /internal/ AND the records table rendered.
+#
+# The probe itself lives in `webridge_collect.login` because the screening run uses the very same
+# test before it reads a page. A check that could disagree with the run would be worse than none.
+def _check_login(client: WebBridgeClient, profile: dict) -> dict:
+    list_url = str(profile.get("list_url") or "")
+    client.navigate(list_url, new_tab=True, group_title=str(profile.get("tab_group_title") or ""))
+    return _check(CHECK_LOGIN, probe_sign_in(client)["signed_in"], reason=REASON_LOGIN)
 
 
 # Poll /status until the daemon answers (starting it first) or the wait runs out.
@@ -119,17 +117,6 @@ def _await_extension(daemon_url: str, status: dict, *, wait_seconds: float) -> d
         time.sleep(1.0)
         status = webbridge_status(daemon_url) or status
     return status
-
-
-# Decide whether the browser is signed in: inside /internal/ AND the records table rendered.
-def _check_login(client: WebBridgeClient, profile: dict) -> dict:
-    list_url = str(profile.get("list_url") or "")
-    client.navigate(list_url, new_tab=True, group_title=str(profile.get("tab_group_title") or ""))
-    probe = client.evaluate(LOGIN_PROBE_JS)
-    path = str(probe.get("path") or "") if isinstance(probe, dict) else ""
-    has_table = bool(probe.get("has_table")) if isinstance(probe, dict) else False
-    inside = "/internal/" in path
-    return _check(CHECK_LOGIN, inside and has_table, reason=REASON_LOGIN)
 
 
 # Print a PII-free envelope; errors go to stderr.

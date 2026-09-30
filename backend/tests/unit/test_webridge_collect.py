@@ -763,3 +763,164 @@ def test_cli_webbridge_daemon_auto_start_fails_need_input(tmp_path, monkeypatch,
     assert exit_code == 2
     payload = json.loads(captured.out)
     assert payload["missing"] == ["jas_session"]
+
+
+# --- the sign-in gate -------------------------------------------------------
+#
+# A site that requires a login must be signed in *before* the collector reads the page.
+# Without the gate a logged-out run reads the identity provider's page, which parses as
+# "no job" — so HR is told the job does not exist when the session is what is missing.
+
+
+# A prod-shaped profile, taken from the shipped profile so the test tracks the real thing.
+def _prod_profile() -> dict:
+    from screening_core.site_mode import site_profile
+
+    return site_profile("prod")
+
+
+# A browser whose answer to the shared sign-in probe is scripted.
+class _ProbeBrowser:
+    def __init__(self, *, path: str, has_table: bool) -> None:
+        self.path = path
+        self.has_table = has_table
+        self.urls: list[str] = []
+
+    def navigate(self, url, *, new_tab=True, group_title=None):
+        self.urls.append(url)
+
+    def cdp(self, method, params=None):
+        pass
+
+    # The sign-in probe is identified by its own selector text, so one fake can answer both
+    # the probe and the ghost-cursor script the human flow runs.
+    def evaluate(self, code):
+        if "has_table" in code:
+            return {"path": self.path, "has_table": self.has_table}
+        return {"typed": True, "clicked": True, "href": RECORDS_URL, "text": "View"}
+
+    def page_html(self):
+        return DEMO_HTML
+
+    def fetch_bytes(self, url):
+        return b"%PDF"
+
+
+# Logged out on prod: the run stops before it reads or writes anything, with a sign-in message.
+def test_prod_collect_refuses_when_not_signed_in(tmp_path) -> None:
+    from jas_import.errors import SiteLoginRequiredError
+
+    browser = _ProbeBrowser(path="/sso/login", has_table=False)
+    folder = tmp_path / "job"
+    with pytest.raises(SiteLoginRequiredError) as excinfo:
+        collect.collect_job(
+            records_url=RECORDS_URL,
+            folder=folder,
+            profile=_prod_profile(),
+            driver="webbridge",
+            base_url=DEMO_BASE_URL,
+            refno="2600827001",
+            client=browser,  # type: ignore[arg-type]
+        )
+    assert "sign in" in str(excinfo.value).lower()
+    # The gate runs before the page is read, so no half-collected job is left on disk.
+    assert not (folder / "records.html").exists()
+
+
+# Signed in on prod: the same run proceeds and collects normally.
+def test_prod_collect_proceeds_when_signed_in(tmp_path) -> None:
+    browser = _ProbeBrowser(path="/internal/records.php", has_table=True)
+    folder = tmp_path / "job"
+    manifest = collect.collect_job(
+        records_url=RECORDS_URL,
+        folder=folder,
+        profile=_prod_profile(),
+        driver="webbridge",
+        base_url=DEMO_BASE_URL,
+        refno="2600827001",
+        client=browser,  # type: ignore[arg-type]
+    )
+    assert (folder / "records.html").is_file()
+    assert manifest["site"] == "prod"
+
+
+# The demo has no login, so the gate must never fire there — even with no session at all.
+def test_demo_collect_is_not_gated(tmp_path) -> None:
+    from screening_core.site_mode import site_profile
+
+    browser = _ProbeBrowser(path="/", has_table=False)
+    folder = tmp_path / "job"
+    manifest = collect.collect_job(
+        records_url=RECORDS_URL,
+        folder=folder,
+        profile=site_profile("demo"),
+        driver="webbridge",
+        base_url=DEMO_BASE_URL,
+        refno="2600827001",
+        client=browser,  # type: ignore[arg-type]
+    )
+    assert manifest["site"] == "demo"
+
+
+# A page that renders the records table but is not inside the internal area is not a signed-in
+# session: the identity provider is unknown, so only landing inside /internal/ counts.
+def test_prod_collect_refuses_a_table_outside_the_internal_area(tmp_path) -> None:
+    from jas_import.errors import SiteLoginRequiredError
+
+    browser = _ProbeBrowser(path="/sso/login", has_table=True)
+    with pytest.raises(SiteLoginRequiredError):
+        collect.collect_job(
+            records_url=RECORDS_URL,
+            folder=tmp_path / "job",
+            profile=_prod_profile(),
+            driver="webbridge",
+            base_url=DEMO_BASE_URL,
+            refno="2600827001",
+            client=browser,  # type: ignore[arg-type]
+        )
+
+
+# The probe is shared with the readiness check: the run and the check must agree on what
+# "signed in" means, or a run could pass the check and then read a login page.
+def test_probe_sign_in_is_the_shared_test() -> None:
+    from webridge_collect.login import LOGIN_PROBE_JS, probe_sign_in
+
+    assert "has_table" in LOGIN_PROBE_JS and "/internal/" not in LOGIN_PROBE_JS
+    assert probe_sign_in(_ProbeBrowser(path="/internal/records.php", has_table=True))["signed_in"] is True
+    assert probe_sign_in(_ProbeBrowser(path="/internal/records.php", has_table=False))["signed_in"] is False
+    assert probe_sign_in(_ProbeBrowser(path="/sso/login", has_table=True))["signed_in"] is False
+
+
+# A client that cannot answer the probe is treated as not signed in (fail closed).
+def test_probe_sign_in_fails_closed_on_a_silent_client() -> None:
+    from webridge_collect.login import probe_sign_in
+
+    class _Silent:
+        def evaluate(self, code):
+            return None
+
+    assert probe_sign_in(_Silent())["signed_in"] is False
+
+
+# CLI maps a missing session to need_input(jas_session) with the sign-in question — the same
+# contract the readiness check uses, so HR reads one sentence about signing in either way.
+def test_cli_missing_session_asks_hr_to_sign_in(tmp_path, monkeypatch, capsys) -> None:
+    from jas_import.errors import SiteLoginRequiredError
+
+    module = _import_cli()
+
+    def fake_collect_job(**kwargs):
+        raise SiteLoginRequiredError("not signed in to the internal job system")
+
+    monkeypatch.setattr(module, "collect_job", fake_collect_job)
+    monkeypatch.setattr(module, "ensure_webbridge_daemon", lambda daemon_url: True)
+    monkeypatch.setattr(
+        sys, "argv", [module.__file__, "2600827001", "--driver", "webbridge", "--collect-dir", str(tmp_path)]
+    )
+    exit_code = module.main()
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    payload = json.loads(captured.out)
+    assert payload["status"] == "need_input"
+    assert payload["missing"] == ["jas_session"]
+    assert "sign in" in payload["questions"][0].lower()

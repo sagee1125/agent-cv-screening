@@ -144,6 +144,17 @@ On the demo the two coincide. On prod they do not, and the second one is wrong.
 
 ### 1.4 The readiness check does not exist
 
+> **Partly fixed 2026-09-30 (v1.2.1).** `preflight` still does not run automatically before a
+> screening, but the **run itself** now makes the same positive sign-in test, so the gap that
+> mattered is closed: a logged-out prod run can no longer reach the page, parse nothing, and
+> report `JobNotFoundError`. It stops with `need_input(jas_session)` instead. The probe lives in
+> `webridge_collect/login.py` and is shared by `run_preflight.py:_check_login` and
+> `collect.py:collect_job`, so the check and the run cannot drift. `_run_request_jas_access`
+> is unchanged: it still only formats the state the caller asserts.
+>
+> Still open: `screen_refno` does not *call* `preflight`, so Chrome/daemon/extension are still
+> instruction-level checks rather than enforced ones. Only the session is now enforced.
+
 `run_workbuddy_tool._run_request_jas_access` (`run_workbuddy_tool.py:191`) only *formats* a state
 the caller asserts via `--jas-session`; it verifies nothing. `_jas_session`
 (`run_workbuddy_tool.py:86`) reads back the `need_input` that a **failed** run produced, so today

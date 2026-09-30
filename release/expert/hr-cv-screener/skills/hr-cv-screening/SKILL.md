@@ -215,9 +215,8 @@ starting now"); the next run re-scores from scratch, which is intended. If the u
 offline, or fails, continue with the installed engine and never surface the failure.
 
 For demo-mode jobs on any platform you can pass `--driver http` (the public demo needs no
-browser). Screening the real PolyU records pages uses the same human browser flow on
-Windows and macOS — confirmed working on macOS at v1.1.6; the old "Windows-only bridge"
-note was stale.
+browser). Screening the real PolyU records pages uses the human browser flow, on Windows and
+macOS alike.
 
 ## Decision flow
 
@@ -579,10 +578,9 @@ environment, else the repo-root `.env`, else `site_profiles.json`'s `default`:
 else refuses to start** rather than guessing. Since v1.2.0 the package ships
 **prod by default**: the installer writes `JES_SITE_MODE=1` into `.env` and
 `site_profiles.json`'s default is `prod`, so machines screen the internal pages out of
-the box (working on Windows and macOS — the old "prod is Windows-only" note was stale) —
-the demo needs an explicit `JES_SITE_MODE=0` in `.env`. The envelope
-stamps which site a run used (`site: "demo"` / `"prod"`) — say which one a result came
-from when it could matter.
+the box (Windows and macOS alike) — the demo needs an explicit `JES_SITE_MODE=0` in
+`.env`. The envelope stamps which site a run used (`site: "demo"` / `"prod"`) — say which
+one a result came from when it could matter.
 
 - **Demo** — `https://jes-web-demo.vercel.app`. No login, no cookies, and the preflight
   runs no sign-in check. Working demo refnos: **2600827001** (4 candidates),
@@ -595,7 +593,11 @@ from when it could matter.
   `/internal/records.php`). Needs the campus network / VPN, HR signed in to the
   internal system in the Chrome the run uses, and the preflight `login` check passing:
   it passes only when the run lands inside `/internal/` **and** the records table
-  rendered — a positive test, never a guess from a redirect.
+  rendered — a positive test, never a guess from a redirect. The run re-checks this
+  itself just before it reads the page, so a session that expired after the preflight
+  stops the run with the sign-in question instead of reporting a job that does not
+  exist. If HR is told to sign in, she signs in to the internal system in Chrome and
+  asks again — never hand her a cookie, password or token prompt.
 
 Never ask HR for cookies, passwords or tokens in either mode — the browser session HR
 already has is the only credential this skill touches.

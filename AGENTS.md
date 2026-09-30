@@ -167,6 +167,12 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
 - `site_profiles.json` at the repo root (selected by `JES_SITE_MODE`) supplies the active
   site's base URL, allowed host and no-cookie defaults automatically, so do not pass them
   by hand.
+- **A site that expects a login must actually be signed in before the page is read.** On prod the
+  collector runs the same positive sign-in probe as `preflight` (inside `/internal/` **and** the
+  records table rendered) and, when it fails, stops with `need_input(jas_session)` and the sign-in
+  question — never the "job not found" message the identity provider's page would otherwise
+  produce. The probe lives in `webridge_collect/login.py` and is shared with `run_preflight.py`,
+  so the check and the run cannot disagree.
 - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
 - **Browser cleanup is automatic**: when a run succeeds and `ranking-overview.html` has
   been opened, the collector calls WebBridge `close_session`, so every page it opened is

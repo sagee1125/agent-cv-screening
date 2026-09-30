@@ -18,7 +18,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
-from jas_import.errors import JobNotFoundError
+from jas_import.errors import JobNotFoundError, SiteLoginRequiredError
 from screening_core.candidate_id import is_jas_refno, refno_from_url
 from screening_core.hr_output import HR_PACK_FOLDER
 from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_from_env, merge_allowed_hosts
@@ -38,6 +38,14 @@ ASK_WEBRIDGE = (
     "Please start Kimi WebBridge and open Chrome/Edge with its extension connected "
     "(or rerun with --driver http for the public demo).",
     "請啟動 Kimi WebBridge，並開啟已連接擴充的 Chrome/Edge（公開 demo 可直接改用 --driver http）。",
+)
+
+# The same wording the readiness check uses for the same failure, so HR reads one sentence about
+# signing in whichever path noticed it first.
+ASK_LOGIN = (
+    "You are not signed in to the internal job pages. Please sign in to the internal system in "
+    "Chrome, then ask me again.",
+    "你尚未登入內部招聘系統。請先在 Chrome 登入內部系統，然後再叫我。",
 )
 
 # WebBridge failures that mean "the browser is not usable yet" rather than a real error.
@@ -232,6 +240,11 @@ def main() -> int:
         # at an empty search, then report the not-found envelope.
         _close_browser_tabs(client, keep=args.keep_browser)
         return _emit({"status": "error", "error_code": "not_found", "error_message": str(exc)}, to_stderr=True)
+    except SiteLoginRequiredError as exc:
+        # Not a not-found and not a broken browser: the session is missing. Answer with the
+        # sign-in instruction instead of the "no such job" message the page would otherwise
+        # produce, and leave the tab open so HR can sign in on the page she is looking at.
+        return _print_need_input(["jas_session"], list(ASK_LOGIN), detail=str(exc))
     except WebBridgeError as exc:
         if exc.reason in BROWSER_UNAVAILABLE_REASONS:
             return _print_need_input(["jas_session"], list(ASK_WEBRIDGE), detail=str(exc))
