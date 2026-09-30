@@ -179,9 +179,18 @@ it replaces guessing with one of three named answers in `checks[]`:
 
 - `daemon` fails (`daemon_unreachable`) → the WebBridge helper is not running. Tell HR to open
   Chrome — the logon-started daemon then comes up — or start it manually, then re-check.
-- `extension` fails (`extension_disabled`) → the Kimi extension is off, and nothing else will
-  help until it is on: `chrome://extensions` → re-enable **Kimi** and accept the permission
-  prompt.
+- `extension` fails → read `checks[].reason` before saying anything. The check reads the
+  browser's own profile, so the reason names *which* of the four things to fix, and
+  `ask.questions` already holds the sentence for it:
+  - `extension_not_installed` → the Kimi browser extension is not on this computer. Give HR the
+    Chrome Web Store link from the question. Do **not** tell her to enable it — there is nothing
+    there to enable.
+  - `extension_off` → installed, but the browser switched it off: `chrome://extensions` → switch
+    **Kimi** on and accept the permission prompt.
+  - `browser_not_running` → installed and enabled, but no browser is open: tell her to open
+    Chrome.
+  - `extension_disabled` → could not be determined (an unreadable profile, or installed and on
+    and still not attaching): the generic sentence — open Chrome (or Edge) with Kimi enabled.
 - `login` fails (`not_signed_in`) → prod only: HR is not signed in to the internal system (or
   the run did not land inside `/internal/` with the records table rendered). She signs in;
   you re-run the check.

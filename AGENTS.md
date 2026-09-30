@@ -173,6 +173,14 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
   question — never the "job not found" message the identity provider's page would otherwise
   produce. The probe lives in `webridge_collect/login.py` and is shared with `run_preflight.py`,
   so the check and the run cannot disagree.
+- **A missing browser extension is diagnosed, not guessed.** The daemon only reports *that* no
+  extension is attached, so `preflight`'s `extension` check reads the browser's own profile
+  (`webridge_collect/browser_ext.py`) and names the cause: `extension_not_installed` (the profile
+  was readable and holds no Kimi extension — the ask sentence carries the Chrome Web Store link),
+  `extension_off` (installed, but the browser disabled it), or `browser_not_running` (installed
+  and enabled, no browser open). `extension_disabled` remains the **undetermined** fallback, so an
+  unreadable profile never becomes a confident "not installed". The store id
+  `fldmhceldgbpfpkbgopacenieobmligc` is both the profile folder name and the ask's link.
 - Repeat runs reuse unchanged PDFs; a changed JD or CV is rebuilt.
 - **Browser cleanup is automatic**: when a run succeeds and `ranking-overview.html` has
   been opened, the collector calls WebBridge `close_session`, so every page it opened is

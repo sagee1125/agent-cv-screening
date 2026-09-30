@@ -370,8 +370,18 @@ prod failure can be diagnosed quickly.
   | check | how | mode |
   | --- | --- | --- |
   | `daemon` | `POST /status` → `running` | both |
-  | `extension` | `/status` → `extension_connected`, plus the version | both |
+  | `extension` | `/status` → `extension_connected`, plus the version; when it is **not** connected, `browser_ext.py` reads the browser's own profile to name the cause | both |
   | `login` | navigate to `/internal/records.php`, then require *landed inside `/internal/`* **and** *the records table is present* | prod only |
+
+  > **Extended 2026-09-30 (v1.2.2).** The `extension` check no longer stops at "not connected":
+  > the daemon cannot say *why*, and the three causes need three different instructions. It now
+  > reports `extension_not_installed` (the profile was read and holds no Kimi extension — the
+  > sentence carries the Chrome Web Store link), `extension_off` (installed, but the browser
+  > disabled it), or `browser_not_running` (installed and on, no browser open). `extension_disabled`
+  > is kept as the **undetermined** fallback, used when the profile could not be read, so an
+  > unreadable profile never becomes a confident "not installed". `ask.questions` items were raised
+  > from 120 to 240 chars in the same change, because a sentence that has to carry a URL was being
+  > truncated mid-clause.
 
 - [x] Classify the login result by the positive test above, not by an unknown IdP hostname.
 - [x] Close the tabs the check opened, the same way a not-found run does

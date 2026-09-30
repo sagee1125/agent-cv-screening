@@ -5,9 +5,14 @@ You need: this folder, your personal API key (in the encrypted spreadsheet we
 sent you), and about 15 minutes.
 
 For internal University jobs you also need Google Chrome on this computer, with
-the Kimi WebBridge extension installed and enabled - see "Which jobs are
-screened" below. If chrome://extensions does not list Kimi at all, contact us
-before your first screening.
+the Kimi browser extension installed and enabled - see "Which jobs are
+screened" below. If chrome://extensions does not list Kimi, install it from the
+Chrome Web Store first:
+
+    https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc
+
+(The extension is the one formerly called Kimi WebBridge. Vera checks all of
+this before her first screening and tells you which piece is missing.)
 
 Nothing else has to be installed first. The installer brings its own private
 copy of Python 3.12 - it never uses or changes the Python already on this
@@ -127,13 +132,16 @@ Out of the box this package screens the University's INTERNAL job pages.
 Screening them needs three things at the time of a run:
 
   1. Chrome is open on this computer.
-  2. The Kimi WebBridge extension is installed and ENABLED
-     (check chrome://extensions - if it is greyed out or off, switch it on).
+  2. The Kimi browser extension is installed and ENABLED
+     (check chrome://extensions - if it is greyed out or off, switch it on;
+     if Kimi is not listed at all, install it from
+     https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc ).
   3. You are signed in to the internal job system in Chrome, and the computer
      is on the campus network or connected to the University VPN.
 
 Before the first screening Vera checks all three and tells you exactly which
-one is missing - if it says you are not signed in, sign in to the internal
+one is missing - if it says the extension is not installed it also gives you
+the store link, and if it says you are not signed in, sign in to the internal
 system in Chrome and ask again. Nothing is screened until the checks pass.
 
 To screen the public DEMO jobs instead (no sign-in, no VPN, no extension

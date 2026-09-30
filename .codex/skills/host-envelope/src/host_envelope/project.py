@@ -146,7 +146,10 @@ def _project_ask(payload: dict[str, Any]) -> dict[str, Any] | None:
         missing = ["input"]
     if not missing and status != "need_input":
         return None
-    questions = [sanitize_text(item, 120) for item in list(questions_raw)[:6] if str(item).strip()]
+    # 240, not 120: an ask can have to carry a URL (the readiness check's "the extension is not
+    # installed, get it here" is one), and the old 120 cut the longer readiness sentences
+    # mid-clause - HR was handed "Please start it, then a". Six of these is still a small payload.
+    questions = [sanitize_text(item, 240) for item in list(questions_raw)[:6] if str(item).strip()]
     questions = [
         item
         for item in questions

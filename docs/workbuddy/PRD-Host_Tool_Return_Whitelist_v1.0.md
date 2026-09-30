@@ -1,7 +1,7 @@
 ---
 prd_id: PRD-Host_Tool_Return_Whitelist-v1.0
 feature_name: WorkBuddy Host Tool Return JSON Whitelist
-version: 1.1.0
+version: 1.3.0
 status: Draft
 owner: HR Screening Product Owner
 api_version: v1
@@ -26,7 +26,7 @@ affected_modules:
 # Product Requirements Document (PRD)
 
 **Feature Name:** WorkBuddy Host Tool Return JSON Whitelist
-**Version:** 1.1.0 (MVP)
+**Version:** 1.3.0 (MVP)
 **Status:** Draft
 **Product Manager:** HR Screening Product Owner
 **Target Users:** WorkBuddy host integrators; non-technical HR using chat to screen a JAS `refno`
@@ -42,6 +42,7 @@ affected_modules:
 | 1.0.0   | 2026-08-27 | HR Screening Product Owner | Initial host-visible tool envelope: field whitelist, denylist, ask/auth codes. |
 | 1.1.0   | 2026-08-27 | Engineering                | `host-envelope` projector CLI; pipeline identity is `refno`/`appno`/`display_label`. |
 | 1.2.0   | 2026-09-25 | Engineering                | Bring the document back in step with the code: `check_updates` and `preflight` tools, the post dimension (`posts`, `ranking[].post`, the `changes` post keys), `conditions_pending`, `conditions_unreadable`, `site`, and the readiness `checks`. |
+| 1.3.0   | 2026-09-30 | Engineering                | The readiness check names *why* no extension is attached: `extension_not_installed`, `extension_off`, `browser_not_running`, with `extension_disabled` kept as the undetermined fallback. `ask.questions` items may now be 240 chars, so a sentence can carry the Chrome Web Store link. Header version brought back in step with this table. |
 
 ---
 
@@ -256,7 +257,7 @@ Top-level keys only. Nested objects may only use keys listed under them.
 
 #### 5.2.1 `error_code` enum
 
-`envelope_rejected` | `unauthorized` | `session_expired` | `host_not_allowlisted` | `refno_invalid` | `fetch_failed` | `need_input` | `conditions_pending` | `not_found` | `conditions_unreadable` | `pipeline_error` | `partial_failures` | `internal` | `daemon_unreachable` | `extension_disabled` | `not_signed_in` | `bad_site_mode`
+`envelope_rejected` | `unauthorized` | `session_expired` | `host_not_allowlisted` | `refno_invalid` | `fetch_failed` | `need_input` | `conditions_pending` | `not_found` | `conditions_unreadable` | `pipeline_error` | `partial_failures` | `internal` | `daemon_unreachable` | `extension_disabled` | `extension_not_installed` | `extension_off` | `browser_not_running` | `not_signed_in` | `bad_site_mode`
 
 Do not put HTTP bodies, HTML, or exception strings into `error_code`.
 
@@ -283,7 +284,7 @@ session state that was never observed.
 | Key          | Type     | Allowed                                                                                         |
 | ------------ | -------- | ----------------------------------------------------------------------------------------------- |
 | `missing`    | string[] | Subset of: `jas_session` \| `refno` \| `candidates` \| `jd` \| `position` \| `scope` \| `input` \| `conditions` \| `browser` \| `extension` |
-| `questions`  | string[] | Max 6 items, each max 120 chars, already written for HR; sanitizer 5.5                          |
+| `questions`  | string[] | Max 6 items, each max 240 chars, already written for HR; sanitizer 5.5                          |
 | `conditions` | object   | `conditions_pending` only: the stored conditions HR is being asked about, see 5.2.6             |
 | `post_deltas`| array    | `conditions_pending` only, max 12: per-post derivations HR must confirm, each `{post, labels[], confirmed, delta[]}` |
 
@@ -396,7 +397,7 @@ resolved at all.
 | --------- | --------------- | ------------------------------------------------------------------ |
 | `check`   | string          | `daemon` \| `extension` \| `login`                                  |
 | `ok`      | boolean         | Pass/fail                                                           |
-| `reason`  | string or null  | `null` when `ok`; else `daemon_unreachable` \| `extension_disabled` \| `not_signed_in` |
+| `reason`  | string or null  | `null` when `ok`; else `daemon_unreachable` \| `extension_disabled` (undetermined) \| `extension_not_installed` \| `extension_off` \| `browser_not_running` \| `not_signed_in` |
 | `version` | string or null  | Extension version, max 40 chars, when the check could read one      |
 
 The identifier key is `check`, **not** `name`. `name` is denylisted here because it is the

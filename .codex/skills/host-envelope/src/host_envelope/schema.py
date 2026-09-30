@@ -28,6 +28,12 @@ ALLOWED_ERROR_CODES = frozenset(
         # silently swallowed and HR would be told "something went wrong" instead of what to fix.
         "daemon_unreachable",
         "extension_disabled",
+        # The three specific reasons behind "no extension is attached". They exist so HR is told to
+        # install the extension, to switch it back on, or to open the browser - three different
+        # actions that the generic reason above can only list as a guess.
+        "extension_not_installed",
+        "extension_off",
+        "browser_not_running",
         "not_signed_in",
         # A site switch that is neither prod nor demo; the run refuses to start rather than
         # silently screening the wrong site.
@@ -59,7 +65,18 @@ ALLOWED_SITES = frozenset({"demo", "prod"})
 # The readiness check's per-check records. The identifier key is `check`, not `name`: `name` is
 # denylisted because it is the candidate-name field, and a check record must never borrow it.
 ALLOWED_CHECKS = frozenset({"daemon", "extension", "login"})
-ALLOWED_CHECK_REASONS = frozenset({"daemon_unreachable", "extension_disabled", "not_signed_in"})
+ALLOWED_CHECK_REASONS = frozenset(
+    {
+        "daemon_unreachable",
+        # The fallback: an extension is not attached and the browser profile could not be read, so
+        # the reason is unknown and the sentence lists every cause.
+        "extension_disabled",
+        "extension_not_installed",
+        "extension_off",
+        "browser_not_running",
+        "not_signed_in",
+    }
+)
 CHECK_KEYS = frozenset({"check", "ok", "reason", "version"})
 TOP_KEYS = frozenset(
     {

@@ -35,6 +35,9 @@
         "internal",
         "daemon_unreachable",
         "extension_disabled",
+        "extension_not_installed",
+        "extension_off",
+        "browser_not_running",
         "not_signed_in",
         "bad_site_mode"
       ]
@@ -358,7 +361,15 @@
           "ok": { "type": "boolean" },
           "reason": {
             "type": ["string", "null"],
-            "enum": [null, "daemon_unreachable", "extension_disabled", "not_signed_in"]
+            "enum": [
+              null,
+              "daemon_unreachable",
+              "extension_disabled",
+              "extension_not_installed",
+              "extension_off",
+              "browser_not_running",
+              "not_signed_in"
+            ]
           },
           "version": { "type": ["string", "null"], "maxLength": 40, "pattern": "^[^\\r\\n]*$" }
         }

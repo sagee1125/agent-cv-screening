@@ -753,6 +753,45 @@ def test_project_preflight_drops_unknown_check_and_reason() -> None:
     assert envelope["checks"][0]["reason"] is None
 
 
+# The three specific extension reasons survive the projection: without them in the whitelist HR
+# would be told "something went wrong" instead of which of the three things to fix.
+def test_project_preflight_keeps_the_specific_extension_reasons() -> None:
+    for reason in ("extension_not_installed", "extension_off", "browser_not_running"):
+        envelope = project_host_return(
+            tool="preflight",
+            payload={
+                "status": "need_input",
+                "checks": [
+                    {"check": "daemon", "ok": True, "reason": None, "version": None},
+                    {"check": "extension", "ok": False, "reason": reason, "version": None},
+                ],
+                "missing": ["extension"],
+                "questions": ["Something HR has to do."],
+            },
+        )
+        assert validate_envelope(envelope) == []
+        assert envelope["checks"][1]["reason"] == reason
+
+
+# An ask that has to carry a URL must arrive whole. The limit used to be 120, which cut the longer
+# readiness sentences mid-clause - HR was handed "Please start it, then a".
+def test_project_ask_keeps_a_sentence_with_a_url_whole() -> None:
+    store = "https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc"
+    question = f"The Kimi browser extension is not installed on this computer. Install it: {store}"
+    assert len(question) > 120
+    envelope = project_host_return(
+        tool="preflight",
+        payload={
+            "status": "need_input",
+            "checks": [{"check": "extension", "ok": False, "reason": "extension_not_installed", "version": None}],
+            "missing": ["extension"],
+            "questions": [question],
+        },
+    )
+    assert validate_envelope(envelope) == []
+    assert envelope["ask"]["questions"] == [question]
+
+
 # The auth block follows the login check: a signed-out session is reported as expired, while a
 # check that never ran the login probe claims nothing about the session.
 def test_project_preflight_auth_follows_the_login_check() -> None:

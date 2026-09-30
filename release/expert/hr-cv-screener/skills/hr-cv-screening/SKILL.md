@@ -150,22 +150,41 @@ report. When a check fails, tell HR the one thing to fix, wait for her, then re-
 - 繁中：「開始前請確認：**Chrome 已開啟**、`chrome://extensions` 內 **Kimi 擴充功能已啟用**，
   內部職位還要**已登入內部招聘系統**。好了請告訴我。」
 
-If HR says something is wrong anyway — or a run still dies on the browser — diagnose with
-the three checks below. `auth.jas_session: "missing"` does **not** mean HR logged out — on
+### What an extension failure means — read `checks[].reason`, do not guess
+
+`preflight` does not stop at "no extension attached". It reads the browser's own profile
+(`browser_ext.py`) and names **one** of the causes below, so HR is never told to install
+something she already has. The matching sentence is already in `ask.questions` — relay it in
+her language rather than inventing your own:
+
+| `checks[].reason` | What is actually wrong | What HR does |
+|---|---|---|
+| `extension_not_installed` | the browser's profile holds no Kimi extension | install it from the Chrome Web Store (formerly Kimi WebBridge): `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc` |
+| `extension_off` | installed, but the browser disabled it | `chrome://extensions` → switch **Kimi** on and accept the permission prompt |
+| `browser_not_running` | installed and enabled, but no browser is open | open Chrome |
+| `extension_disabled` | **not determined**: the profile could not be read, or it is installed and on and still not attaching | the generic sentence — open Chrome (or Edge) with Kimi enabled |
+
+Only `extension_not_installed` justifies telling HR to install anything. If the reason is
+anything else, do not suggest installing: the extension is already on the computer.
+
+If HR says something is wrong anyway — or a run still dies on the browser — diagnose by hand
+with the three checks below. `auth.jas_session: "missing"` does **not** mean HR logged out — on
 the demo there is no login at all. It only means the WebBridge link to Chrome is not up.
 Three cheap checks, all read-only:
 
 1. Daemon: `curl -s http://127.0.0.1:10086/status`
    → `running`, `extension_connected`, `version`, `update_available`.
-   `extension_connected: false` = the Chrome extension is not attached; that is the whole
-   problem, no need to look further.
+   `extension_connected: false` = the Chrome extension is not attached. Why it is not attached
+   is the `checks[].reason` above; the daemon cannot say.
 2. Real browser open? `tasklist /FI "IMAGENAME eq chrome.exe"` (and `msedge.exe`).
    Beware: `msedgewebview2.exe` also matches a loose `^msedge` grep — it is the desktop
    app's embedded webview, **not** a browser HR can use. Use the `/FI` form.
-3. Extension installed? search the Chrome profile's `Extensions/**/manifest.json` for
-   `kimi|webbridge` — Windows: `%LOCALAPPDATA%/Google/Chrome/User Data/Default/Extensions`;
-   macOS: `~/Library/Application Support/Google/Chrome/Default/Extensions`.
-   The folder name is the extension id, subfolders are its versions.
+3. Extension installed? the store id is the folder name:
+   `Extensions/fldmhceldgbpfpkbgopacenieobmligc/` — Windows:
+   `%LOCALAPPDATA%/Google/Chrome/User Data/Default/Extensions`; macOS:
+   `~/Library/Application Support/Google/Chrome/Default/Extensions`.
+   An unpacked install has a generated id instead, so fall back to matching
+   `Extensions/**/manifest.json` on `kimi|webbridge`.
 
 Helper CLI (status|restart|start|upgrade) — Windows:
 `%USERPROFILE%/.kimi-webbridge/bin/kimi-webbridge.exe`; macOS: `~/.kimi-webbridge/bin/kimi-webbridge`.
@@ -173,7 +192,8 @@ Helper CLI (status|restart|start|upgrade) — Windows:
 **Where Chrome really stores extension state:** `Default/Preferences → extensions.settings`
 can be empty. The live store is **`Default/Secure Preferences → extensions.settings`**. Read
 that one, or you will wrongly conclude the extension is not installed. Fields to read:
-`disable_reasons`, `path`, `manifest.version`. (The browser add-on is named **Kimi**.)
+`disable_reasons` (**empty list = enabled**, a non-empty one is Chrome having switched it off),
+`path`, `manifest.version`. (The browser add-on is named **Kimi**.)
 
 **Known root cause (2026-09-07):** `disable_reasons = [2]` = Chromium
 `DISABLE_PERMISSIONS_INCREASE`. Chrome had auto-updated the Kimi extension to v2.0.5, the

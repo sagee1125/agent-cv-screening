@@ -64,6 +64,32 @@ def _patch_browser(module, monkeypatch, *, probe=None, error=None) -> tuple[dict
     return holder, closed
 
 
+# Install a fixed extension diagnosis, so a test never reads the machine's own browser profiles.
+#
+# The check reads real Chrome/Edge files on the computer it runs on, so every test that reaches the
+# extension check has to pin the answer; otherwise the same test passes on one developer's machine
+# and fails on another.
+def _patch_diagnosis(module, monkeypatch, *, installed=None, switched_off=None, browser_up=None) -> list:
+    calls: list = []
+    monkeypatch.setattr(
+        module,
+        "diagnose",
+        lambda: {
+            "installed": installed,
+            "switched_off": switched_off,
+            "browser": None,
+            "profile": None,
+        },
+    )
+
+    def fake_running():
+        calls.append(1)
+        return browser_up
+
+    monkeypatch.setattr(module, "browser_running", fake_running)
+    return calls
+
+
 # --- the daemon wait -------------------------------------------------------
 
 
@@ -172,12 +198,98 @@ def test_cli_extension_disabled(monkeypatch, capsys) -> None:
     monkeypatch.setenv("JES_SITE_MODE", "0")
     monkeypatch.setattr(module, "webbridge_status", lambda url, timeout=2.0: {"extension_connected": False})
     monkeypatch.setattr(module, "EXTENSION_CONNECT_WAIT", 0.0)
+    # Nothing could be read about the extension, which is the case the generic sentence covers.
+    _patch_diagnosis(module, monkeypatch, installed=None)
     monkeypatch.setattr(sys, "argv", [module.__file__])
     assert module.main() == module.EXIT_NEED_INPUT
     payload = json.loads(capsys.readouterr().out)
     assert payload["missing"] == ["extension"]
     assert [item["check"] for item in payload["checks"]] == ["daemon", "extension"]
     assert payload["checks"][1]["reason"] == "extension_disabled"
+
+
+# --- what the extension diagnosis changes ----------------------------------
+
+
+# Run the CLI to the extension failure and return the payload, with the daemon up but nothing
+# attached. `browser_up` and the diagnosis are the only things each test varies.
+def _extension_failure(module, monkeypatch, capsys, **diagnosis) -> tuple[dict, list]:
+    monkeypatch.setenv("JES_SITE_MODE", "0")
+    monkeypatch.setattr(module, "webbridge_status", lambda url, timeout=2.0: {"extension_connected": False})
+    monkeypatch.setattr(module, "EXTENSION_CONNECT_WAIT", 0.0)
+    calls = _patch_diagnosis(module, monkeypatch, **diagnosis)
+    monkeypatch.setattr(sys, "argv", [module.__file__])
+    assert module.main() == module.EXIT_NEED_INPUT
+    return json.loads(capsys.readouterr().out), calls
+
+
+# An extension that is not installed is a different instruction from one that is switched off, and
+# it carries the store link: a computer that never had the extension has no other way to be told
+# where to get it.
+def test_cli_extension_not_installed_carries_the_store_link(monkeypatch, capsys) -> None:
+    module = _import_cli()
+    payload, _ = _extension_failure(module, monkeypatch, capsys, installed=False)
+    assert payload["checks"][1]["reason"] == "extension_not_installed"
+    question = " ".join(payload["questions"])
+    assert module.STORE_URL in question
+    # And the link survives the host projection's sanitizing, which is what HR actually receives.
+    from host_envelope.project import project_host_return
+
+    envelope = project_host_return(tool="preflight", payload=payload)
+    assert envelope["status"] == "need_input"
+    assert module.STORE_URL in " ".join(envelope["ask"]["questions"])
+
+
+# Installed but switched off is its own sentence: "enable it" is not "install it".
+def test_cli_extension_switched_off(monkeypatch, capsys) -> None:
+    module = _import_cli()
+    payload, _ = _extension_failure(module, monkeypatch, capsys, installed=True, switched_off=True)
+    assert payload["checks"][1]["reason"] == "extension_off"
+    assert "chrome://extensions" in " ".join(payload["questions"])
+
+
+# Installed and on, with no browser open, is the third case: nothing is wrong with the extension.
+def test_cli_browser_not_open(monkeypatch, capsys) -> None:
+    module = _import_cli()
+    payload, _ = _extension_failure(
+        module, monkeypatch, capsys, installed=True, switched_off=False, browser_up=False
+    )
+    assert payload["checks"][1]["reason"] == "browser_not_running"
+
+
+# Installed and on with the browser open means the extension is simply not attaching, so the
+# generic sentence stands rather than a wrong "open Chrome".
+def test_cli_extension_installed_and_on_keeps_the_generic_reason(monkeypatch, capsys) -> None:
+    module = _import_cli()
+    payload, _ = _extension_failure(
+        module, monkeypatch, capsys, installed=True, switched_off=False, browser_up=True
+    )
+    assert payload["checks"][1]["reason"] == "extension_disabled"
+
+
+# The process listing is only worth running once the extension itself is accounted for: if it is
+# not installed, whether a browser is open is not the answer HR needs.
+def test_cli_does_not_look_for_a_browser_when_the_extension_is_missing(monkeypatch, capsys) -> None:
+    module = _import_cli()
+    _, calls = _extension_failure(module, monkeypatch, capsys, installed=False)
+    assert calls == []
+
+
+# A profile that blows up while being read must not turn the readiness check into an error: the
+# answer degrades to "unknown" and HR gets the generic sentence.
+def test_diagnose_extension_never_raises(monkeypatch) -> None:
+    module = _import_cli()
+
+    def boom():
+        raise OSError("profile is a mess")
+
+    monkeypatch.setattr(module, "diagnose", boom)
+    assert module._diagnose_extension() == {
+        "installed": None,
+        "switched_off": None,
+        "browser": None,
+        "profile": None,
+    }
 
 
 # The demo site is public, so its check list never includes a login probe.
