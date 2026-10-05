@@ -202,3 +202,15 @@ refno, or an exported folder), including 「用 jas-import 離綫篩選」plus a
    Do not ask HR to name Python scripts. On a multi-post job, give the counts and top `appno`s
    **per post** and say that scores are comparable within a post, not across posts (FR-11) —
    the exact wording is in "Multi-post jobs" above.
+
+## Release artifacts
+
+- `release/build_release.py <X.Y.Z>` builds `CV-Screening-Setup.zip`; CI attaches that zip to the
+  GitHub release for the tag. Nothing under `release/manual/` is packaged.
+- **The user manual is generated, not hand-edited.** `release/manual/build_manual_docx.py` writes
+  `Desktop/CV-Screening-User-Setup-Manual.docx` — the copy HR receives, carrying `[SCREENSHOT: …]`
+  placeholders the owner replaces by hand. Run it with the **managed** Python
+  (`~/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe`), because python-docx is not
+  installed in the repo venv. Close Word first — it locks the file and `doc.save` then fails with
+  `PermissionError`; `--out <path>` writes somewhere else. `VERSION` inside the script is a
+  constant, so bump it by hand when the manual describes a new release.
