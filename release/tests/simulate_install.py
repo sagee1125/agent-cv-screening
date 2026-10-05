@@ -191,6 +191,13 @@ def main() -> int:
     setup_bat_env.update({
         "TEMP": str(sandbox_temp),
         "TMP": str(sandbox_temp),
+        # The shipped script downloads whatever uv is *latest*, while this rehearsal pins its own
+        # uv. Two uv versions must not share a Python install directory: setup.bat's uv tries to
+        # replace the minor-version link the pinned uv made, and on Windows that fails with
+        # "Failed to create Python minor version link directory ... 存取被拒 (os error 5)", which
+        # aborts the install. Give it its own directory. The wheel cache is content-addressed and
+        # safe to share, so the install stays fast.
+        "UV_PYTHON_INSTALL_DIR": str(sandbox_root / "python"),
         # The shipped script calls plain `uv pip install`, so the wheel cache has to arrive
         # through the environment (see the note on antlr4 below).
         "UV_FIND_LINKS": str(Path(__file__).resolve().parent / "wheels"),
