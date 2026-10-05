@@ -26,6 +26,15 @@ from screening_core.site_mode import SiteModeError, resolve_site_mode
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+# The longest an ask question may be, and the one place that decides it.
+#
+# It is generous because a sentence can have to carry two URLs: the readiness check's "the
+# extension is not installed, get it here" gives HR both the Chrome Web Store listing and the
+# vendor's page. Six of these is still a small payload. The published JSON schema repeats this
+# number, and `test_published_schema_matches_the_code_whitelists` fails if the two drift - they
+# did drift once, and the schema would have rejected the very ask the check exists to send.
+ASK_QUESTION_LIMIT = 320
+
 
 # Returns a minimal error envelope the host LLM is allowed to see.
 def rejected_envelope(tool: str, message: str) -> dict[str, Any]:
@@ -146,11 +155,11 @@ def _project_ask(payload: dict[str, Any]) -> dict[str, Any] | None:
         missing = ["input"]
     if not missing and status != "need_input":
         return None
-    # 320, not 120: an ask can have to carry two URLs (the readiness check's "the extension is not
-    # installed, get it here" carries the Web Store listing and the vendor's page), and the old 120
-    # cut the longer readiness sentences mid-clause - HR was handed "Please start it, then a".
-    # Six of these is still a small payload.
-    questions = [sanitize_text(item, 320) for item in list(questions_raw)[:6] if str(item).strip()]
+    # See ASK_QUESTION_LIMIT: an ask can have to carry two URLs, and the old 120 cut the longer
+    # readiness sentences mid-clause - HR was handed "Please start it, then a".
+    questions = [
+        sanitize_text(item, ASK_QUESTION_LIMIT) for item in list(questions_raw)[:6] if str(item).strip()
+    ]
     questions = [
         item
         for item in questions
@@ -850,4 +859,4 @@ def project_host_return(
     return envelope
 
 
-__all__ = ["project_host_return", "rejected_envelope", "unwrap_skill_payload"]
+__all__ = ["ASK_QUESTION_LIMIT", "project_host_return", "rejected_envelope", "unwrap_skill_payload"]

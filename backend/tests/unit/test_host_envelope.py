@@ -863,3 +863,11 @@ def test_published_schema_matches_the_code_whitelists() -> None:
     assert set(checks["properties"]["check"]["enum"]) == code.ALLOWED_CHECKS
     assert set(checks["properties"]["reason"]["enum"]) - {None} == code.ALLOWED_CHECK_REASONS
 
+    # Lengths drift too, and the enum comparison above cannot see it: the schema capped ask
+    # questions at 120 while the projector had already been raised to 320, so the contract
+    # rejected the one ask that carries the extension's two download links.
+    from host_envelope import project
+
+    assert props["ask"]["properties"]["questions"]["items"]["maxLength"] == project.ASK_QUESTION_LIMIT
+    assert props["ask"]["properties"]["questions"]["maxItems"] == 6
+

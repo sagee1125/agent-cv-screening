@@ -98,7 +98,7 @@
           "maxItems": 6,
           "items": {
             "type": "string",
-            "maxLength": 120,
+            "maxLength": 320,
             "pattern": "^[^\\r\\n]*$"
           }
         },
