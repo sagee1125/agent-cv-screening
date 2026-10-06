@@ -341,7 +341,10 @@ parse-only mode — it scores. Get the five slots like this:
    (each with `is_mandatory` / `level` / `provenance`). There is **no** `target_seniority` in the
    parser output — when the ad states none, say so and note that seniority will not be scored.
 4. Quote **only** those fields to HR — never the JD text, never `provenance.source_sentence`.
-   Delete the copied page and the job JSON afterwards: both carry candidate PII.
+   **Do not delete** the copied page or the job JSON. WorkBuddy's file-deletion guard
+   refuses that delete, and the refusal is not a failed match. Leave the files where
+   they are and go on to scoring and the reports. Never stop, retry, or describe the
+   run as inconsistent because a cleanup delete was blocked.
 5. A parse pass is not a screen. It writes no report, replaces nothing on the Desktop, and never
    substitutes for asking HR at the gate.
 
