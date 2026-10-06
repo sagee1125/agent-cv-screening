@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -20,6 +21,9 @@ DAEMON_START_WAIT = 25.0
 EXTENSION_CONNECT_WAIT = 30.0
 # Cleanup uses a short HTTP timeout so a hung daemon never delays a finished run.
 CLEANUP_TIMEOUT_SECONDS = 10.0
+# How long to wait for a navigated CV download to show up in the network log.
+DOWNLOAD_POLLS = 40
+DOWNLOAD_POLL_SECONDS = 0.25
 
 
 # True when the WebBridge daemon answers a status probe on the given URL.
@@ -146,6 +150,38 @@ class WebBridgeError(RuntimeError):
         super().__init__(message)
 
 
+# True when a captured request is the same CV file as the URL we opened.
+def _same_cv_request(request_url: str, target: str) -> bool:
+    want = parse_qs(urlparse(target).query)
+    got = parse_qs(urlparse(request_url).query)
+    return bool(want.get("id")) and want.get("t") == got.get("t") and want.get("id") == got.get("id")
+
+
+# Turn a captured network body into the file bytes. Binary responses arrive base64-encoded.
+def _response_bytes(detail: dict[str, Any]) -> bytes:
+    if detail.get("bodyError"):
+        raise WebBridgeError(str(detail.get("bodyError"))[:200], reason="download-failed")
+    encoded = bool(detail.get("base64Encoded"))
+    body = detail.get("body")
+    if isinstance(body, dict):
+        encoded = bool(body.get("base64Encoded", encoded))
+        body = body.get("body")
+    if isinstance(body, bytes):
+        return body
+    if not isinstance(body, str) or body == "":
+        raise WebBridgeError("browser download had no body", reason="download-failed")
+    if encoded:
+        return base64.b64decode(body)
+    raw = body.encode("latin-1", errors="surrogateescape")
+    if raw.startswith(b"%PDF"):
+        return raw
+    try:
+        decoded = base64.b64decode(body, validate=True)
+    except Exception:
+        return raw
+    return decoded if decoded.startswith(b"%PDF") else raw
+
+
 # Client for the WebBridge daemon: one POST /command per browser action.
 class WebBridgeClient:
     # Bind one client to a daemon URL and a session (tab group) name.
@@ -153,6 +189,8 @@ class WebBridgeClient:
         self.daemon_url = daemon_url.rstrip("/")
         self.session = session
         self.timeout = timeout
+        # The records page we navigate back to, so the next CV request keeps that Referer.
+        self._download_referer = ""
 
     # POST one command and return the parsed JSON body; timeout overrides the client default.
     def command(
@@ -240,30 +278,64 @@ class WebBridgeClient:
     def page_html(self) -> str:
         return str(self.evaluate("document.documentElement.outerHTML"))
 
-    # Fetch a URL inside the browser (carries its login session) and return bytes.
+    # Download a CV by opening it like a click, then read the captured response.
+    #
+    # file.php answers 404 to fetch() (Sec-Fetch-Mode: cors, Dest: empty) and
+    # serves the file for a top-level navigation (Mode: navigate, Dest: document),
+    # which is what a click on the records page sends. JavaScript cannot set
+    # those headers, so the download has to be a real navigation.
     def fetch_bytes(self, url: str) -> bytes:
-        meta = self.evaluate(
-            "(async () => { const r = await fetch(%r); const b = await r.arrayBuffer(); "
-            "window.__wbcv = { u: new Uint8Array(b), pos: 0, total: b.byteLength, status: r.status, ok: r.ok }; "
-            "return { ok: r.ok, status: r.status, total: b.byteLength }; })()" % url
-        )
-        if not isinstance(meta, dict) or not meta.get("ok"):
-            raise WebBridgeError(f"browser fetch failed for {url}: {meta}", reason="download-failed")
-        chunks: list[str] = []
-        for _ in range(int(meta.get("total", 0)) // CV_CHUNK_BYTES + 1):
-            part = self.evaluate(
-                "(function(){ const s = window.__wbcv; if (!s) return { error: 'no buffer' }; "
-                "const CH = %d; const end = Math.min(s.pos + CH, s.total); let bin = ''; "
-                "for (let i = s.pos; i < end; i++) bin += String.fromCharCode(s.u[i]); "
-                "s.pos = end; return { done: s.pos >= s.total, pos: s.pos, total: s.total, chunk: btoa(bin) }; })()"
-                % CV_CHUNK_BYTES
-            )
-            if not isinstance(part, dict) or "chunk" not in part:
-                raise WebBridgeError(f"browser CV chunk failed: {part}", reason="download-failed")
-            chunks.append(part["chunk"])
-            if part.get("done"):
-                break
-        return base64.b64decode("".join(chunks))
+        referer = self._download_referer or self._current_tab_url()
+        if referer and "file.php" not in referer:
+            self._download_referer = referer
+        self.command("network", {"cmd": "start"})
+        try:
+            self.navigate(url, new_tab=False)
+            match = self._await_download_request(url)
+            status = int(match.get("status") or 0)
+            if status >= 400 or not match.get("requestId"):
+                raise WebBridgeError(
+                    f"browser download failed for {url}: status {status or 'missing'}",
+                    reason="download-failed",
+                )
+            detail = self.command("network", {"cmd": "detail", "requestId": match["requestId"]})
+            if not isinstance(detail, dict):
+                raise WebBridgeError(f"browser download returned no body for {url}", reason="download-failed")
+            return _response_bytes(detail)
+        finally:
+            try:
+                self.command("network", {"cmd": "stop"})
+            except Exception:
+                pass
+            if self._download_referer:
+                try:
+                    self.navigate(self._download_referer, new_tab=False)
+                except Exception:
+                    pass
+
+    # The URL of the tab this session is driving, used as the CV download Referer.
+    def _current_tab_url(self) -> str:
+        for tab in self.list_tabs():
+            if tab.get("active") and tab.get("url"):
+                return str(tab["url"])
+        return ""
+
+    # Poll the network log until the navigated CV request has finished.
+    def _await_download_request(self, url: str) -> dict[str, Any]:
+        last: dict[str, Any] = {}
+        for _ in range(DOWNLOAD_POLLS):
+            listed = self.command("network", {"cmd": "list", "filter": "file.php"})
+            requests = listed.get("requests") if isinstance(listed, dict) else None
+            if isinstance(requests, list):
+                for request in requests:
+                    if isinstance(request, dict) and _same_cv_request(str(request.get("url") or ""), url):
+                        last = request
+                        if request.get("completed"):
+                            return request
+            time.sleep(DOWNLOAD_POLL_SECONDS)
+        if last:
+            return last
+        raise WebBridgeError(f"browser download was not captured for {url}", reason="download-failed")
 
     # List the tabs this session opened (diagnostics before/after cleanup).
     def list_tabs(self) -> list[dict[str, Any]]:

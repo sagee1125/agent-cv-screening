@@ -1,6 +1,7 @@
 # Unit tests for the webridge-collect skill (WebBridge + HTTP collection).
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -470,20 +471,37 @@ def test_collect_http_driver_records_download_failure(tmp_path, monkeypatch) -> 
     assert manifest["download_failures"][0]["appno"] == "2600827004"
 
 
-# WebBridgeClient.fetch_bytes pulls the CV in chunks through evaluate.
-def test_webridge_client_fetch_bytes_chunks(monkeypatch) -> None:
+# A CV download is a real navigation, not fetch(): file.php 404s a cors fetch.
+def test_webridge_client_fetch_bytes_uses_navigation(monkeypatch) -> None:
     client = WebBridgeClient(session="test-session")
-    calls: list[str] = []
+    cv_url = "https://jobs.polyu.edu.hk/internal/file.php?t=cv&id=300880&refno=260625010"
+    records = "https://jobs.polyu.edu.hk/internal/records.php?refno=260625010"
+    calls: list[tuple] = []
 
-    def fake_evaluate(code):
-        calls.append(code)
-        if len(calls) == 1:
-            return {"ok": True, "status": 200, "total": 5}
-        return {"done": True, "pos": 5, "total": 5, "chunk": "aGVsbG8="}
+    def fake_command(action, args=None, timeout=None):
+        calls.append((action, args))
+        if action == "list_tabs":
+            return {"tabs": [{"url": records, "active": True}]}
+        if action == "network" and (args or {}).get("cmd") == "list":
+            return {
+                "count": 1,
+                "requests": [{
+                    "requestId": "r1",
+                    "url": cv_url,
+                    "status": 200,
+                    "completed": True,
+                    "mimeType": "application/pdf",
+                }],
+            }
+        if action == "network" and (args or {}).get("cmd") == "detail":
+            return {"body": base64.b64encode(b"%PDF-1.4").decode("ascii"), "base64Encoded": True}
+        return {}
 
-    monkeypatch.setattr(client, "evaluate", fake_evaluate)
-    assert client.fetch_bytes("https://jes-web-demo.vercel.app/uploads/CV.pdf") == b"hello"
-    assert len(calls) == 2
+    monkeypatch.setattr(client, "command", fake_command)
+    assert client.fetch_bytes(cv_url).startswith(b"%PDF")
+    opened = [args["url"] for action, args in calls if action == "navigate" and args]
+    assert opened[0] == cv_url
+    assert opened[-1] == records
 
 
 # WebBridgeClient unwraps the daemon's {"ok": true, "data": {...}} envelope.

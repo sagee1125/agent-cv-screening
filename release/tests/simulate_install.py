@@ -309,7 +309,13 @@ def main() -> int:
         expert_md = home / ".workbuddy-ai" / "plugins" / "marketplaces" / "my-experts" / "plugins" / "hr-cv-screener" / "agents" / "hr-cv-screener.md"
         check("expert installed for WorkBuddy", expert_md.is_file())
         skill_text = (expert_md.parent.parent / "skills" / "hr-cv-screening" / "SKILL.md").read_text(encoding="utf-8")
-        check("expert skill paths rewritten to the engine dir", "C:/agent-cv-screening" not in skill_text)
+        installed = str(sandbox_root / "agent-cv-screening")
+        check(
+            "expert skill paths rewritten to the engine dir",
+            "C:/agent-cv-screening" not in skill_text
+            and "C:\\agent-cv-screening" not in skill_text
+            and installed in skill_text,
+        )
 
         jd_output = run("engine smoke test (rule-mode JD parse)",
                         [str(venv_python), str(sandbox_root / "agent-cv-screening" / ".codex" / "skills" / "jd-parser" / "scripts" / "run_jd_parse.py"),

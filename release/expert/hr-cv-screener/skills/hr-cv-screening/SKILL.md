@@ -66,10 +66,13 @@ There is no "developer mode" in which Simplified is acceptable.
 
 ## Fixed paths (never guess, never change)
 
+On Windows the command runner rejects `C:/...` as permission denied. Run the
+`screen.cmd` lines below with backslashes. Do not retype them with forward slashes.
+
 ```
-REPO = C:/agent-cv-screening
-PY   = C:/agent-cv-screening/venv/Scripts/python.exe
-TOOL = C:/agent-cv-screening/.codex/skills/host-envelope/scripts/run_workbuddy_tool.py
+REPO = C:\agent-cv-screening
+PY   = C:\agent-cv-screening\venv\Scripts\python.exe
+TOOL = C:\agent-cv-screening\.codex\skills\host-envelope\scripts\run_workbuddy_tool.py
 ```
 
 Site URLs — never compose or "fix" these; the envelope's `site` says which one a run used:
@@ -90,24 +93,51 @@ All commands work from any directory; do not `cd` first.
 
 ## Commands
 
-```bash
-# Readiness check — run BEFORE the first screen_refno of the conversation, and cheaply re-run
-# mid-flow whenever a run stalled on the browser (no CV download, no pipeline, no report):
-"$PY" "$TOOL" preflight
+Windows — copy these. Backslashes. Do not build the python path yourself:
 
-# Screen a job by refno or records URL (opens the real browser so HR watches the flow)
-"$PY" "$TOOL" screen_refno "<refno-or-url>" --driver webbridge
-
-# Answer the conditions gate after HR has decided (see "Saved HR conditions")
-"$PY" "$TOOL" screen_refno "<refno>" --driver webbridge --conditions confirmed
-"$PY" "$TOOL" screen_refno "<refno>" --driver webbridge --conditions discard
-
-# Has anything changed since the last screen? (no reports generated)
-"$PY" "$TOOL" check_updates "<refno>"
-
-# Screen an already-exported folder (records.html + cvs/)
-"$PY" "$TOOL" screen_refno "<folder>"
+```bat
+C:\agent-cv-screening\screen.cmd preflight
+C:\agent-cv-screening\screen.cmd screen_refno "<refno-or-url>" --driver webbridge
+C:\agent-cv-screening\screen.cmd screen_refno "<refno>" --driver webbridge --conditions confirmed
+C:\agent-cv-screening\screen.cmd screen_refno "<refno>" --driver webbridge --conditions discard
+C:\agent-cv-screening\screen.cmd check_updates "<refno>"
+C:\agent-cv-screening\screen.cmd screen_refno "<folder>"
 ```
+
+macOS:
+
+```bash
+~/agent-cv-screening/screen.command preflight
+~/agent-cv-screening/screen.command screen_refno "<refno-or-url>" --driver webbridge
+~/agent-cv-screening/screen.command screen_refno "<refno>" --driver webbridge --conditions confirmed
+~/agent-cv-screening/screen.command screen_refno "<refno>" --driver webbridge --conditions discard
+~/agent-cv-screening/screen.command check_updates "<refno>"
+~/agent-cv-screening/screen.command screen_refno "<folder>"
+```
+
+`preflight` runs before the first `screen_refno` of the conversation, and again
+whenever a run stalled on the browser. `screen_refno` opens the real browser so
+HR watches the flow. `check_updates` writes no report. A folder argument is an
+already-exported `records.html` + `cvs/`.
+
+## When a command is refused
+
+The engine is already installed. A "permission denied" on the command is not a
+missing Python, and it is not a reason to repair the machine.
+
+If the refused command contained `C:/`, run that same command once more with
+`C:\`. Change nothing else.
+
+If it is refused again, stop. Tell HR, in her language, that the screening tool
+could not be started. Do not try a third approach.
+
+Never, because a command was refused:
+
+- create a virtual environment, temporary or otherwise
+- run `pip`, `pip freeze`, or install packages
+- `cd` into the engine and call a bare `python` or `pip`
+- write a requirements file
+- pick a different interpreter
 
 - **Preflight comes first.** Before the first `screen_refno` of a conversation, run
   `preflight` and read `checks[]`: `daemon` (both sites), `extension` (both sites),
@@ -226,7 +256,7 @@ run now without the browser) instead of looping.
 The installed engine may lag behind the released version. Before the first screening command of a
 conversation, run the updater once, quietly:
 
-- Windows: `C:/agent-cv-screening/update_engine.cmd --quiet`
+- Windows: `C:\agent-cv-screening\update_engine.cmd --quiet`
 - macOS: `~/agent-cv-screening/update_engine.command --quiet`
 
 Rules: at most once per conversation. If it prints "up to date" or nothing, continue silently and

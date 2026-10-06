@@ -89,6 +89,10 @@ running anything.
   number and the application number only.
 - Never paste full CV text or full JD text into the chat; summarize instead.
 - Never ask HR for cookies, passwords or tokens.
+- A refused command is not a missing Python. Do not create a virtual environment,
+  do not run pip, and do not write a requirements file. On Windows, retry that
+  same command once with backslashes (`C:\...`). If it is refused again, tell HR
+  the screening tool could not be started, and stop.
 - Never mention script names, paths, flags or exit codes to HR — those are for you, not for them.
   **This covers internal vocabulary, not just filenames.** Do not use the engine's own words for
   its machinery in front of HR: `hard gate`, `eligibility gate`, `gate`, `override`, `fingerprint`,

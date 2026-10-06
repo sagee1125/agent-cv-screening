@@ -124,6 +124,8 @@ def install_launcher_files(pkg: Path, dst: Path) -> None:
         "setup.command",
         "update_engine.cmd",
         "update_engine.command",
+        "screen.cmd",
+        "screen.command",
     ):
         src = pkg / name
         dst_file = dst / name
@@ -232,11 +234,16 @@ def workbuddy_config_dir() -> Path:
     return chosen
 
 
+# Point the installed expert at this machine's engine, using that OS's path separators.
 def rewrite_skill_paths(skill_md: Path, engine_dst: Path) -> None:
+    # Windows command runners reject C:/ paths as "permission denied". The
+    # installed skill must name this machine's engine with its own separators.
+    token = str(engine_dst) if sys.platform == "win32" else engine_dst.as_posix()
     text = skill_md.read_text(encoding="utf-8")
-    text = text.replace("C:/agent-cv-screening", engine_dst.as_posix())
-    text = text.replace("C:\\\\agent-cv-screening", str(engine_dst))
-    text = text.replace("C:\\agent-cv-screening", str(engine_dst))
+    for root in ("C:/agent-cv-screening", "C:\\agent-cv-screening"):
+        text = text.replace(root, token)
+    if sys.platform == "win32":
+        text = text.replace(token + "/", token + "\\")
     skill_md.write_text(text, encoding="utf-8")
 
 

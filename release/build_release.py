@@ -44,7 +44,7 @@ LIVE_EXPERT = Path.home() / ".workbuddy-ai" / "plugins" / "marketplaces" / "my-e
 ENGINE_COPY = (".codex", "data/taxonomy", "site_profiles.json", ".env.example")
 EXPERT_EXCLUDE = ("TESTING.md",)
 IGNORE_DIRS = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "_backup-*")
-EXECUTABLE_NAMES = ("setup.command", "update_engine.command")
+EXECUTABLE_NAMES = ("setup.command", "update_engine.command", "screen.command")
 
 # Files that must never end up in a public release.
 FORBIDDEN_IN_ZIP = (".env", "id_rsa", "*.pem", "jas_state")
@@ -140,6 +140,8 @@ def sanity_checks(stage: Path) -> None:
         stage / "setup.command",
         stage / "update_engine.cmd",
         stage / "update_engine.command",
+        stage / "screen.cmd",
+        stage / "screen.command",
         stage / "START-HERE.txt",
         stage / "engine" / ".codex" / "skills" / "jas-import" / "scripts" / "run_jas_screening.py",
         stage / "engine" / "data" / "taxonomy" / "skill_taxonomy.yaml",
