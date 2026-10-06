@@ -317,7 +317,9 @@ def collect_job(
         ensure_signed_in(browser, profile)
         html = browser.page_html()
     (folder / "records.html").write_text(html, encoding="utf-8")
-    job = job_payload_from_html(html, base_url=effective_base)
+    # Relative CV links (file.php?...) live beside this page, under /internal/,
+    # not at the site root. The page URL is the base; a bare host would drop /internal/.
+    job = job_payload_from_html(html, base_url=records_url or effective_base)
     refno_label = refno or refno_from_url(records_url) or "the requested job"
     if not (job.get("refno") or "").strip():
         raise JobNotFoundError(f"no JAS job found for {refno_label} (page had no job reference)")

@@ -122,6 +122,21 @@ def test_parse_job_html_extracts_jd_and_candidates() -> None:
     assert candidate.supp_url is None
 
 
+# A relative CV link on the records page stays under /internal/, beside that page.
+def test_parse_job_html_resolves_relative_cv_link_under_internal() -> None:
+    relative = JOB_HTML.replace(
+        'href="https://jobs.polyu.edu.hk/internal/file.php?t=cv&amp;id=123456&amp;refno=190001010"',
+        'href="file.php?t=cv&amp;id=300880&amp;refno=260625010"',
+    )
+    detail = parse_job_html(
+        relative,
+        base_url="https://jobs.polyu.edu.hk/internal/records.php?refno=260625010",
+    )
+    assert detail.candidates[0].cv_url == (
+        "https://jobs.polyu.edu.hk/internal/file.php?t=cv&id=300880&refno=260625010"
+    )
+
+
 # Candidate fields follow header labels when JAS inserts a new column.
 def test_parse_job_html_maps_shifted_candidate_columns_by_header() -> None:
     shifted = JOB_HTML.replace(

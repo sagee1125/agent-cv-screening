@@ -252,12 +252,21 @@ def _query_value(url: str, key: str) -> str | None:
     return values[0].strip() if values else None
 
 
+# Join a link from a JAS page. A relative href such as file.php belongs next to the
+# page that contained it (/internal/records.php), not at the site root.
+def _join_link(origin: str, href: str) -> str:
+    base = origin.strip()
+    if not urlparse(base).path:
+        base = base.rstrip("/") + "/"
+    return urljoin(base, href.strip())
+
+
 # Resolve the first link href in a cell against the base URL.
 def _first_link_url(cell: dict[str, Any], origin: str) -> str | None:
     for link in cell["links"]:
         href = link["href"]
         if href:
-            return urljoin(origin.rstrip("/") + "/", href)
+            return _join_link(origin, href)
     return None
 
 
@@ -266,7 +275,7 @@ def _refno_from_cell(cell: dict[str, Any], origin: str) -> tuple[str, str | None
     for link in cell["links"]:
         refno = _query_value(link["href"], "refno")
         if refno:
-            return refno, urljoin(origin.rstrip("/") + "/", link["href"])
+            return refno, _join_link(origin, link["href"])
     text = _text(cell)
     match = re.search(r"(\d{6,})", text)
     return (match.group(1) if match else text), None
