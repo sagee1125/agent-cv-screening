@@ -20,7 +20,14 @@ if exist "%UV%" goto have_uv
 set UVARCH=x86_64
 if "%PROCESSOR_ARCHITECTURE%"=="ARM64" set UVARCH=aarch64
 echo Fetching the installer helper (uv, about 17 MB, one time)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-%UVARCH%-pc-windows-msvc.zip' -OutFile '%TEMP%\uv.zip' -UseBasicParsing; Expand-Archive -Force '%TEMP%\uv.zip' '%TEMP%\uvunpack' } catch { exit 1 }"
+rem Pinned on purpose. This used to be releases/latest, which hands every machine whatever uv was
+rem published most recently - and a bad build then breaks the install everywhere with nothing to
+rem fall back to. 0.12.23 (the "latest" on 2026-10-05) cannot finish `uv pip install` at all:
+rem it hangs silently during resolution with a session proxy set, and without one it dies on
+rem "failed to hardlink file ... os error 5". 0.12.18 completes the same install in 27 s.
+rem Bump this only after verifying the new version on a clean machine.
+set UVVER=0.12.18
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/download/%UVVER%/uv-%UVARCH%-pc-windows-msvc.zip' -OutFile '%TEMP%\uv.zip' -UseBasicParsing; Expand-Archive -Force '%TEMP%\uv.zip' '%TEMP%\uvunpack' } catch { exit 1 }"
 if not %errorlevel%==0 goto no_uv
 copy /y "%TEMP%\uvunpack\uv.exe" "%UV%" >nul 2>nul
 if not exist "%UV%" goto no_uv

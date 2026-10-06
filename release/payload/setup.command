@@ -18,8 +18,13 @@ if [ ! -x "$UV" ]; then
     arm64) ASSET="uv-aarch64-apple-darwin.tar.gz" ;;
     *)     ASSET="uv-x86_64-apple-darwin.tar.gz" ;;
   esac
+  # Pinned on purpose, and kept in step with setup.bat. This used to be releases/latest, which
+  # hands every machine whatever uv was published most recently - and a bad build then breaks the
+  # install everywhere with nothing to fall back to (see the note in setup.bat). Bump this only
+  # after verifying the new version on a clean machine.
+  UVVER="0.12.18"
   TMPDIR_UV="$(mktemp -d)"
-  if ! curl -fsSL "https://github.com/astral-sh/uv/releases/latest/download/$ASSET" -o "$TMPDIR_UV/uv.tgz"; then
+  if ! curl -fsSL "https://github.com/astral-sh/uv/releases/download/$UVVER/$ASSET" -o "$TMPDIR_UV/uv.tgz"; then
     echo ""
     echo "Could not download the installer helper. Check the internet connection"
     echo "(the download comes from github.com) and run setup.command again."
