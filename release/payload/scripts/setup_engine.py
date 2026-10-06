@@ -357,8 +357,11 @@ def main() -> int:
     log("Next steps:")
     log("  1. Restart WorkBuddy (quit fully, then open it again).")
     log("  2. Open Experts -> My Experts -> Vera.")
-    log("  3. Say: screen refno 260901004   (a demo job, safe to try).")
-    log("  4. Reports land on your Desktop, in the folder workbuddy-cv-screen.")
+    log("  3. In Chrome, open the PolyU JES internal pages and sign in first.")
+    log("     You must already be inside the system before you screen anything.")
+    log("  4. Then tell Vera: screen Ref.No xxxxxxxxx")
+    log("     xxxxxxxxx is a real Ref. No. from the internal PolyU JES system.")
+    log("  5. Reports land on your Desktop, in the folder workbuddy-cv-screen.")
     return 0
 
 

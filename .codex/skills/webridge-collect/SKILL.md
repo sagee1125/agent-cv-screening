@@ -56,8 +56,11 @@ venv/Scripts/python.exe .codex/skills/webridge-collect/scripts/run_webridge_coll
 - Writes `<collect-dir>/<refno>/records.html` + `cvs/<appno>.pdf` + `_webridge-manifest.json`.
 - WebBridge driver simulates a human: it opens the job list page, types the refno into the Ref no. filter,
   locates the job row, and opens its View link (falls back to the records URL directly when the row is not found).
+  If the list is split across pages, the same cursor turns to the next page and looks again, up to 40 pages,
+  before reporting the job as not found. A pager that loads a new page is followed the same way.
 - The human flow auto-focuses the new browser tab (CDP `Page.bringToFront`) and drives a visible ghost
-  cursor that glides to the filter, types the refno, and presses the View link, so HR watches the interaction.
+  cursor that glides to the filter, types the refno, turns pages when it has to, and presses the View link,
+  so HR watches the interaction.
 - Then runs `run_jas_import.py <folder>` -> `Desktop/workbuddy-cv-screen/<refno>/`.
 - Exit codes: `0` success/partial_success, `1` error, `2` need_input (`refno` or `jas_session`).
 - WebBridge daemon down -> the script auto-starts it (and waits for it to come up);

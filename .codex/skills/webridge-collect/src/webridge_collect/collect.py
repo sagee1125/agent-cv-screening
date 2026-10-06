@@ -23,9 +23,16 @@ from webridge_collect.login import ensure_signed_in
 COLLECT_ROOT_NAME = "jes_webridge"
 MANIFEST_NAME = "_webridge-manifest.json"
 
-# JS run in the browser: drive a visible ghost cursor to type the refno into the filter and press the row's View link.
-GHOST_CURSOR_JS = """(async () => {
-  const refno = %r;
+# How many list pages the human flow will open looking for one refno.
+# Past this, the search stops and reports the job as not found.
+MAX_LIST_PAGES = 40
+
+# JS run in the browser: type the refno into the filter, then turn list pages until the row's View link shows.
+# Placeholders are filled by list_search_js. typeFilter is false after a page reload, which starts blank.
+LIST_SEARCH_JS = r"""(async () => {
+  const refno = __REFNO__;
+  const typeFilter = __TYPE_FILTER__;
+  const MAX_PAGES = 40;
   const sleep = (ms) => new Promise(res => setTimeout(res, ms));
   let cursor = document.getElementById('jes-ghost-cursor');
   if (!cursor) {
@@ -36,40 +43,158 @@ GHOST_CURSOR_JS = """(async () => {
     document.body.appendChild(cursor);
   }
   const move = async (el) => {
+    try { el.scrollIntoView({block: 'center', inline: 'nearest'}); } catch (e) {}
     const rect = el.getBoundingClientRect();
     cursor.style.left = (rect.left + rect.width / 2 - 3) + 'px';
     cursor.style.top = (rect.top + rect.height / 2 - 3) + 'px';
     await sleep(450);
   };
-  // Type the reference number into the first (Ref no.) column search box, like a human.
-  const inputs = Array.from(document.querySelectorAll('thead input[aria-label="Search column"], thead input[placeholder*="Filter" i]'));
+  const isShown = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  };
+  const isDisabled = (el) => {
+    if (!el) return true;
+    if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true' || el.classList.contains('disabled')) return true;
+    const parent = el.parentElement;
+    return !!(parent && (parent.classList.contains('disabled') || parent.getAttribute('aria-disabled') === 'true'));
+  };
+  const isActive = (el) => {
+    if (!el) return false;
+    if (el.classList.contains('active') || el.getAttribute('aria-current') === 'page' || el.getAttribute('aria-current') === 'true') return true;
+    const parent = el.parentElement;
+    return !!(parent && (parent.classList.contains('active') || parent.getAttribute('aria-current') === 'page'));
+  };
+  const pageNumber = (el) => {
+    const raw = el.getAttribute('data-n');
+    if (raw && /^\d+$/.test(raw)) return Number(raw);
+    const text = (el.innerText || '').trim();
+    return /^\d+$/.test(text) ? Number(text) : null;
+  };
+  const destination = (el) => {
+    const raw = (el.getAttribute('href') || '').trim();
+    if (!raw || raw === '#' || raw.charAt(0) === '#' || /^javascript:/i.test(raw)) return '';
+    try { return new URL(raw, location.href).href; } catch (e) { return ''; }
+  };
+  const sameDocument = (url) => {
+    try {
+      const next = new URL(url);
+      return next.origin === location.origin && next.pathname === location.pathname && next.search === location.search;
+    } catch (e) { return false; }
+  };
+  const findRow = () => Array.from(document.querySelectorAll('table tbody tr')).find(
+    (row) => isShown(row) && (row.innerText || '').indexOf(refno) !== -1
+  );
+  const pagerControls = () => {
+    const scoped = Array.from(document.querySelectorAll(
+      'tfoot a, tfoot button, .pag a, .pag button, .pagination a, .pagination button, .pager a, .pager button, a[rel="next"], button[rel="next"]'
+    ));
+    const named = Array.from(document.querySelectorAll('a, button')).filter((el) => {
+      if (el.closest('thead') || el.closest('tbody')) return false;
+      const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      return el.getAttribute('rel') === 'next' || aria === 'next' || aria.indexOf('next page') !== -1
+        || /^(next|›|»|>|下一頁|下頁|下一页)$/i.test(text);
+    });
+    const seen = new Set();
+    const out = [];
+    scoped.concat(named).forEach((el) => {
+      if (seen.has(el)) return;
+      seen.add(el);
+      out.push(el);
+    });
+    return out;
+  };
+  const findNext = (step) => {
+    const controls = pagerControls().filter((el) => isShown(el) && !isDisabled(el));
+    const named = controls.find((el) => {
+      const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      return el.getAttribute('rel') === 'next' || aria === 'next' || aria.indexOf('next page') !== -1
+        || /^(next|›|»|>|下一頁|下頁|下一页)$/i.test(text);
+    });
+    if (named) return named;
+    const nums = controls.filter((el) => pageNumber(el) !== null);
+    const active = nums.find(isActive);
+    if (active) return nums.find((el) => pageNumber(el) === pageNumber(active) + 1) || null;
+    if (step === 0) return nums.find((el) => pageNumber(el) === 2) || null;
+    return null;
+  };
+  const pageMark = () => {
+    const active = document.querySelector('tfoot .active, .pag .active, .pagination .active, .pager .active, [aria-current="page"]');
+    const shown = Array.from(document.querySelectorAll('table tbody tr')).filter(isShown).slice(0, 3)
+      .map((row) => (row.innerText || '').slice(0, 40)).join('|');
+    return (active ? (active.getAttribute('data-n') || active.innerText || '') : '') + '|' + shown;
+  };
   let typed = false;
-  if (inputs.length) {
-    const filter = inputs[0];
-    await move(filter);
-    filter.focus();
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    for (let i = 0; i <= refno.length; i++) {
-      setter.call(filter, refno.slice(0, i));
-      filter.dispatchEvent(new Event('input', {bubbles: true}));
-      filter.dispatchEvent(new Event('keyup', {bubbles: true}));
-      await sleep(70);
+  if (typeFilter) {
+    const inputs = Array.from(document.querySelectorAll('thead input[aria-label="Search column"], thead input[placeholder*="Filter" i]'));
+    if (inputs.length) {
+      const filter = inputs[0];
+      await move(filter);
+      filter.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (let i = 0; i <= refno.length; i++) {
+        setter.call(filter, refno.slice(0, i));
+        filter.dispatchEvent(new Event('input', {bubbles: true}));
+        filter.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+        if (window.jQuery) { try { window.jQuery(filter).trigger('keyup'); } catch (e) {} }
+        await sleep(70);
+      }
+      await sleep(250);
+      typed = true;
     }
-    await sleep(250);
-    typed = true;
   }
-  // Find the job row and press its View link (visual press only; the script opens the link itself).
-  const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.innerText.includes(refno));
-  if (!row) return {typed: typed, clicked: false, reason: 'row-not-found'};
-  const link = Array.from(row.querySelectorAll('a')).find(a => /view/i.test(a.innerText || '')) || row.querySelector('a');
-  if (!link) return {typed: typed, clicked: false, reason: 'link-not-found'};
-  await move(link);
-  link.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
-  await sleep(150);
-  link.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true}));
-  await sleep(200);
-  return {typed: typed, clicked: true, href: link.href || '', text: (link.innerText || '').trim()};
+  let pagesTurned = 0;
+  let guard = pageMark();
+  for (let step = 0; step < MAX_PAGES; step++) {
+    const row = findRow();
+    if (row) {
+      const link = Array.from(row.querySelectorAll('a')).find((a) => /view/i.test(a.innerText || '')) || row.querySelector('a');
+      if (!link) return {typed: typed, clicked: false, reason: 'link-not-found', pages_turned: pagesTurned};
+      await move(link);
+      link.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
+      await sleep(150);
+      link.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true}));
+      await sleep(200);
+      return {typed: typed, clicked: true, href: link.href || '', text: (link.innerText || '').trim(), pages_turned: pagesTurned};
+    }
+    const next = findNext(step);
+    if (!next) return {typed: typed, clicked: false, reason: 'row-not-found', pages_turned: pagesTurned};
+    const dest = destination(next);
+    if (dest && !sameDocument(dest)) {
+      await move(next);
+      return {typed: typed, clicked: false, reason: 'next-page', href: dest, pages_turned: pagesTurned};
+    }
+    await move(next);
+    next.click();
+    await sleep(500);
+    const mark = pageMark();
+    if (mark === guard) return {typed: typed, clicked: false, reason: 'row-not-found', pages_turned: pagesTurned};
+    guard = mark;
+    pagesTurned += 1;
+  }
+  return {typed: typed, clicked: false, reason: 'row-not-found', pages_turned: pagesTurned};
 })()"""
+
+
+# Fill the list-search script for one page. The filter is typed only on the first page.
+def list_search_js(refno: str, *, type_filter: bool) -> str:
+    return (
+        LIST_SEARCH_JS
+        .replace("__REFNO__", json.dumps(refno))
+        .replace("__TYPE_FILTER__", "true" if type_filter else "false")
+    )
+
+
+# Read a page-turn count from the browser, treating anything unreadable as zero.
+def _page_turns(value: object) -> int:
+    try:
+        return max(0, int(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
 
 
 # Build the records URL for a refno: an explicit base URL wins (a non-standard deployment),
@@ -98,22 +223,41 @@ def _focus_current_tab(browser: WebBridgeClient) -> None:
 # Search the list page like a human: return (target URL, flow label) or (None, not_found).
 # The list URL and the tab-group label come from the active site profile, not from a
 # hard-coded demo shape, so the same flow drives the internal system unchanged.
+# When the matching row is on a later page, follow the pager — an in-page control is
+# clicked inside the script, and a link that loads a new page is opened here and searched again.
 def navigate_like_human(
     browser: WebBridgeClient, *, refno: str, list_url: str, records_url: str, tab_group_title: str
 ) -> tuple[str | None, str]:
     browser.navigate(list_url, new_tab=True, group_title=tab_group_title)
     _focus_current_tab(browser)
-    try:
-        found = browser.evaluate(GHOST_CURSOR_JS % refno)
-    except Exception:
-        found = None
-    if isinstance(found, dict) and found.get("clicked") and found.get("href"):
-        return str(found["href"]), "view_link"
-    # The refno was typed into the filter but no matching row appeared: report not found
-    # without navigating away, so HR sees the empty search result and the tab stays open.
-    if isinstance(found, dict) and found.get("typed") and not found.get("clicked"):
+    type_filter = True
+    pages_turned = 0
+    seen_hrefs: set[str] = set()
+    searched = False
+    while True:
+        try:
+            found = browser.evaluate(list_search_js(refno, type_filter=type_filter))
+        except Exception:
+            found = None
+        if not isinstance(found, dict):
+            break
+        turned = pages_turned + _page_turns(found.get("pages_turned"))
+        searched = searched or bool(found.get("typed")) or turned > 0
+        if found.get("clicked") and found.get("href"):
+            return str(found["href"]), "view_link_paged" if turned else "view_link"
+        next_href = str(found.get("href") or "") if found.get("reason") == "next-page" else ""
+        if next_href and next_href not in seen_hrefs and turned < MAX_LIST_PAGES:
+            seen_hrefs.add(next_href)
+            pages_turned = turned + 1
+            type_filter = False
+            browser.navigate(next_href, new_tab=False, group_title=tab_group_title)
+            _focus_current_tab(browser)
+            continue
+        break
+    # The list was actually searched and the row was not on any page reached.
+    if searched:
         return None, "not_found"
-    # Could not drive the list filter (DOM changed); fall back to the direct records URL.
+    # Could not drive the list (DOM changed); fall back to the direct records URL.
     return records_url, "fallback_direct_url"
 
 
@@ -235,8 +379,10 @@ def collect_job(
 __all__ = [
     "COLLECT_ROOT_NAME",
     "MANIFEST_NAME",
+    "MAX_LIST_PAGES",
     "build_records_url",
     "collect_job",
+    "list_search_js",
     "navigate_like_human",
     "origin_of",
 ]

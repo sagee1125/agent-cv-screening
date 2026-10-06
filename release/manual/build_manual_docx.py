@@ -42,7 +42,7 @@ from docx.shared import Inches, Pt, RGBColor
 OUT = Path(r"C:\Users\User\Desktop\CV-Screening-User-Setup-Manual.docx")
 GREY = RGBColor(0x80, 0x80, 0x80)
 MONO = "Consolas"
-VERSION = "1.2.4"
+VERSION = "1.2.6"
 
 STORE_URL = "https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc"
 KIMI_URL = "https://www.kimi.com/products/kimi-browser-extension"
@@ -87,16 +87,18 @@ BLOCKS: list[tuple[str, object]] = [
 
     ("pagebreak", None),
     ("h1", "3. Screen a Job"),
-    ("p", "Open Vera in WorkBuddy and send the job's reference number:"),
-    ("code", "screen refno 26xxxxxxxxx"),
-    ("p", "Replace **26xxxxxxxxx** with the real reference number — or paste the link to the job's "
-          "records page instead."),
+    ("p", "Before you send anything, open the PolyU JES internal pages in Chrome and sign in "
+          "until you are inside the system. Then open Vera and send a real internal Ref. No.:"),
+    ("code", "screen Ref.No xxxxxxxxx"),
+    ("p", "Replace **xxxxxxxxx** with a real Ref. No. from the internal PolyU JES system — or paste "
+          "the link to that job's records page. Screening does not start until you are signed in "
+          "on that web page."),
     ("ph", "a screening request typed into the Vera chat window"),
     ("p", "**For internal University jobs, four things must be true while the screening runs:**"),
     ("bullets", [
         "Chrome is open",
         "the **Kimi browser extension** is enabled — check **chrome://extensions**",
-        "you are signed in to the internal job system in Chrome",
+        "you are signed in on the PolyU JES internal pages and already inside the system",
         "the computer is on the campus network or connected to the University VPN",
     ]),
     ("ph", "chrome://extensions showing the Kimi extension enabled"),
@@ -178,7 +180,8 @@ BLOCKS: list[tuple[str, object]] = [
         "Paste your personal API key when asked.",
         "Wait for **Install complete.**",
         "Quit WorkBuddy, open it again, then open **Vera**.",
-        "Send: **screen refno 26xxxxxxxxx**",
+        "In Chrome, open the PolyU JES internal pages and sign in until you are inside the system.",
+        "Send: **screen Ref.No xxxxxxxxx** — a real Ref. No. from that internal system.",
         "The reports appear on your Desktop in **workbuddy-cv-screen**.",
     ]),
 ]

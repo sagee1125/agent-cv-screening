@@ -314,6 +314,118 @@ def test_collect_webridge_human_flow_view_link(tmp_path) -> None:
     assert manifest["human_flow"] == "view_link"
 
 
+# A list split across pages is followed: the next-page link is opened, then the row's View link.
+def test_navigate_like_human_follows_next_list_page() -> None:
+    class FakeBrowser:
+        # First look reports a pager link; the reloaded page then has the row.
+        def __init__(self):
+            self.urls = []
+            self.scripts = []
+
+        def navigate(self, url, *, new_tab=True, group_title=None):
+            self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            pass
+
+        def evaluate(self, code):
+            self.scripts.append(code)
+            if len(self.scripts) == 1:
+                return {
+                    "typed": True,
+                    "clicked": False,
+                    "reason": "next-page",
+                    "href": "https://jobs.polyu.edu.hk/internal/records.php?page=2",
+                }
+            return {
+                "typed": False,
+                "clicked": True,
+                "href": "https://jobs.polyu.edu.hk/internal/records.php?refno=190001010",
+                "text": "View",
+            }
+
+    browser = FakeBrowser()
+    target, flow = collect.navigate_like_human(
+        browser,  # type: ignore[arg-type]
+        refno="190001010",
+        list_url="https://jobs.polyu.edu.hk/internal/records.php",
+        records_url="https://jobs.polyu.edu.hk/internal/records.php?refno=190001010",
+        tab_group_title="JAS screening",
+    )
+    assert target == "https://jobs.polyu.edu.hk/internal/records.php?refno=190001010"
+    assert flow == "view_link_paged"
+    assert browser.urls == [
+        "https://jobs.polyu.edu.hk/internal/records.php",
+        "https://jobs.polyu.edu.hk/internal/records.php?page=2",
+    ]
+    assert "const typeFilter = true" in browser.scripts[0]
+    assert "const typeFilter = false" in browser.scripts[1]
+
+
+# An in-page pager (no reload) is recorded as paged once the script reports the turns.
+def test_navigate_like_human_records_in_page_turns() -> None:
+    class FakeBrowser:
+        def __init__(self):
+            self.urls = []
+
+        def navigate(self, url, *, new_tab=True, group_title=None):
+            self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            pass
+
+        def evaluate(self, code):
+            return {"typed": True, "clicked": True, "href": RECORDS_URL, "pages_turned": 2}
+
+    browser = FakeBrowser()
+    target, flow = collect.navigate_like_human(
+        browser,  # type: ignore[arg-type]
+        refno="2600827001",
+        list_url=DEMO_BASE_URL + "/",
+        records_url=RECORDS_URL,
+        tab_group_title="JES demo screening",
+    )
+    assert target == RECORDS_URL
+    assert flow == "view_link_paged"
+    assert browser.urls == [DEMO_BASE_URL + "/"]
+
+
+# The same next-page address is not opened twice, and the search then stops as not found.
+def test_navigate_like_human_stops_on_repeated_next_page() -> None:
+    class FakeBrowser:
+        def __init__(self):
+            self.urls = []
+
+        def navigate(self, url, *, new_tab=True, group_title=None):
+            self.urls.append(url)
+
+        def cdp(self, method, params=None):
+            pass
+
+        def evaluate(self, code):
+            return {
+                "typed": True,
+                "clicked": False,
+                "reason": "next-page",
+                "href": "https://jobs.polyu.edu.hk/internal/records.php?page=2",
+            }
+
+    browser = FakeBrowser()
+    target, flow = collect.navigate_like_human(
+        browser,  # type: ignore[arg-type]
+        refno="190001010",
+        list_url="https://jobs.polyu.edu.hk/internal/records.php",
+        records_url="https://jobs.polyu.edu.hk/internal/records.php?refno=190001010",
+        tab_group_title="JAS screening",
+    )
+    assert target is None
+    assert flow == "not_found"
+    assert browser.urls == [
+        "https://jobs.polyu.edu.hk/internal/records.php",
+        "https://jobs.polyu.edu.hk/internal/records.php?page=2",
+    ]
+
+
 # A records page that returns the wrong job is refused (never collects a wrong report).
 def test_collect_webridge_refuses_wrong_job(tmp_path, monkeypatch) -> None:
     async def fake_fetch_html(url, cookie_file=None, allowed_hosts=None):

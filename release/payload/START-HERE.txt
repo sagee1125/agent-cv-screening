@@ -46,17 +46,14 @@ WINDOWS
        setup.bat
     so any error message stays visible.)
 4. Quit WorkBuddy completely and open it again.
-5. Open  Experts -> My Experts -> Vera  and give it a real internal job
-   number, for example:
-       screen refno 26xxxxxxxxx
-   This screens the University's internal job pages. Before it starts, make
-   sure Chrome is open with the Kimi extension enabled, that you are signed in
-   to the internal job system in Chrome, and that you are on the campus network
-   (or VPN). Vera tells you if one of these is missing.
+5. Open  Experts -> My Experts -> Vera.
+   Before you send anything, open Chrome, go to the PolyU JES internal pages,
+   and sign in until you are inside the system. Keep Chrome open, with the
+   Kimi extension enabled, and stay on the campus network or the University VPN.
+   Then send:
+       screen Ref.No xxxxxxxxx
+   xxxxxxxxx is a real Ref. No. from the internal PolyU JES system.
    Reports appear on your Desktop in the folder  workbuddy-cv-screen.
-   (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
-   file as described in "Which jobs are screened" below, then say:
-       screen refno 260901004 )
 
 
 MAC - TRY THIS FIRST: double-click  setup.command
@@ -74,17 +71,14 @@ MAC - TRY THIS FIRST: double-click  setup.command
 3. When it asks for your personal API key, paste it and press Enter
    (the input is hidden on screen - that is normal).
 4. Wait for  Self-test passed  and  Install complete.
-5. Quit WorkBuddy completely and open it again, then open Vera and give it a
-   real internal job number, for example:
-       screen refno 26xxxxxxxxx
-   This screens the University's internal job pages. Before it starts, make
-   sure Chrome is open with the Kimi extension enabled, that you are signed in
-   to the internal job system in Chrome, and that you are on the campus network
-   (or VPN). Vera tells you if one of these is missing.
+5. Quit WorkBuddy completely and open it again, then open Vera.
+   Before you send anything, open Chrome, go to the PolyU JES internal pages,
+   and sign in until you are inside the system. Keep Chrome open, with the
+   Kimi extension enabled, and stay on the campus network or the University VPN.
+   Then send:
+       screen Ref.No xxxxxxxxx
+   xxxxxxxxx is a real Ref. No. from the internal PolyU JES system.
    Reports appear on your Desktop in the folder  workbuddy-cv-screen.
-   (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
-   file as described in "Which jobs are screened" below, then say:
-       screen refno 260901004 )
 
 
 MAC - NO TERMINAL AT ALL: let WorkBuddy install it for you
@@ -96,22 +90,20 @@ MAC - NO TERMINAL AT ALL: let WorkBuddy install it for you
 2. Open WorkBuddy and start a NEW conversation (any assistant).
 3. Paste this message:
 
-   請幫我安裝 CV 篩選引擎：在 ~/Downloads/CV-Screening-Setup 資料夾裡執行
-   bash setup.command。key.txt 已在資料夾內，安裝器會自動讀取並刪除；
-   完成後回報結果。
+   Please install the CV screening engine: in the folder
+   ~/Downloads/CV-Screening-Setup, run bash setup.command. key.txt is
+   already in that folder. The installer reads it and then deletes it.
+   When it finishes, tell me the result.
 
 4. When it finishes, quit WorkBuddy completely and open it again.
-5. Open  Experts -> My Experts -> Vera  and give it a real internal job
-   number, for example:
-       screen refno 26xxxxxxxxx
-   This screens the University's internal job pages. Before it starts, make
-   sure Chrome is open with the Kimi extension enabled, that you are signed in
-   to the internal job system in Chrome, and that you are on the campus network
-   (or VPN). Vera tells you if one of these is missing.
+5. Open  Experts -> My Experts -> Vera.
+   Before you send anything, open Chrome, go to the PolyU JES internal pages,
+   and sign in until you are inside the system. Keep Chrome open, with the
+   Kimi extension enabled, and stay on the campus network or the University VPN.
+   Then send:
+       screen Ref.No xxxxxxxxx
+   xxxxxxxxx is a real Ref. No. from the internal PolyU JES system.
    Reports appear on your Desktop in the folder  workbuddy-cv-screen.
-   (To try the public demo instead, first add  JES_SITE_MODE=0  to the .env
-   file as described in "Which jobs are screened" below, then say:
-       screen refno 260901004 )
 
 
 UPDATES
@@ -142,8 +134,9 @@ Screening them needs three things at the time of a run:
          https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc
      or, if that page will not open, Kimi's own page:
          https://www.kimi.com/products/kimi-browser-extension
-  3. You are signed in to the internal job system in Chrome, and the computer
-     is on the campus network or connected to the University VPN.
+  3. You have already opened the PolyU JES internal pages in Chrome and signed
+     in until you are inside the system. The computer is on the campus network
+     or connected to the University VPN. Do this before you send a Ref. No.
 
 Before the first screening Vera checks all three and tells you exactly which
 one is missing - if it says the extension is not installed it also gives you
@@ -174,7 +167,8 @@ TROUBLESHOOTING
   run setup again.
 - Screening the internal pages fails: Vera's message names the one thing to
   fix. In order, check that Chrome is open, that the Kimi extension is enabled
-  in chrome://extensions, that you are signed in to the internal job system in
-  Chrome, and that you are on the campus network / VPN. To fall back to the
-  public demo jobs while troubleshooting, set  JES_SITE_MODE=0  in the .env
+  in chrome://extensions, that you have signed in on the PolyU JES internal
+  pages and are inside the system, and that you are on the campus network or
+  VPN. To fall back to the public demo jobs while troubleshooting, set
+  JES_SITE_MODE=0  in the .env
   file (see "Which jobs are screened").
