@@ -658,3 +658,19 @@ async def test_text_fallback_length_rejection_names_the_jd_length() -> None:
     assert "cv_chars=" in error_message
     # The model's own limit travels through verbatim inside the original exception text.
     assert "maximum context length" in error_message
+
+
+# Profile lines that state "N years experience ..." must become dated experience for scoring.
+def test_declared_experience_years_from_summary() -> None:
+    from cv_parser.helpers import apply_content_fallback, extract_declared_experience_years, normalize_schema
+
+    summary = (
+        "5 years experience in business analysis, data governance and data quality management. "
+        "Skilled in collaborating with cross-functional teams."
+    )
+    assert extract_declared_experience_years(summary) == 5.0
+    structured = apply_content_fallback(summary, normalize_schema({"summary": summary}))
+    assert structured["experience_years_declared"] == 5.0
+    assert len(structured["experience"]) == 1
+    row = structured["experience"][0]
+    assert row["start_date"] and row["end_date"] == "Present"

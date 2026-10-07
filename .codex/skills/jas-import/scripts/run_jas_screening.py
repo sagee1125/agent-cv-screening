@@ -31,6 +31,7 @@ from jas_import.fetch import download_to_if_changed, fetch_job_payload
 from jas_import.skill import parse_job_skill
 from screening_core.candidate_id import appno_from_filename, is_jas_refno, records_url_for_refno, refno_from_url
 from screening_core.hr_output import (
+    CV_PACK_SUBDIR,
     HR_PACK_FOLDER,
     RANKING_OVERVIEW_HTML,
     RESUME_LINKS_JSON,
@@ -229,6 +230,23 @@ def _stage_cvs_by_appno(work_dir: Path, cvs: list[tuple[str, Path]]) -> list[tup
     return staged
 
 
+# Copy staged CVs beside the HTML report pack so the board opens local PDFs, not JES URLs.
+def _publish_cvs_to_pack(job_dir: Path, staged: list[tuple[str, Path]]) -> None:
+    """Publish downloaded CV PDFs under <job-dir>/cvs/, skipping unchanged files."""
+    pack_dir = job_dir / CV_PACK_SUBDIR
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    for appno, src in staged:
+        if not src.is_file():
+            continue
+        dest = pack_dir / f"{safe_pack_id(appno, fallback='unknown')}.pdf"
+        if dest.is_file():
+            same_size = dest.stat().st_size == src.stat().st_size
+            same_mtime = dest.stat().st_mtime >= src.stat().st_mtime
+            if same_size and same_mtime:
+                continue
+        shutil.copy2(src, dest)
+
+
 # Pair each staged CV's application number with the post that applicant applied for.
 # Returns [] for a single-post job (no post values on the page), so the pipeline is called
 # exactly as before there. An applicant whose post value is blank is left out on purpose:
@@ -410,9 +428,10 @@ def _run_screening(
     # arrives newest-first, and both stage their CVs through this function.
     cvs = order_by_records_page(cvs, job.get("candidates"))
     staged = _stage_cvs_by_appno(work_dir, cvs)
+    _publish_cvs_to_pack(job_dir, staged)
     manifest = _build_manifest(job, staged, download_failures=download_failures)
     (work_dir / "jas-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    # Persist appno -> online CV URL so the ranking board can link to the online resume.
+    # Persist appno -> online CV URL for audit only; the HTML board links to local cvs/*.pdf.
     resume_links = {
         str(candidate.get("appno")): str(candidate.get("cv_url"))
         for candidate in job.get("candidates", [])

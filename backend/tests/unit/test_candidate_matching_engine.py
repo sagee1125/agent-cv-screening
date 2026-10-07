@@ -75,6 +75,32 @@ def _cv() -> dict:
     }
 
 
+# Summary-only CVs that declare "N years experience in ..." must not score as zero years.
+def test_declared_experience_years_from_profile_summary() -> None:
+    from cv_parser.helpers import apply_content_fallback, normalize_schema
+
+    summary = (
+        "5 years experience in business analysis, data governance and data quality management. "
+        "Skilled in collaborating with cross-functional teams."
+    )
+    cv = apply_content_fallback(summary, normalize_schema({"summary": summary}))
+    jd = {
+        "must_skills": [
+            {"skill_id": "dg_1", "canonical_skill": "data_governance", "display_name": "Data Governance", "weight": 2.0},
+            {"skill_id": "sql_1", "canonical_skill": "sql", "display_name": "SQL", "weight": 1.0},
+        ],
+        "preferred_skills": [],
+        "language_requirements": [],
+        "education_requirement": {"minimum_degree": "bachelor", "is_mandatory": True},
+        "visa_requirement": {"requirement_type": "not_required"},
+        "experience_requirement": {"minimum_years": 3},
+        "jd_overview": {"job_title": "Data Governance Specialist"},
+    }
+    result = match_candidate(cv, build_matching_config(jd), "2026-10-07")
+    experience = next(item for item in result["radar_dimensions"] if item["dimension_id"] == "relevant_experience")
+    assert experience["reasoning"]["facts"]["relevant_years"] >= 5.0
+
+
 # Verifies fixed IDs, activation, normalization, and canonical hash stability.
 def test_config_is_canonical_and_normalizes_active_weights() -> None:
     first = build_matching_config(_jd())

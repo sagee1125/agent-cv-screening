@@ -36,7 +36,12 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from jd_parser.post_split import PostSplit, split_advertisement
 from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
 from screening_core.board_tooltip import public_radar_dimensions
-from screening_core.hr_output import RANKING_OVERVIEW_HTML, RESUME_LINKS_JSON, candidate_match_stem, cv_link_for_appno
+from screening_core.hr_output import (
+    CV_PACK_SUBDIR,
+    RANKING_OVERVIEW_HTML,
+    candidate_match_stem,
+    local_cv_href,
+)
 from screening_core.input_policy import (
     ALLOWED_URL_HOSTS,
     extra_allowed_hosts_from_env,
@@ -1158,18 +1163,27 @@ def _run_matching_engine(
     )
 
 
-# Loads the optional appno -> online resume URL map written by the collector.
-def _load_resume_links(out_dir: Path) -> dict[str, str]:
-    path = out_dir / RESUME_LINKS_JSON
-    if not path.is_file():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return {str(key): str(value) for key, value in payload.items() if value}
+# Build appno -> relative href map for CV PDFs published beside the HTML report pack.
+def _local_cv_hrefs(report_dir: Path, rows: list[dict]) -> dict[str, str]:
+    """Return relative cvs/<appno>.pdf links for rows whose local CV file exists."""
+    hrefs: dict[str, str] = {}
+    for row in rows:
+        appno = row.get("appno")
+        if not appno:
+            continue
+        href = local_cv_href(appno, report_dir)
+        if href:
+            hrefs[str(appno)] = href
+    return hrefs
+
+
+# Digest of published CV files so the board rebuilds when a download changes.
+def _published_cv_digest(report_dir: Path) -> str:
+    cvs_dir = report_dir / CV_PACK_SUBDIR
+    if not cvs_dir.is_dir():
+        return ""
+    parts = [f"{path.name}:{path.stat().st_size}" for path in sorted(cvs_dir.glob("*.pdf"))]
+    return sha256_text("|".join(parts))
 
 
 # Variable keys from matching interview questions that may be published to HR reports.
@@ -1178,14 +1192,12 @@ PUBLIC_QUESTION_VARIABLE_KEYS = frozenset({"requirement", "skill", "context"})
 
 
 # Public ranking fields plus radar tooltip/interview numbers from matching detail (allow-listed reasoning only, no raw CV text).
-def _board_row(row: dict, resume_links: dict[str, str] | None = None) -> dict:
+def _board_row(row: dict, local_cv_hrefs: dict[str, str] | None = None) -> dict:
     public = {key: value for key, value in row.items() if not str(key).startswith("_")}
-    if resume_links and row.get("appno"):
-        # Only a link the application number identifies may reach HR-facing HTML: the page's own CV
-        # file name can carry the candidate's name, and a name in an href is a name in the report.
-        resume_url = cv_link_for_appno(resume_links.get(str(row.get("appno"))), row.get("appno"))
-        if resume_url:
-            public["resume_url"] = resume_url
+    if local_cv_hrefs and row.get("appno"):
+        href = local_cv_hrefs.get(str(row.get("appno")))
+        if href:
+            public["local_cv_href"] = href
     detail_path = row.get("_detail")
     if not detail_path:
         return public
@@ -1348,12 +1360,13 @@ def _generate_reports(
         row["_pdf"] = pdf_out
     if not rows:
         return reports
-    resume_links = _load_resume_links(out_dir)
-    comparison_rows = [_board_row(row, resume_links) for row in rows]
+    all_rows = list(rows) + list(unassigned or [])
+    published_hrefs = _local_cv_hrefs(report_dir, all_rows)
+    comparison_rows = [_board_row(row, published_hrefs) for row in rows]
     # An applicant whose post could not be read is ranked nowhere, so the board must carry it in
     # its needs-confirmation block instead of dropping it (FR-7). They are appended after the
     # ranked rows, so every ranked row keeps its position and its matching board-row file.
-    comparison_rows += [_board_row(row, resume_links) for row in (unassigned or [])]
+    comparison_rows += [_board_row(row, published_hrefs) for row in (unassigned or [])]
     html_out = report_dir / RANKING_OVERVIEW_HTML
     # JD content feeds the board panel, so its digest must invalidate the cached board.
     jd_digest, jd_text_arg, jd_json_arg = _report_jd_inputs(out_dir, jd_sources, jd_text)
@@ -1369,7 +1382,7 @@ def _generate_reports(
         position=args.position,
         refno=getattr(args, "refno", None),
         candidate_fingerprints=candidate_fps,
-        resume_links_digest=sha256_text(json.dumps(resume_links, sort_keys=True, ensure_ascii=False)),
+        resume_links_digest=_published_cv_digest(report_dir),
         jd_digest=jd_digest,
         post_order=post_order,
     )

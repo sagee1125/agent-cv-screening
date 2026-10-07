@@ -10,6 +10,8 @@ from urllib.parse import unquote, urlparse
 
 HR_PACK_FOLDER = "workbuddy-cv-screen"
 PIPELINE_SUBDIR = "_pipeline"
+# Original CV PDFs downloaded during screening (WebBridge session), linked from the HTML board.
+CV_PACK_SUBDIR = "cvs"
 RANKING_OVERVIEW_HTML = "ranking-overview.html"
 RANKING_COMPARISON_XLSX = "ranking-comparison.xlsx"
 RESUME_LINKS_JSON = "resume-links.json"
@@ -124,6 +126,25 @@ def candidate_match_stem(appno: object) -> str:
     return safe_pack_id(appno, fallback="unknown")
 
 
+# True when a href is a simple relative path safe to embed in the HTML board (no traversal).
+def is_safe_relative_href(value: object) -> bool:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or text.startswith(("/", "\\\\")):
+        return False
+    return ".." not in text.split("/")
+
+
+# Return a relative href to the locally downloaded CV PDF when it exists in the report pack.
+def local_cv_href(appno: object, report_dir: Path | str) -> str:
+    stem = safe_pack_id(appno, fallback="")
+    if not stem:
+        return ""
+    path = Path(report_dir) / CV_PACK_SUBDIR / f"{stem}.pdf"
+    if not path.is_file():
+        return ""
+    return f"{CV_PACK_SUBDIR}/{stem}.pdf"
+
+
 # Allow only http(s) resume links on HR-facing HTML; reject javascript: and other schemes.
 def safe_http_url(value: object) -> str:
     text = str(value or "").strip()
@@ -186,6 +207,7 @@ def open_hr_file(path: Path | str) -> None:
 
 
 __all__ = [
+    "CV_PACK_SUBDIR",
     "HR_PACK_FOLDER",
     "PIPELINE_SUBDIR",
     "RANKING_COMPARISON_XLSX",
@@ -194,6 +216,8 @@ __all__ = [
     "candidate_match_stem",
     "cv_link_for_appno",
     "default_hr_pack_root",
+    "is_safe_relative_href",
+    "local_cv_href",
     "is_host_session_dir",
     "is_internal_output_dir",
     "looks_like_jas_export_dir",

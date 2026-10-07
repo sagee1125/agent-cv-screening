@@ -66,7 +66,7 @@ from cv_parser.prompts import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v4-p1-fields"
+PARSER_CACHE_VERSION = "pii-redaction-v5-declared-experience-years"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent

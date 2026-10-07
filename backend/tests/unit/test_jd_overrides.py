@@ -379,7 +379,7 @@ def test_hr_sourced_tooltip_is_labelled_as_conversation() -> None:
 
     html = _parsed_groups(parsed)
 
-    assert "Moved by HR (conversation)" in html
+    assert "Moved by you during screening" in html
     assert "tag-meta-hr" in html
     # An untouched requirement still reads as auto-extracted from the ad.
     assert "JD source (auto-extracted)" in html
@@ -429,10 +429,10 @@ def test_conditions_label_reports_hr_supplement_count() -> None:
     labelled = _conditions_line(
         {"hr_conditions": {"applied": True, "changed": 7, "collected_at": "2026-09-14"}}
     )
-    assert "Conditions: job ad + 7 HR supplements" in labelled
+    assert "Conditions: job ad + 7 additional conditions you confirmed" in labelled
 
     single = _conditions_line({"hr_conditions": {"applied": True, "changed": 1}})
-    assert "Conditions: job ad + 1 HR supplement<" in single
+    assert "Conditions: job ad + 1 additional condition you confirmed<" in single
 
 
 # Education and work-authorisation lines carry an HR marker when HR changed them.
@@ -451,7 +451,7 @@ def test_education_gate_shows_hr_marker_in_the_report() -> None:
 
     assert "Education:" in html
     assert "hr-mark" in html
-    assert "Added by HR (conversation)" in html
+    assert "Added by you during screening" in html
 
 
 # --- Per-post derivation grill (FR-9) ------------------------------------------------------

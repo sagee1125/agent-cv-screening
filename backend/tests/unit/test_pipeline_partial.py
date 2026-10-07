@@ -229,8 +229,15 @@ def test_pipeline_resume_skips_existing_extracted(tmp_path, monkeypatch, capsys)
     jd = tmp_path / "jd.json"
     jd.write_text("{}", encoding="utf-8")
     extracted = out_dir / "extracted-good.json"
+    from screening_core.report_fingerprint import CV_PARSER_LOGIC_VERSION
+
     extracted.write_text(
-        json.dumps({"structured_data": {"name": "Resumed", "skills": ["Python"]}}),
+        json.dumps(
+            {
+                "structured_data": {"name": "Resumed", "skills": ["Python"]},
+                "cv_parser_logic": CV_PARSER_LOGIC_VERSION,
+            }
+        ),
         encoding="utf-8",
     )
     parse_calls: list[str] = []
@@ -533,18 +540,13 @@ def test_board_row_publishes_only_allowlisted_question_variables(tmp_path) -> No
     assert questions[2] == {"priority": "low", "question": "Legacy plain question."}
 
 
-# A CV link the application number does not identify must not reach the board row, because the
-# page's own file name can carry the candidate's name (measured: .../uploads/CV_<Given>_<Surname>.pdf).
-def test_board_row_drops_a_cv_link_that_names_the_candidate() -> None:
+# The board links to locally downloaded CV PDFs, not JES file.php URLs.
+def test_board_row_carries_local_cv_href_only() -> None:
     module = _import_pipeline()
-    named = {"123456": "https://jobs.polyu.edu.hk/uploads/CV_Hana_Ito.pdf"}
-    assert "resume_url" not in module._board_row({"rank": 1, "appno": "123456"}, named)
-    # The appno-identified shapes the report may link still come through.
-    for url in (
-        "https://host/uploads/123456.pdf",
-        "https://host/file.php?t=cv&id=123456&refno=260917001",
-    ):
-        assert module._board_row({"rank": 1, "appno": "123456"}, {"123456": url})["resume_url"] == url
+    row = module._board_row({"rank": 1, "appno": "123456"}, {"123456": "cvs/123456.pdf"})
+    assert row.get("local_cv_href") == "cvs/123456.pdf"
+    assert "resume_url" not in row
+    assert "local_cv_href" not in module._board_row({"rank": 1, "appno": "123456"}, {})
 
 
 # Stored HR conditions must not be applied until the current conversation confirms them.

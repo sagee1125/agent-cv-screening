@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from screening_core.candidate_id import format_candidate_label  # noqa: F401  (kept for API compatibility)
-from screening_core.hr_output import candidate_match_stem, safe_http_url
+from screening_core.hr_output import candidate_match_stem, is_safe_relative_href
 from screening_core.posts import base_name, group_by_post
 
 _DIMENSION_LABELS = {
@@ -699,12 +699,12 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
     """
 
 
-# Render the online resume link cell; em dash when no URL is known.
+# Render a link to the locally downloaded CV PDF; em dash when the file was not collected.
 def _resume_cell(row: dict[str, Any]) -> str:
-    resume_url = safe_http_url(row.get("resume_url"))
-    if not resume_url:
-        return "<span class='muted'>—</span>"
-    return f"<a href='{_esc(resume_url)}' target='_blank' rel='noopener'>Resume</a>"
+    local_href = str(row.get("local_cv_href") or "").strip()
+    if is_safe_relative_href(local_href):
+        return f"<a href='{_esc(local_href)}'>CV</a>"
+    return "<span class='muted'>—</span>"
 
 
 # Remove email, phone and contact-name patterns from free JD text before it is rendered.
@@ -759,10 +759,10 @@ def _provenance_origin(provenance: Any) -> str | None:
 _TIP_DEFAULT = ("JD source (auto-extracted)", "")
 _TIP_BY_ORIGIN = {
     "hr_supplement": (
-        "Added by HR (conversation)",
+        "Added by you during screening",
         "Added during the conversation; the job ad does not state this.",
     ),
-    "hr_moved": ("Moved by HR (conversation)", ""),
+    "hr_moved": ("Moved by you during screening", ""),
 }
 
 
@@ -772,7 +772,7 @@ def _hr_mark(provenance: Any) -> str:
     if origin not in _TIP_BY_ORIGIN:
         return ""
     heading = _TIP_BY_ORIGIN[origin][0]
-    return f" <span class='hr-mark' title='{_esc(heading)}'>HR</span>"
+    return f" <span class='hr-mark' title='{_esc(heading)}'>You</span>"
 
 
 # State which conditions produced this ranking, so a reader knows what it is based on.
@@ -785,8 +785,8 @@ def _conditions_line(parsed: dict | None) -> str:
         except (TypeError, ValueError):
             changed = 0
     if changed > 0:
-        plural = "supplement" if changed == 1 else "supplements"
-        label = f"Conditions: job ad + {changed} HR {plural}"
+        plural = "condition" if changed == 1 else "conditions"
+        label = f"Conditions: job ad + {changed} additional {plural} you confirmed"
         title = f" title='{_esc(str(conditions.get('collected_at') or ''))}'"
     else:
         label = "Conditions: job ad only"
@@ -1133,7 +1133,7 @@ def _ranking_table(ranked: list[dict[str, Any]]) -> str:
     return (
         "<table>"
         "<thead><tr><th>Rank</th><th>Application No.</th><th>Score</th><th>Tier</th>"
-        "<th>Resume</th></tr></thead>"
+        "<th>CV</th></tr></thead>"
         f"<tbody>{''.join(table_rows)}</tbody></table>"
     )
 
@@ -1156,8 +1156,8 @@ def _needs_confirmation(rows: list[dict[str, Any]]) -> str:
         detail = f"post value on the records page: {_esc(raw)}" if raw else "no post value on the records page"
         items.append(f"<li>Application No. {appno} — {detail}</li>")
     return (
-        "<section class='note' aria-label='Needs HR confirmation'>"
-        "<h2>Needs HR confirmation</h2>"
+        "<section class='note' aria-label='Needs your confirmation'>"
+        "<h2>Needs your confirmation</h2>"
         "<p>These applicants are not ranked: the records page did not state which post they "
         "applied for, and guessing would score them against the wrong job description. Confirm "
         "their post and re-run.</p>"

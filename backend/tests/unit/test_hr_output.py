@@ -125,6 +125,17 @@ def test_cv_link_keeps_a_query_identified_url() -> None:
 
 # The gate fails closed: an unrecognised but harmless file name loses the link rather than
 # risk publishing a name, and an unusable URL or a missing appno yields no link at all.
+def test_local_cv_href_points_at_pack_cvs(tmp_path: Path) -> None:
+    from screening_core.hr_output import CV_PACK_SUBDIR, local_cv_href
+
+    pack = tmp_path / "260625010"
+    cvs = pack / CV_PACK_SUBDIR
+    cvs.mkdir(parents=True)
+    (cvs / "305511.pdf").write_bytes(b"%PDF")
+    assert local_cv_href("305511", pack) == f"{CV_PACK_SUBDIR}/305511.pdf"
+    assert local_cv_href("999999", pack) == ""
+
+
 def test_cv_link_fails_closed() -> None:
     assert cv_link_for_appno("https://host/uploads/scan_of_resume.pdf", "260907004") == ""
     assert cv_link_for_appno("https://host/uploads/260907004.pdf", "") == ""

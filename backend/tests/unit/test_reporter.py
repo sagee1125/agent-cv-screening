@@ -206,7 +206,7 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
                 "appno": "260901007",
                 "total_score": 57.4,
                 "tier": "low",
-                "resume_url": "https://example.test/cvs/260901007.pdf",
+                "local_cv_href": "cvs/260901007.pdf",
                 "radar_dimensions": [
                     {"id": "core_skill_match", "label": "Core Skill Match", "score": 50},
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
@@ -218,10 +218,10 @@ def test_html_board_resume_links_and_explicit_labels(tmp_path: Path) -> None:
         ],
     )
     text = out.read_text(encoding="utf-8")
-    # Resume column links to the online CV.
-    assert "<th>Resume</th>" in text
-    assert "href='https://example.test/cvs/260901007.pdf'" in text
-    assert ">Resume</a>" in text
+    # CV column links to the locally downloaded PDF beside the report pack.
+    assert "<th>CV</th>" in text
+    assert "href='cvs/260901007.pdf'" in text
+    assert ">CV</a>" in text
     # Labels show the application No. only; the refno lives in the page title.
     assert "Application No.: 260901007" in text
     # Radar spells out full dimension names, wraps them, and pads the viewBox so nothing clips.
@@ -680,7 +680,7 @@ def test_html_board_table_link_uses_sanitized_stem(tmp_path: Path) -> None:
     assert "Application No.: 260901/007" in text
 
 
-# Unsafe resume URLs are dropped instead of rendered as clickable links.
+# Unsafe local CV hrefs are dropped instead of rendered as clickable links.
 def test_html_board_rejects_unsafe_resume_url(tmp_path: Path) -> None:
     from app.services.reporter import ReporterService
 
@@ -698,7 +698,7 @@ def test_html_board_rejects_unsafe_resume_url(tmp_path: Path) -> None:
                 "appno": "260901007",
                 "total_score": 57.4,
                 "tier": "low",
-                "resume_url": "javascript:alert(1)",
+                "local_cv_href": "../secrets.pdf",
                 "radar_dimensions": [
                     {"id": "core_skill_match", "label": "Core Skill Match", "score": 50},
                     {"id": "relevant_experience", "label": "Relevant Experience", "score": 40},
@@ -708,8 +708,8 @@ def test_html_board_rejects_unsafe_resume_url(tmp_path: Path) -> None:
         ],
     )
     text = out.read_text(encoding="utf-8")
-    assert "javascript:" not in text
-    assert ">Resume</a>" not in text
+    assert "../secrets" not in text
+    assert ">CV</a>" not in text
 
 
 # Match pages still show dimension cards when rows carry score-only radar axes.

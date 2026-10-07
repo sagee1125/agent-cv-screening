@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from functools import lru_cache
 from typing import Any
 
@@ -269,6 +270,101 @@ def extract_year_from_text(text: str | None) -> str | None:
         return None
     match = re.search(r"(19|20)\d{2}", str(text))
     return match.group(0) if match else None
+
+
+# Patterns such as "5 years experience in ..." or "5+ years of relevant work experience".
+_DECLARED_YEARS_PATTERNS = (
+    re.compile(
+        r"\b(\d+(?:\.\d+)?)\s*\+?\s*years?\s+(?:of\s+)?(?:[\w-]+\s+){0,8}experience\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(\d+(?:\.\d+)?)\s*\+?\s*years?\s+experience\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:over|more\s+than|at\s+least)\s+(\d+(?:\.\d+)?)\s+years?\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+# Read a self-declared duration such as "5 years experience in business analysis".
+def extract_declared_experience_years(text: str | None) -> float | None:
+    if not text:
+        return None
+    normalized = re.sub(r"\s+", " ", str(text)).strip()
+    for pattern in _DECLARED_YEARS_PATTERNS:
+        match = pattern.search(normalized)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+    return None
+
+
+# Turn a declared duration into ISO start/end ending at Present (for the matching engine).
+def experience_range_from_years(years: float, *, reference: date | None = None) -> tuple[str, str]:
+    today = reference or date.today()
+    months = max(1, int(round(float(years) * 12)))
+    start_month_index = today.year * 12 + today.month - months
+    start_year, start_month = divmod(start_month_index - 1, 12)
+    start_month += 1
+    return f"{start_year:04d}-{start_month:02d}", "Present"
+
+
+# Stamp declared years onto experience rows and synthesize one row from a summary-only CV.
+def enrich_experience_from_declared_years(structured: dict[str, Any]) -> dict[str, Any]:
+    summary = str(structured.get("summary") or "").strip()
+    declared = extract_declared_experience_years(summary)
+    experience = structured.get("experience")
+    if not isinstance(experience, list):
+        experience = []
+    for item in experience:
+        if not isinstance(item, dict):
+            continue
+        if item.get("start_date") or item.get("end_date"):
+            continue
+        years = extract_declared_experience_years(
+            " ".join(
+                str(part or "")
+                for part in (
+                    item.get("description"),
+                    item.get("job_title"),
+                    item.get("company"),
+                    item.get("period"),
+                )
+            )
+        )
+        if years is None:
+            continue
+        start_date, end_date = experience_range_from_years(years)
+        item["start_date"] = start_date
+        item["end_date"] = end_date
+        item["period"] = combine_period(start_date, end_date)
+        item["is_current"] = True
+        declared = declared or years
+    if declared is not None:
+        structured["experience_years_declared"] = declared
+    if not experience and summary and declared:
+        start_date, end_date = experience_range_from_years(declared)
+        experience = [
+            {
+                "company": None,
+                "job_title": None,
+                "description": summary,
+                "start_date": start_date,
+                "end_date": end_date,
+                "period": combine_period(start_date, end_date),
+                "is_current": True,
+                "skills_used": [],
+            }
+        ]
+        structured["experience"] = experience
+    else:
+        structured["experience"] = experience
+    return structured
 
 
 def extract_date_range_from_text(text: str | None) -> tuple[str | None, str | None]:
@@ -558,6 +654,10 @@ def normalize_experience_items(value: Any) -> list[dict[str, Any]]:
                 start_date, end_date = extract_date_range_from_text(context)
             if period and not start_date and not end_date:
                 start_date, end_date = extract_date_range_from_text(period)
+            if not start_date and not end_date:
+                declared_years = extract_declared_experience_years(context)
+                if declared_years is not None:
+                    start_date, end_date = experience_range_from_years(declared_years)
             if not period:
                 period = combine_period(start_date, end_date)
             is_current = _is_current_marker(end_date)
@@ -1307,4 +1407,4 @@ def apply_content_fallback(raw_text: str, structured: dict[str, Any]) -> dict[st
         enriched["location"] = extract_location_fallback(raw_text)
     if not enriched.get("work_authorization"):
         enriched["work_authorization"] = extract_work_authorization_fallback(raw_text)
-    return enriched
+    return enrich_experience_from_declared_years(enriched)
