@@ -246,7 +246,7 @@ def test_board_post_without_delta_points_at_the_shared_panel(tmp_path: Path) -> 
 def test_board_lists_unplaced_rows_for_hr(tmp_path: Path) -> None:
     rows = _rows() + [_row("260901009", "", 0, 55.0)]
     text = _board(tmp_path, rows, post_jds=_post_jds())
-    assert "Needs HR confirmation" in text
+    assert "Needs your confirmation" in text
     assert "no post value on the records page" in text
     assert "260901009" in text
     # An unplaced row is never given a rank of its own.
@@ -256,7 +256,7 @@ def test_board_lists_unplaced_rows_for_hr(tmp_path: Path) -> None:
 # A multi-post page where no applicant's post could be read still explains itself (FR-7).
 def test_board_all_unplaced_still_explains_itself(tmp_path: Path) -> None:
     text = _board(tmp_path, [_row("260901009", "", 0, 55.0)], post_jds=_post_jds())
-    assert "Needs HR confirmation" in text
+    assert "Needs your confirmation" in text
     assert "<details class='post-section'" not in text
 
 

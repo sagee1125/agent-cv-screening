@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     jd_parser_mode: str = "rule"
     # Optional model override for the LLM skill refiner (defaults to llm_model).
     jd_parser_llm_model: str | None = None
+    # CV hybrid refiner (second Zhipu pass on redacted text); defaults to llm_model.
+    cv_parser_llm_model: str | None = None
+    cv_parser_hybrid_enabled: bool = True
     # Local Qwen3-0.6B fine-tuned extractor settings (used when mode == "qwen").
     jd_qwen_model_id: str = "Rithankoushik/job-parser-model-qwen"
     jd_qwen_max_new_tokens: int = 512

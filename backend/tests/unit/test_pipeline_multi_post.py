@@ -453,6 +453,8 @@ def test_gate_lets_an_explicit_discard_past_an_unreadable_file(tmp_path: Path) -
 
 # Builds a two-applicant, two-post out_dir plus the args a re-run would pass.
 def _resync_fixture(tmp_path: Path) -> tuple[Path, dict, Any]:
+    from screening_core.report_fingerprint import CV_PARSER_LOGIC_VERSION, JD_PARSER_LOGIC_VERSION
+
     module = _import_pipeline()
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -463,9 +465,16 @@ def _resync_fixture(tmp_path: Path) -> tuple[Path, dict, Any]:
         path = tmp_path / f"{appno}.pdf"
         path.write_bytes(b"%PDF-1.4 " + appno.encode())
         cvs[appno] = path
-        for prefix in ("extracted-", "score-", "detail-"):
+        (out_dir / f"extracted-{appno}.json").write_text(
+            json.dumps({"cv_parser_logic": CV_PARSER_LOGIC_VERSION}),
+            encoding="utf-8",
+        )
+        for prefix in ("score-", "detail-"):
             (out_dir / f"{prefix}{appno}.json").write_text("{}", encoding="utf-8")
-    (out_dir / "jd-parse.json").write_text("{}", encoding="utf-8")
+    (out_dir / "jd-parse.json").write_text(
+        json.dumps({"parser_logic": JD_PARSER_LOGIC_VERSION}),
+        encoding="utf-8",
+    )
 
     def args_for(posts: dict[str, str]) -> argparse.Namespace:
         return argparse.Namespace(

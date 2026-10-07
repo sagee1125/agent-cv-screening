@@ -129,3 +129,56 @@ Important:
 - Put spoken/written languages in "languages", NOT in "skills".
 - Return JSON only, no markdown fences.
 """.format(known_skills=", ".join(sorted(KNOWN_SKILLS)[:50]))
+
+CV_REFINER_SYSTEM_PROMPT = """You refine a draft CV parse into accurate structured JSON.
+
+The CV text is privacy-redacted (names, emails, phones removed). A first-pass parser produced a draft.
+Your job: fix experience timeline and split work history correctly; expand skills from explicit CV text.
+
+Output ONE JSON object with the same schema as the draft (summary, skills, languages, education,
+experience, projects, certifications, publications, location, work_authorization).
+
+Rules:
+- Do NOT return name, email, or phone.
+- Each experience entry = ONE job/employer period. Split merged jobs into separate objects.
+- Merge all bullets for the same job into one description string.
+- Set start_date and end_date as ISO "YYYY-MM" when the CV states dates; use "Present" for ongoing roles.
+- If the CV states "N years experience" without dates, infer a Present-ended range only when no better dates exist.
+- skills: concrete technical/professional terms explicitly in the CV (not spoken languages).
+- languages: spoken/written languages only, separate from skills.
+- Use only explicit CV facts; do not invent employers, degrees, or tools.
+- Return valid JSON only, no markdown."""
+
+CV_REFINER_MAX_CHARS = 14_000
+
+
+# Builds the user message for hybrid CV refinement (redacted text + draft + optional JD).
+def build_cv_refiner_user_prompt(
+    masked_cv_text: str,
+    draft_structured: dict,
+    jd_text: str | None,
+) -> str:
+    import json
+
+    from cv_parser.helpers import compress_cv_text
+
+    clipped = compress_cv_text(raw_text=masked_cv_text, max_chars=CV_REFINER_MAX_CHARS)
+    draft_json = json.dumps(draft_structured, ensure_ascii=False, indent=2)
+    if len(draft_json) > 8000:
+        draft_json = draft_json[:8000] + "\n... (draft truncated)"
+    jd_block = ""
+    if jd_text and jd_text.strip():
+        jd_block = f"\n\nJob context (for relevance only, do not copy requirements as CV facts):\n{jd_text[:4000]}\n"
+    return f"""Refine this draft CV parse using the redacted CV text below.
+
+Focus:
+1) Split experience into one object per job with correct company/title when visible.
+2) Fill start_date/end_date (ISO YYYY-MM) or Present.
+3) Expand skills and per-job skills_used from explicit mentions.
+
+Draft JSON (first pass):
+{draft_json}
+{jd_block}
+Redacted CV text:
+{clipped}
+"""
