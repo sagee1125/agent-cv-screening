@@ -103,6 +103,28 @@ def test_experience_requirement_plain() -> None:
     assert req["maximum_years"] == 2
 
 
+def test_experience_requirement_or_more_words() -> None:
+    """'three or more years' is a lower bound of 3."""
+    service = JDParserService()
+    req = service._extract_experience_requirement("three or more years of relevant work experience")
+    assert req["minimum_years"] == 3
+    assert req["maximum_years"] is None
+
+
+def test_skill_bucket_key_treats_spaces_and_underscores_as_one_skill() -> None:
+    """data governance and data_governance must not be scored as two requirements."""
+    service = JDParserService()
+    spaced = {"canonical_skill": "data governance"}
+    underscored = {"canonical_skill": "data_governance"}
+    assert service._skill_bucket_key(spaced) == service._skill_bucket_key(underscored) == "data_governance"
+
+
+def test_honours_degree_is_a_mandatory_bachelor() -> None:
+    """A good honours degree is a mandatory bachelor, not an absent degree."""
+    service = JDParserService()
+    assert service._minimum_degree("have a good honours degree in computer science") == "bachelor"
+
+
 def test_experience_requirement_missing() -> None:
     """No year phrase returns null bounds."""
     service = JDParserService()

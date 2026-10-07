@@ -144,9 +144,23 @@ class JDParserService:
         "what you need",
     )
     PREFERRED_SECTION_MARKERS = ("preferred", "nice to have", "plus", "bonus")
-    # Matches ASCII digits or short Chinese numerals used in year requirements.
-    _NUMBER_PATTERN = r"(?:\d{1,2}|[一二三四五六七八九十兩两]{1,3})"
-    RESPONSIBILITY_SECTION_MARKERS = ("responsibilit", "what you will do", "you will")
+    _EN_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+    _NUMBER_PATTERN = (
+        r"(?:\d{1,2}|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b|"
+        r"[一二三四五六七八九十兩两]{1,3})"
+    )
+    RESPONSIBILITY_SECTION_MARKERS = ("responsibilit", "what you will do", "you will", "duties", "duty")
     # Recognizes section headings (e.g. "Preferred qualifications:") so the heading
     # word wins over a "qualification" substring inside the must marker set.
     HEADING_SECTION_RE = re.compile(
@@ -276,6 +290,8 @@ class JDParserService:
                 if self._should_ignore_line(line) or self._is_metadata_line(line):
                     continue
                 if section_name == "other" and not self._line_has_skill_cue(line):
+                    continue
+                if section_name == "responsibility":
                     continue
                 skills = self._extract_candidates_from_line(line)
                 if self._is_degree_field_line(line):
@@ -515,8 +531,13 @@ class JDParserService:
     def _extract_candidates_from_line(self, line: str) -> list[str]:
         candidates: set[str] = set()
         for matched in self._skill_token_re.finditer(line):
-            canonical = self._token_to_canonical.get(matched.group(0))
+            token = matched.group(0)
+            canonical = self._token_to_canonical.get(token)
             if canonical and not self._is_language_value(canonical):
+                full_name = canonical.replace("_", " ")
+                # "teams" must not become Microsoft Teams unless the longer name is present.
+                if " " in full_name and " " not in token:
+                    continue
                 candidates.add(canonical)
 
         for pattern in self.SKILL_INTRO_PATTERNS:
@@ -567,6 +588,29 @@ class JDParserService:
         key = (value or "").strip().casefold().replace("_", " ")
         return key in self._language_token_to_canonical
 
+    # Split an advantage clause off the rest of the line so only that clause is optional.
+    def _language_clauses(self, line: str) -> list[tuple[str, bool]]:
+        cue_at: tuple[int, str] | None = None
+        for cue in self.PREFERRED_CUES:
+            position = line.find(cue)
+            if position == -1:
+                continue
+            if cue_at is None or position < cue_at[0]:
+                cue_at = (position, cue)
+        if cue_at is None:
+            return [(line, False)]
+        position = cue_at[0]
+        cut = max(line.rfind(",", 0, position), line.rfind(";", 0, position), line.rfind("，", 0, position))
+        if cut <= 0:
+            return [(line, True)]
+        head, tail = line[:cut].strip(" ,;"), line[cut:].strip(" ,;")
+        clauses: list[tuple[str, bool]] = []
+        if head:
+            clauses.append((head, False))
+        if tail:
+            clauses.append((tail, True))
+        return clauses or [(line, False)]
+
     def _extract_language_requirements(self, text: str) -> list[dict[str, Any]]:
         """Extract language requirements from JD lines, separate from job skills."""
         lowered = self._clean_text(text)
@@ -578,31 +622,31 @@ class JDParserService:
             for line in lines:
                 if self._should_ignore_line(line):
                     continue
-                matched_names = self._languages_in_line(line)
-                if not matched_names:
-                    continue
-                target, _ = self._line_target_and_weight(section_name, line)
-                is_mandatory = target != "preferred"
-                level = self._infer_language_level(line)
-                for name in matched_names:
-                    key = name.casefold()
-                    if key not in found:
-                        found[key] = {
-                            "language": name,
-                            "level": level,
-                            "is_mandatory": is_mandatory,
-                            "provenance": "",
-                            "_source_line": line,
-                        }
-                        order.append(key)
+                for fragment, clause_preferred in self._language_clauses(line):
+                    matched_names = self._languages_in_line(fragment)
+                    if not matched_names:
                         continue
-                    current = found[key]
-                    if is_mandatory:
-                        current["is_mandatory"] = True
-                    if _LANGUAGE_LEVEL_RANK.get(level, 0) > _LANGUAGE_LEVEL_RANK.get(current["level"], 0):
-                        current["level"] = level
-                        # Provenance follows the line that set the emitted level.
-                        current["_source_line"] = line
+                    target, _ = self._line_target_and_weight(section_name, fragment)
+                    is_mandatory = (not clause_preferred) and target != "preferred"
+                    level = self._infer_language_level(fragment)
+                    for name in matched_names:
+                        key = name.casefold()
+                        if key not in found:
+                            found[key] = {
+                                "language": name,
+                                "level": level,
+                                "is_mandatory": is_mandatory,
+                                "provenance": "",
+                                "_source_line": fragment,
+                            }
+                            order.append(key)
+                            continue
+                        current = found[key]
+                        if is_mandatory:
+                            current["is_mandatory"] = True
+                        if _LANGUAGE_LEVEL_RANK.get(level, 0) > _LANGUAGE_LEVEL_RANK.get(current["level"], 0):
+                            current["level"] = level
+                            current["_source_line"] = fragment
 
         return [found[key] for key in order]
 
@@ -653,24 +697,29 @@ class JDParserService:
 
     @staticmethod
     def _skill_bucket_key(item: dict[str, Any]) -> str:
-        """Return the canonical key used to dedupe skill items across buckets."""
-        return str(item.get("canonical_skill") or item.get("extracted_name") or "").strip().casefold()
+        """Return one id for a skill, so spaces and underscores do not count twice."""
+        raw = str(item.get("canonical_skill") or item.get("extracted_name") or item.get("display_name") or "")
+        return "_".join(raw.strip().casefold().replace("-", " ").replace("_", " ").split())
 
     def _backfill_refined_skills(
         self,
         structured_data: dict[str, Any],
         rule_must: list[dict[str, Any]],
         rule_preferred: list[dict[str, Any]],
+        jd_text: str,
     ) -> None:
-        """Restore rule-extracted skills that LLM refinement dropped from either bucket."""
+        """Restore qualification skills the model missed. Do not restore skills it removed."""
         must = list(structured_data.get("must_skills") or [])
         preferred = list(structured_data.get("preferred_skills") or [])
         seen = {key for key in (self._skill_bucket_key(item) for item in must + preferred) if key}
+        evidence = self._qualification_text(jd_text)
 
         def append_missing(bucket: list[dict[str, Any]], source: list[dict[str, Any]]) -> None:
             for item in source:
                 key = self._skill_bucket_key(item)
                 if not key or key in seen or len(bucket) >= MAX_SKILLS_PER_BUCKET:
+                    continue
+                if not self._skill_explicitly_named(key, evidence):
                     continue
                 bucket.append(dict(item))
                 seen.add(key)
@@ -683,6 +732,162 @@ class JDParserService:
             item["priority_order"] = idx
         structured_data["must_skills"] = must[:MAX_SKILLS_PER_BUCKET]
         structured_data["preferred_skills"] = preferred[:MAX_SKILLS_PER_BUCKET]
+
+    # Qualifications text when that heading exists; otherwise the whole advert.
+    def _qualification_text(self, jd_text: str) -> str:
+        sections = self._split_sections(self._clean_text(jd_text))
+        must_lines = sections.get("must") or []
+        if must_lines:
+            return "\n".join(must_lines)
+        return jd_text
+
+    # True when the advert states this skill by its own name, not a short ambiguous alias.
+    def _skill_explicitly_named(self, canonical: str, text: str) -> bool:
+        folded = text.casefold()
+        full = canonical.replace("_", " ").strip()
+        if not full:
+            return False
+        aliases = [full, *self.skill_synonyms.get(canonical, [])]
+        phrases = [alias for alias in aliases if " " in alias] if " " in full else aliases
+        return any(
+            re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", folded)
+            for phrase in phrases
+            if phrase
+        )
+
+    # Map model skill names onto the taxonomy and drop anything that does not fit.
+    def _canonicalize_skill_items(self, items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        kept: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            raw = str(item.get("extracted_name") or item.get("display_name") or item.get("canonical_skill") or "")
+            key = self._token_to_canonical.get(raw.strip().casefold())
+            if not key:
+                key = self._token_to_canonical.get(raw.strip().casefold().replace("_", " "))
+            if not key or self._is_language_value(key) or key in seen:
+                continue
+            seen.add(key)
+            copied = dict(item)
+            stored = "_".join(key.replace("_", " ").split())
+            label = stored.replace("_", " ")
+            copied["canonical_skill"] = stored
+            copied["display_name"] = label.title()
+            copied["extracted_name"] = label
+            copied["skill_id"] = f"{stored}_{len(kept) + 1}"
+            kept.append(copied)
+        for index, item in enumerate(kept, start=1):
+            item["priority_order"] = index
+        return kept
+
+    # Read a degree word, including a PolyU honours degree, as bachelor/master/phd.
+    def _minimum_degree(self, text: str) -> str:
+        if re.search(r"\b(ph\.?d|doctorate|doctoral)\b", text):
+            return "phd"
+        if re.search(r"\bmaster'?s?\b", text):
+            return "master"
+        if re.search(r"\b(bachelor'?s?|honou?rs)\b", text) and re.search(r"\bdegree\b", text):
+            return "bachelor"
+        if re.search(r"\bbachelor'?s?\b", text):
+            return "bachelor"
+        return "none"
+
+    # Apply degree, years, and languages from the model when it returned them.
+    def _apply_llm_requirements(self, structured_data: dict[str, Any], result: Any) -> None:
+        education = getattr(result, "education", None)
+        if isinstance(education, dict):
+            current = dict(structured_data.get("education_requirement") or {})
+            degree = str(education.get("minimum_degree") or "").strip().casefold()
+            if degree in {"bachelor", "master", "phd", "none"}:
+                current["minimum_degree"] = degree
+            field = education.get("field_of_study")
+            if isinstance(field, str) and field.strip():
+                current["field_of_study"] = field.strip()
+            if "is_mandatory" in education:
+                current["is_mandatory"] = bool(education.get("is_mandatory"))
+            elif current.get("minimum_degree") not in (None, "", "none"):
+                current["is_mandatory"] = True
+            structured_data["education_requirement"] = current
+
+        experience = getattr(result, "experience", None)
+        if isinstance(experience, dict) and experience.get("minimum_years") is not None:
+            try:
+                years = int(experience["minimum_years"])
+            except (TypeError, ValueError):
+                years = None
+            if years is not None:
+                structured_data["experience_requirement"] = {
+                    "minimum_years": years,
+                    "maximum_years": None,
+                    "raw_text": str(experience.get("raw_text") or f"{years} or more years"),
+                }
+
+        languages = getattr(result, "languages", None)
+        if isinstance(languages, list) and languages:
+            normalized = self._normalize_llm_languages(languages)
+            if normalized:
+                structured_data["language_requirements"] = self._keep_rule_languages(
+                    normalized,
+                    structured_data.get("language_requirements") or [],
+                )
+
+    # Map model language rows onto the canonical names and allowed levels.
+    def _normalize_llm_languages(self, languages: list[Any]) -> list[dict[str, Any]]:
+        found: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        allowed_levels = {"native", "fluent", "business", "basic"}
+        for item in languages:
+            if not isinstance(item, dict):
+                continue
+            raw = str(item.get("language") or "").strip()
+            display = self._language_token_to_canonical.get(raw.casefold())
+            if not display:
+                continue
+            level = str(item.get("level") or "business").strip().casefold()
+            if level not in allowed_levels:
+                level = "business"
+            key = display.casefold()
+            row = {
+                "language": display,
+                "level": level,
+                "is_mandatory": bool(item.get("is_mandatory")),
+                "provenance": "",
+            }
+            if key not in found:
+                found[key] = row
+                order.append(key)
+                continue
+            if row["is_mandatory"]:
+                found[key]["is_mandatory"] = True
+            if _LANGUAGE_LEVEL_RANK.get(level, 0) > _LANGUAGE_LEVEL_RANK.get(found[key]["level"], 0):
+                found[key]["level"] = level
+        return [found[key] for key in order]
+
+    # Keep a language the rules already found when the model omits it.
+    def _keep_rule_languages(
+        self,
+        llm_rows: list[dict[str, Any]],
+        rule_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged = [dict(row) for row in llm_rows]
+        seen = {str(row.get("language") or "").casefold() for row in merged}
+        for row in rule_rows:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("language") or "").casefold()
+            if not key or key in seen:
+                continue
+            merged.append(
+                {
+                    "language": row.get("language"),
+                    "level": row.get("level") or "business",
+                    "is_mandatory": bool(row.get("is_mandatory")),
+                    "provenance": row.get("provenance") or "",
+                }
+            )
+            seen.add(key)
+        return merged
 
     def _needles_for_language(self, language: str) -> list[str]:
         """Collect display name and aliases used to locate a language mention."""
@@ -725,13 +930,23 @@ class JDParserService:
                 return {"minimum_years": count, "maximum_years": None, "raw_text": plus_match.group(0)}
 
         lower_prefix = re.search(
-            rf"(?:不少於|不少于|至少|最少|不低於|不低于|超過|超过|at least)\s*({number})\s*{units}",
+            rf"(?:不少於|不少于|至少|最少|不低於|不低于|超過|超过|at least|minimum of)\s*({number})\s*{units}",
             normalized,
         )
         if lower_prefix:
             count = self._to_int_or_none(lower_prefix.group(1))
             if count is not None:
                 return {"minimum_years": count, "maximum_years": None, "raw_text": lower_prefix.group(0)}
+
+        or_more = re.search(
+            rf"({number})\s+(?:or more|or above)\s+{units}|({number})\s+{units}\s+(?:or more|or above)",
+            normalized,
+        )
+        if or_more:
+            token = or_more.group(1) or or_more.group(2)
+            count = self._to_int_or_none(token)
+            if count is not None:
+                return {"minimum_years": count, "maximum_years": None, "raw_text": or_more.group(0)}
 
         lower_suffix = re.search(
             rf"({number})\s*(?:\u5e74\u4ee5\u4e0a|\u5e74\u6216\u4ee5\u4e0a|\u5e74\u6216\u66f4\u591a)",
@@ -755,6 +970,9 @@ class JDParserService:
         """Convert an ASCII or Chinese numeral token to an int, or None."""
         if value.isdigit():
             return int(value)
+        word = JDParserService._EN_NUMBER_WORDS.get(value.casefold())
+        if word is not None:
+            return word
         return _cn_numeral_to_int(value)
 
     def _build_preprocessed_payload(self, text: str) -> dict[str, Any]:
@@ -968,6 +1186,7 @@ class JDParserService:
                 "provenance": empty_skill_provenance(),
             }
 
+        degree = self._minimum_degree(normalized_cleaned)
         structured_data: dict[str, Any] = {
             "must_skills": [build_skill_item(skill, idx + 1, 1.0) for idx, skill in enumerate(must_skills)],
             "preferred_skills": [
@@ -975,9 +1194,9 @@ class JDParserService:
             ],
             "language_requirements": language_requirements,
             "education_requirement": {
-                "minimum_degree": "bachelor" if "bachelor" in normalized_cleaned else "none",
+                "minimum_degree": degree,
                 "field_of_study": self._extract_education_fields(cleaned_input),
-                "is_mandatory": "bachelor" in normalized_cleaned,
+                "is_mandatory": degree != "none",
                 "provenance": "",
             },
             "visa_requirement": {
@@ -1010,9 +1229,13 @@ class JDParserService:
                 if result.must_skills or result.preferred_skills:
                     rule_must = structured_data["must_skills"]
                     rule_preferred = structured_data["preferred_skills"]
-                    structured_data["must_skills"] = self._drop_language_skill_items(result.must_skills)
-                    structured_data["preferred_skills"] = self._drop_language_skill_items(result.preferred_skills)
-                    self._backfill_refined_skills(structured_data, rule_must, rule_preferred)
+                    canon_must = self._canonicalize_skill_items(self._drop_language_skill_items(result.must_skills))
+                    canon_pref = self._canonicalize_skill_items(self._drop_language_skill_items(result.preferred_skills))
+                    if canon_must or canon_pref:
+                        structured_data["must_skills"] = canon_must
+                        structured_data["preferred_skills"] = canon_pref
+                        self._backfill_refined_skills(structured_data, rule_must, rule_preferred, cleaned_input)
+                self._apply_llm_requirements(structured_data, result)
                 if result.jd_overview:
                     structured_data["jd_overview"] = result.jd_overview
             else:

@@ -13,6 +13,9 @@ class JDEnrichmentResult:
     provider_name: str
     must_skills: list[dict[str, Any]] = field(default_factory=list)
     preferred_skills: list[dict[str, Any]] = field(default_factory=list)
+    education: dict[str, Any] | None = None
+    experience: dict[str, Any] | None = None
+    languages: list[dict[str, Any]] | None = None
     jd_overview: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
     raw_output: Any = None

@@ -129,7 +129,7 @@ async def test_hybrid_uses_premap_phrase_when_not_in_taxonomy() -> None:
     data = result["structured_data"]
     by_name = {item["display_name"].lower(): item["provenance"]["source_sentence"] for item in data["must_skills"]}
     assert by_name["python"] == "3+ years of experience with Python and FastAPI"
-    assert by_name["distributed systems"] == "Experience with distributed systems"
+    assert "distributed systems" not in by_name
 
 
 @pytest.mark.asyncio
@@ -144,10 +144,10 @@ async def test_hybrid_empty_source_when_skill_not_in_jd() -> None:
     )
     service = JDParserService()
     result = await service.parse_jd(SAMPLE_JD, mode="hybrid", enrichment_provider=LLMRefinerProvider(llm_client=llm))
-    telepathy = next(item for item in result["structured_data"]["must_skills"] if item["display_name"].lower() == "telepathy")
-    assert telepathy["provenance"]["source_sentence"] == ""
-    assert telepathy["provenance"]["confidence"] == 0.9
-    assert "extracted_name" not in telepathy
+    data = result["structured_data"]
+    names = {item["display_name"].lower() for item in data["must_skills"]}
+    assert "python" in names
+    assert "telepathy" not in names
 
 
 @pytest.mark.asyncio

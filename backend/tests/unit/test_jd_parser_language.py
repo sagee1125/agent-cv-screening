@@ -98,6 +98,55 @@ async def test_putonghua_and_mandarin_collapse_to_mandarin() -> None:
 
 
 @pytest.mark.asyncio
+async def test_advantage_clause_does_not_make_earlier_languages_optional() -> None:
+    """Putonghua can be an advantage while English and Chinese on the same line stay required."""
+    jd = """Qualifications
+Applicants should have a good command of both written and spoken English and Chinese, fluency in Putonghua would be an advantage.
+"""
+    service = JDParserService()
+    result = await service.parse_jd(jd)
+    languages = {item["language"]: item for item in result["structured_data"]["language_requirements"]}
+    assert languages["English"]["is_mandatory"] is True
+    assert languages["Chinese"]["is_mandatory"] is True
+    assert languages["Mandarin"]["is_mandatory"] is False
+
+
+@pytest.mark.asyncio
+async def test_llm_language_list_keeps_omitted_advantage_language() -> None:
+    """A model that forgets Putonghua does not erase the optional language the rules found."""
+    from jd_parser.providers.base import JDEnrichmentResult
+
+    class _Provider:
+        name = "hybrid"
+
+        async def refine(self, **_kwargs: object) -> JDEnrichmentResult:
+            return JDEnrichmentResult(
+                provider_name="hybrid",
+                must_skills=[{
+                    "display_name": "Sql",
+                    "canonical_skill": "sql",
+                    "extracted_name": "sql",
+                    "weight": 1.0,
+                    "provenance": {},
+                }],
+                languages=[
+                    {"language": "English", "level": "fluent", "is_mandatory": True},
+                    {"language": "Chinese", "level": "fluent", "is_mandatory": True},
+                ],
+            )
+
+    jd = """Qualifications
+Applicants should have a good command of both written and spoken English and Chinese, fluency in Putonghua would be an advantage.
+"""
+    service = JDParserService()
+    result = await service.parse_jd(jd, enrichment_provider=_Provider())
+    languages = {item["language"]: item for item in result["structured_data"]["language_requirements"]}
+    assert languages["English"]["is_mandatory"] is True
+    assert languages["Chinese"]["is_mandatory"] is True
+    assert languages["Mandarin"]["is_mandatory"] is False
+
+
+@pytest.mark.asyncio
 async def test_hybrid_strips_languages_from_refined_skills() -> None:
     """LLM-refined language labels are dropped from skill buckets."""
     llm = FakeLLM(

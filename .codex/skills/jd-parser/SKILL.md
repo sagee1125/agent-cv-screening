@@ -45,7 +45,7 @@ venv/Scripts/python.exe .codex/skills/jd-parser/scripts/run_jd_parse.py --jd-tex
 ## Behavior notes
 
 - On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0.
-- The REST endpoints `POST /api/v1/jobs` and `POST /api/v1/jobs/{id}/parse-jd` share the same rule parser. Hybrid/qwen LLM enrichment stays on the REST adapter only.
+- The screening CLI uses Zhipu when `ZAI_API_KEY` is set: the model fills skills, degree, years, and languages, then names are mapped onto the taxonomy. A failed model call keeps the rule result. `JD_PARSER_MODE=rule` forces the rules. Hybrid/qwen on the REST API is unchanged.
 
 ## Example
 
