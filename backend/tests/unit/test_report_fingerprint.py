@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 from screening_core.report_fingerprint import (
+    CV_PARSER_LOGIC_VERSION,
+    LEGACY_SCORER_LOGIC_VERSION,
+    MATCHING_ALGORITHM_VERSION,
     board_report_fingerprint,
     candidate_report_fingerprint,
+    cv_parser_logic_changed,
     input_run_payload,
     jd_inputs_changed,
     load_fingerprints,
     post_changed_slugs,
     save_fingerprints,
+    scoring_logic_changed,
     stale_cv_slugs,
 )
 
@@ -85,6 +90,10 @@ def test_input_fingerprint_detects_jd_and_cv_changes(tmp_path) -> None:
         cv_hashes={"123456": "aaa"},
     )
     assert jd_inputs_changed(first, second)
+    assert not jd_inputs_changed({}, first)
+    saved_before_parser_stamp = dict(first)
+    saved_before_parser_stamp.pop("parser", None)
+    assert jd_inputs_changed(saved_before_parser_stamp, first)
     third = input_run_payload(
         engine="matching",
         position="PA",
@@ -94,6 +103,47 @@ def test_input_fingerprint_detects_jd_and_cv_changes(tmp_path) -> None:
     )
     assert stale_cv_slugs(second, third) == ["123456"]
     assert not jd_inputs_changed({}, first)
+
+
+# CV parser or scoring logic bumps invalidate cached work without treating the JD as edited.
+def test_logic_version_stamps_invalidate_resume(tmp_path) -> None:
+    jd = tmp_path / "jd.txt"
+    jd.write_text("role A", encoding="utf-8")
+
+    def payload(**overrides: object) -> dict:
+        base = input_run_payload(
+            engine="matching",
+            position="PA",
+            refno="1",
+            jd_paths=[jd],
+            cv_hashes={"123456": "aaa"},
+        )
+        base.update(overrides)
+        return base
+
+    baseline = payload()
+    assert baseline["cv_parser"] == CV_PARSER_LOGIC_VERSION
+    assert baseline["matching"] == MATCHING_ALGORITHM_VERSION
+
+    saved_before_cv_stamp = dict(baseline)
+    saved_before_cv_stamp.pop("cv_parser", None)
+    assert cv_parser_logic_changed(saved_before_cv_stamp, baseline)
+    assert not cv_parser_logic_changed({}, baseline)
+
+    older_cv = payload(cv_parser="old-parser")
+    assert cv_parser_logic_changed(older_cv, baseline)
+
+    legacy = payload(engine="legacy")
+    assert legacy["legacy_scorer"] == LEGACY_SCORER_LOGIC_VERSION
+    saved_before_legacy = dict(legacy)
+    saved_before_legacy.pop("legacy_scorer", None)
+    assert scoring_logic_changed(saved_before_legacy, legacy)
+    assert not scoring_logic_changed(baseline, legacy)
+    assert scoring_logic_changed(
+        payload(matching="old-matching"),
+        baseline,
+    )
+
 
 # The JD digest changes the board fingerprint so a JD edit rebuilds the ranking board.
 def test_board_fingerprint_changes_with_jd_digest() -> None:

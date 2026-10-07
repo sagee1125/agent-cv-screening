@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from cv_parser.service import PARSER_CACHE_VERSION as CV_PARSER_LOGIC_VERSION
+from scorer.matching.contracts import ALGORITHM_VERSION as MATCHING_ALGORITHM_VERSION
+
 # v3: board radar axes carry native-tooltip reasoning payload (Option A, PRD-REPORT-GEN-001).
 # v4: radar axes print full dimension names plus on-chart scores, tooltip cards auto-size,
 #     and the candidate match page shows an always-visible dimension breakdown (F1.3-F1.6).
@@ -14,7 +17,13 @@ from typing import Any
 # v7: the candidate page is keyed on the post applied for, so a multi-post advertisement
 #     rebuilds an applicant's page when they move post (PRD-Multi_Post Section 6).
 REPORT_FINGERPRINT_VERSION = "hr-report-v7"
-INPUT_FINGERPRINT_VERSION = "hr-input-v1"
+# v2: input payload carries JD/CV parser and scoring logic stamps for automatic invalidation.
+INPUT_FINGERPRINT_VERSION = "hr-input-v2"
+# Bump when structured JD parsing changes. A stored jd-parse.json from an older
+# value is discarded on the next screen, so HR does not have to delete anything.
+JD_PARSER_LOGIC_VERSION = "jd-logic-v2"
+# Bump when the legacy ScorerService dimension scoring changes.
+LEGACY_SCORER_LOGIC_VERSION = "legacy-scorer-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"
 
 
@@ -84,6 +93,10 @@ def input_run_payload(
     return {
         "version": INPUT_FINGERPRINT_VERSION,
         "engine": str(engine or ""),
+        "parser": JD_PARSER_LOGIC_VERSION,
+        "cv_parser": CV_PARSER_LOGIC_VERSION,
+        "matching": MATCHING_ALGORITHM_VERSION,
+        "legacy_scorer": LEGACY_SCORER_LOGIC_VERSION,
         "position": str(position or ""),
         "refno": str(refno or ""),
         "jd": sha256_text("|".join(jd_chunks)),
@@ -103,14 +116,36 @@ def input_run_payload(
     }
 
 
-# True when the advertisement text or the scoring engine changed and cached parse/score JSON must
-# not be reused. A post re-assignment is deliberately NOT part of this: it invalidates the score of
-# the applicant who moved, not the whole run, so it is reported separately (FR-10).
+# True when the advertisement, the scoring engine, or the JD parser logic changed.
+# A missing parser stamp is a change: packs saved before the stamp must be re-parsed.
 def jd_inputs_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
     prior = previous or {}
     if not prior.get("jd"):
         return False
-    return prior.get("jd") != current.get("jd") or prior.get("engine") != current.get("engine")
+    return (
+        prior.get("jd") != current.get("jd")
+        or prior.get("engine") != current.get("engine")
+        or str(prior.get("parser") or "") != str(current.get("parser") or "")
+    )
+
+
+# True when CV parsing logic changed; missing stamp means every extracted profile must be rebuilt.
+def cv_parser_logic_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
+    prior = previous or {}
+    if not prior.get("jd"):
+        return False
+    return str(prior.get("cv_parser") or "") != str(current.get("cv_parser") or "")
+
+
+# True when the active scoring engine's logic version changed and cached scores must be recomputed.
+def scoring_logic_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
+    prior = previous or {}
+    if not prior.get("jd"):
+        return False
+    engine = str(current.get("engine") or "")
+    if engine == "matching":
+        return str(prior.get("matching") or "") != str(current.get("matching") or "")
+    return str(prior.get("legacy_scorer") or "") != str(current.get("legacy_scorer") or "")
 
 
 # Slugs whose post assignment differs between two runs, so their cached score was computed against
@@ -200,17 +235,23 @@ def save_fingerprints(out_dir: Path, payload: dict[str, Any]) -> None:
 
 
 __all__ = [
+    "CV_PARSER_LOGIC_VERSION",
     "FINGERPRINTS_NAME",
     "INPUT_FINGERPRINT_VERSION",
+    "JD_PARSER_LOGIC_VERSION",
+    "LEGACY_SCORER_LOGIC_VERSION",
+    "MATCHING_ALGORITHM_VERSION",
     "REPORT_FINGERPRINT_VERSION",
     "board_report_fingerprint",
     "candidate_report_fingerprint",
+    "cv_parser_logic_changed",
     "input_run_payload",
     "jd_inputs_changed",
     "load_fingerprints",
     "overrides_changed",
     "post_changed_slugs",
     "save_fingerprints",
+    "scoring_logic_changed",
     "sha256_file",
     "sha256_text",
     "stale_cv_slugs",

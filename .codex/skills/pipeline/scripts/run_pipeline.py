@@ -68,12 +68,18 @@ from screening_core.site_mode import default_state_dir
 from screening_core.report_fingerprint import (
     board_report_fingerprint,
     candidate_report_fingerprint,
+    cv_parser_logic_changed,
     input_run_payload,
     jd_inputs_changed,
+    CV_PARSER_LOGIC_VERSION,
+    JD_PARSER_LOGIC_VERSION,
+    LEGACY_SCORER_LOGIC_VERSION,
+    MATCHING_ALGORITHM_VERSION,
     load_fingerprints,
     overrides_changed,
     post_changed_slugs,
     save_fingerprints,
+    scoring_logic_changed,
     sha256_file,
     sha256_text,
     stale_cv_slugs,
@@ -203,6 +209,14 @@ def _clear_score_artifacts(out_dir: Path) -> None:
     (out_dir / "jd-final.json").unlink(missing_ok=True)
 
 
+# Deletes cached scoring configs so build-config runs again after scorer logic changes.
+def _clear_config_artifacts(out_dir: Path) -> None:
+    """Remove legacy/matching scoring configs while keeping parsed JD and CV profiles."""
+    (out_dir / "config.json").unlink(missing_ok=True)
+    for path in out_dir.glob("config-*.json"):
+        path.unlink(missing_ok=True)
+
+
 # Deletes one candidate's cached score so it is recomputed against their post's JD, keeping their
 # parsed CV: a re-assignment changes which JD applies to them, not the CV itself (FR-10).
 def _clear_score_for_slug(out_dir: Path, slug: str) -> None:
@@ -251,11 +265,17 @@ def _input_payload(args: argparse.Namespace, out_dir: Path) -> dict:
     )
 
 
-# Turn off --resume or drop cached work when the JD, the engine, the conditions, a CV or a post
-# assignment changed. Each input change invalidates the smallest set of artifacts that covers it,
-# so a re-run that touches one post group does not rebuild the others (FR-10).
+# Turn off --resume or drop cached work when the JD, the engine, the parser, the conditions,
+# a CV or a post assignment changed.
 def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
-    """Keep --resume only when JD/engine match; rebuild only what the changed inputs stale."""
+    """Keep --resume only when JD, parser logic and engine match; rebuild only what went stale."""
+    if _parser_logic_stale(out_dir):
+        args.resume = False
+        args._inputs_unchanged = False
+        _drop_stale_parse(out_dir)
+    if _cv_parser_logic_stale(out_dir):
+        _drop_stale_extracted(out_dir)
+        args._inputs_unchanged = False
     payload = _input_payload(args, out_dir)
     args._input_payload = payload
     previous = load_fingerprints(out_dir).get("input")
@@ -273,6 +293,14 @@ def _sync_resume_with_inputs(args: argparse.Namespace, out_dir: Path) -> None:
         (out_dir / "config.json").unlink(missing_ok=True)
         _clear_post_jd_artifacts(out_dir)
         return
+    if cv_parser_logic_changed(prior, payload):
+        for slug in (payload.get("cvs") or {}):
+            _clear_candidate_artifacts(out_dir, str(slug))
+        args._inputs_unchanged = False
+    if scoring_logic_changed(prior, payload):
+        _clear_score_artifacts(out_dir)
+        _clear_config_artifacts(out_dir)
+        args._inputs_unchanged = False
     if overrides_changed(prior, payload):
         # HR edited the conditions: the parsed JD still stands, only the scores are stale.
         # --resume stays on so the JD is not re-parsed and must/nice assignment stays stable.
@@ -551,13 +579,13 @@ def _build_post_jds(
 
 
 # Parse JD text with the jd-parser skill into a JSON file, reusing it under --resume.
-# The text is always written next to the JSON so a split decision can be audited afterwards.
+# A file stamped with an older parser logic version is parsed again.
 def _parse_jd_text(
     args: argparse.Namespace, jd_text: str, out_path: Path, text_path: Path
 ) -> Path:
-    """Return the parsed JD JSON path, running the jd-parser only when it is not cached."""
+    """Return the parsed JD JSON path, running the jd-parser only when the cache is current."""
     text_path.write_text(jd_text, encoding="utf-8")
-    if args.resume and _is_usable_json(out_path):
+    if args.resume and _is_usable_json(out_path) and _file_parser_logic(out_path) == JD_PARSER_LOGIC_VERSION:
         return out_path
     _run(
         [
@@ -569,7 +597,121 @@ def _parse_jd_text(
             str(out_path),
         ]
     )
+    _stamp_parser_logic(out_path)
     return out_path
+
+
+# Read the parser logic stamp stored on a JD JSON file.
+def _file_parser_logic(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("parser_logic") or "")
+
+
+# Record the parser logic version on a JD JSON file so the next run can tell it is current.
+def _stamp_parser_logic(path: Path) -> None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    data["parser_logic"] = JD_PARSER_LOGIC_VERSION
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+# True when a saved jd-parse.json was produced by an older parser.
+def _parser_logic_stale(out_dir: Path) -> bool:
+    path = out_dir / "jd-parse.json"
+    if not path.is_file():
+        return False
+    return _file_parser_logic(path) != JD_PARSER_LOGIC_VERSION
+
+
+# Remove cached JD parse, scores and per-post JDs so the new parser result is what gets scored.
+def _drop_stale_parse(out_dir: Path) -> None:
+    for name in ("jd-parse.json", "config.json", "jd-final.json"):
+        (out_dir / name).unlink(missing_ok=True)
+    _clear_score_artifacts(out_dir)
+    _clear_post_jd_artifacts(out_dir)
+    _drop_stale_extracted(out_dir)
+
+
+# Read the CV parser logic stamp stored on an extracted profile JSON file.
+def _file_cv_parser_logic(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("cv_parser_logic") or "")
+
+
+# Record the CV parser logic version on an extracted profile JSON file.
+def _stamp_cv_parser_logic(path: Path) -> None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    data["cv_parser_logic"] = CV_PARSER_LOGIC_VERSION
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+# True when any saved extracted profile was produced by an older CV parser.
+def _cv_parser_logic_stale(out_dir: Path) -> bool:
+    for path in out_dir.glob("extracted-*.json"):
+        if _file_cv_parser_logic(path) != CV_PARSER_LOGIC_VERSION:
+            return True
+    return False
+
+
+# Remove cached extracted/score JSON for every slug with an outdated CV parse.
+def _drop_stale_extracted(out_dir: Path) -> None:
+    for path in out_dir.glob("extracted-*.json"):
+        slug = path.name.removeprefix("extracted-").removesuffix(".json")
+        if slug:
+            _clear_candidate_artifacts(out_dir, slug)
+
+
+# Read the legacy scorer logic stamp stored on a score JSON file.
+def _file_legacy_scorer_logic(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("legacy_scorer_logic") or "")
+
+
+# Record the legacy scorer logic version on a score JSON file.
+def _stamp_legacy_scorer_logic(path: Path) -> None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    data["legacy_scorer_logic"] = LEGACY_SCORER_LOGIC_VERSION
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+# Read the matching algorithm version stored on a detail JSON file.
+def _file_matching_algorithm(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("algorithm_version") or "")
 
 
 # Fold HR-supplied conditions onto the parsed JD so scores use the agreed conditions.
@@ -727,7 +869,11 @@ def _parse_candidates(
         source = str(cv)
         slug = _unique_slug(source, used_slugs)
         extracted_out = out_dir / f"extracted-{slug}.json"
-        if args.resume and _is_usable_json(extracted_out):
+        if (
+            args.resume
+            and _is_usable_json(extracted_out)
+            and _file_cv_parser_logic(extracted_out) == CV_PARSER_LOGIC_VERSION
+        ):
             candidates.append(_with_identity(args, extracted_out, source, slug))
             continue
         cmd = [
@@ -748,6 +894,7 @@ def _parse_candidates(
                 Failure(source=source, stage="cv-parse", attempts=attempts, error_message=error),
             )
             continue
+        _stamp_cv_parser_logic(extracted_out)
         candidates.append(_with_identity(args, extracted_out, source, slug))
     for ext in args.extracted:
         source = str(ext)
@@ -777,7 +924,11 @@ def _score_legacy_candidate(
 ) -> bool:
     """Score one candidate with the legacy engine. Returns True on success."""
     score_out = out_dir / f"score-{cand['slug']}.json"
-    if args.resume and _is_usable_json(score_out):
+    if (
+        args.resume
+        and _is_usable_json(score_out)
+        and _file_legacy_scorer_logic(score_out) == LEGACY_SCORER_LOGIC_VERSION
+    ):
         cand["score"] = score_out
         return True
     cmd = [
@@ -799,6 +950,7 @@ def _score_legacy_candidate(
             Failure(source=cand["source"], stage="score", attempts=attempts, error_message=error),
         )
         return False
+    _stamp_legacy_scorer_logic(score_out)
     cand["score"] = score_out
     return True
 
@@ -916,7 +1068,11 @@ def _match_candidate(
 ) -> dict | None:
     """Match one candidate. Returns a ranking row or None on failure."""
     detail_out = out_dir / f"detail-{cand['slug']}.json"
-    if not (args.resume and _is_usable_json(detail_out)):
+    if not (
+        args.resume
+        and _is_usable_json(detail_out)
+        and _file_matching_algorithm(detail_out) == MATCHING_ALGORITHM_VERSION
+    ):
         cmd = [
             PYTHON,
             str(_skill_script("scorer", "run_score.py")),
