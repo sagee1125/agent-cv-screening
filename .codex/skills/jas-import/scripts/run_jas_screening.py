@@ -26,6 +26,7 @@ from urllib.parse import unquote, urlparse
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
+from jas_import.cv_links import prepare_cv_download_url
 from jas_import.errors import JobNotFoundError
 from jas_import.fetch import download_to_if_changed, fetch_job_payload
 from jas_import.skill import parse_job_skill
@@ -600,6 +601,7 @@ def run_url_screening(args: argparse.Namespace) -> int:
                 continue
             try:
                 appno = _safe_identifier(raw_appno, label="application number")
+                cv_url = prepare_cv_download_url(str(cv_url or "").strip(), job_refno=refno)
                 validate_reference(cv_url, flag="candidate cv_url", allowed_hosts=allowed_hosts)
             except Exception as exc:
                 download_failures.append({"appno": str(raw_appno), "error_message": str(exc)})

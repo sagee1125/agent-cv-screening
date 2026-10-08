@@ -8,6 +8,8 @@ from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
 
+from jas_import.cv_links import is_polyu_jas_host, normalize_polyu_cv_download_url
+
 JAS_SOURCE = "jas"
 DEFAULT_BASE_URL = "https://jobs.polyu.edu.hk"
 
@@ -360,6 +362,8 @@ def _candidate_from_row(row: list[dict[str, Any]], origin: str, indexes: dict[st
     record_detail_url = _first_link_url(detail_cell, origin) if detail_cell else None
     status = _current_status(status_cell) if status_cell else None
     cv_url = _first_link_url(cv_cell, origin) if cv_cell else None
+    if cv_url and (is_polyu_jas_host(cv_url) or is_polyu_jas_host(origin)):
+        cv_url = normalize_polyu_cv_download_url(cv_url)
     supp_url = _first_link_url(supp_cell, origin) if supp_cell else None
     post = _text(post_cell).strip() if post_cell else ""
     if not appno:

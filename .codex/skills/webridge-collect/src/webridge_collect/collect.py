@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from jas_import import fetch as _jas_fetch
+from jas_import.cv_links import prepare_cv_download_url
 from jas_import.errors import JobNotFoundError
 from jas_import.skill import job_payload_from_html
 from screening_core.candidate_id import records_url_for_refno, refno_from_url
@@ -332,6 +333,7 @@ def collect_job(
 
     failures: list[dict[str, Any]] = []
     cvs: dict[str, Path] = {}
+    job_refno = str(job.get("refno") or refno or "").strip()
     for candidate in job.get("candidates", []):
         appno = str(candidate.get("appno") or "").strip()
         cv_url = str(candidate.get("cv_url") or "").strip()
@@ -339,6 +341,7 @@ def collect_job(
             continue
         dest = cvs_dir / f"{safe_pack_id(appno, fallback='unknown')}.pdf"
         try:
+            cv_url = prepare_cv_download_url(cv_url, job_refno=job_refno or None)
             if driver == "http":
                 validate_reference(cv_url, flag="candidate cv_url", allowed_hosts=allowed_hosts)
                 asyncio.run(_jas_fetch.download_to(cv_url, dest, cookie_file=cookie_file, allowed_hosts=allowed_hosts))
