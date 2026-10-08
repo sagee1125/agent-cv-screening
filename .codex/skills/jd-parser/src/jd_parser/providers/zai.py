@@ -16,7 +16,7 @@ _STRUCTURE_SYSTEM = (
 )
 
 
-# Fill degree, years, languages, and skill buckets from the advert when a ZAI key is configured.
+# Fill every structured JD bucket (skills, education, years, languages, visa) when a ZAI key is set.
 class ZaiJDRefiner(JDEnrichmentProvider):
     name = "hybrid"
 
@@ -64,7 +64,8 @@ class ZaiJDRefiner(JDEnrichmentProvider):
         education = parsed.get("education") if isinstance(parsed.get("education"), dict) else None
         experience = parsed.get("experience") if isinstance(parsed.get("experience"), dict) else None
         languages = parsed.get("languages") if isinstance(parsed.get("languages"), list) else None
-        if not must_names and not preferred_names and not education and not experience and not languages:
+        visa = parsed.get("visa") if isinstance(parsed.get("visa"), dict) else None
+        if not must_names and not preferred_names and not education and not experience and not languages and not visa:
             return JDEnrichmentResult(
                 provider_name=self.name,
                 error="LLM returned no requirements.",
@@ -81,6 +82,7 @@ class ZaiJDRefiner(JDEnrichmentProvider):
             education=education,
             experience=experience,
             languages=languages,
+            visa=visa,
             raw_output=parsed,
             notes=["Requirements filled by the configured LLM."],
         )

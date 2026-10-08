@@ -528,6 +528,36 @@ async def test_missing_local_name_uses_privacy_rule_fallback() -> None:
     assert llm.called is False
 
 
+# A missing local name still blocks the model, but local rules keep languages and dates.
+@pytest.mark.asyncio
+async def test_privacy_fallback_keeps_local_languages_and_dates() -> None:
+    llm = DummyLLM()
+    service = CVParserService(llm_client=llm, cache=DummyCache())
+
+    async def fake_extract(_: str) -> LocalCVDocument:
+        return LocalCVDocument(
+            raw_text=(
+                "Email: candidate@example.com\n"
+                "Languages: English, Chinese\n"
+                "Experience\n"
+                "2019-2023 data quality and SQL\n"
+            ),
+            page_texts=(),
+            ocr_lines=(),
+            ocr_page_indexes=frozenset(),
+        )
+
+    service._extract_local_document = fake_extract  # type: ignore[method-assign]
+    service._detect_local_pii = lambda _text: local_ner_module.LocalNERResult(names=(), sensitive_values=())  # type: ignore[method-assign]
+    result = await service.parse_cv("resume.pdf")
+    languages = {item["language"] for item in result["structured_data"]["languages"]}
+    assert result["parse_path"] == "privacy_rule_fallback"
+    assert {"English", "Chinese"} <= languages
+    assert result["structured_data"]["experience"]
+    assert result["structured_data"]["experience"][0]["start_date"]
+    assert llm.called is False
+
+
 # Verifies image-only CV pages are OCRed locally with reusable redaction coordinates.
 def test_scanned_pdf_uses_local_ocr_and_renders_masked_image(tmp_path: Path) -> None:
     source_document = pymupdf.open()

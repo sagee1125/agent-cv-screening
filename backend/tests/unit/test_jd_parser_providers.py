@@ -114,6 +114,37 @@ async def test_hybrid_mode_refines_skills_with_llm() -> None:
 
 
 @pytest.mark.asyncio
+async def test_zai_hybrid_fills_all_requirement_buckets() -> None:
+    """Zhipu JD hybrid writes skills, education, years, languages, and visa — not skills only."""
+    from jd_parser.providers.zai import ZaiJDRefiner
+
+    llm = FakeLLM(
+        {
+            "must_skills": ["python"],
+            "preferred_skills": ["aws"],
+            "education": {
+                "minimum_degree": "bachelor",
+                "field_of_study": "Computer Science",
+                "is_mandatory": True,
+            },
+            "experience": {"minimum_years": 3, "raw_text": "3+ years"},
+            "languages": [{"language": "English", "level": "business", "is_mandatory": True}],
+            "visa": {"requirement_type": "not_required", "target_region": None},
+        }
+    )
+    service = JDParserService()
+    result = await service.parse_jd(SAMPLE_JD, mode="hybrid", enrichment_provider=ZaiJDRefiner(llm_client=llm))
+    data = result["structured_data"]
+    must = {item["display_name"].lower() for item in data["must_skills"]}
+    assert "python" in must
+    assert data["education_requirement"]["minimum_degree"] == "bachelor"
+    assert data["education_requirement"]["field_of_study"] == "Computer Science"
+    assert data["experience_requirement"]["minimum_years"] == 3
+    assert data["language_requirements"][0]["language"] == "English"
+    assert data["visa_requirement"]["requirement_type"] == "not_required"
+
+
+@pytest.mark.asyncio
 async def test_hybrid_uses_premap_phrase_when_not_in_taxonomy() -> None:
     """Unmapped LLM skill names still attach the original JD sentence that mentioned them."""
     jd = SAMPLE_JD + "\n- Experience with distributed systems\n"

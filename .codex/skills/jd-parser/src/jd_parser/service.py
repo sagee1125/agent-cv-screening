@@ -793,7 +793,7 @@ class JDParserService:
             return "bachelor"
         return "none"
 
-    # Apply degree, years, and languages from the model when it returned them.
+    # Apply degree, years, languages, and visa from the model when it returned them.
     def _apply_llm_requirements(self, structured_data: dict[str, Any], result: Any) -> None:
         education = getattr(result, "education", None)
         if isinstance(education, dict):
@@ -831,6 +831,19 @@ class JDParserService:
                     normalized,
                     structured_data.get("language_requirements") or [],
                 )
+
+        visa = getattr(result, "visa", None)
+        if isinstance(visa, dict):
+            current = dict(structured_data.get("visa_requirement") or {})
+            kind = str(visa.get("requirement_type") or "").strip().casefold()
+            if kind in {"required", "not_required", "unknown"}:
+                current["requirement_type"] = kind
+            region = visa.get("target_region")
+            if isinstance(region, str) and region.strip():
+                current["target_region"] = region.strip()
+            elif region is None and "target_region" in visa:
+                current["target_region"] = None
+            structured_data["visa_requirement"] = current
 
     # Map model language rows onto the canonical names and allowed levels.
     def _normalize_llm_languages(self, languages: list[Any]) -> list[dict[str, Any]]:

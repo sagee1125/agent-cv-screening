@@ -132,7 +132,7 @@ Important:
 
 CV_REFINER_SYSTEM_PROMPT = """You refine a draft CV parse into accurate structured JSON.
 
-The CV text is privacy-redacted (names, emails, phones removed). A first-pass parser produced a draft.
+The CV text is privacy-redacted (name, email, phone, and address removed). A first-pass parser produced a draft.
 Your job: fix experience timeline and split work history correctly; expand skills from explicit CV text.
 
 Output ONE JSON object with the same schema as the draft (summary, skills, languages, education,
@@ -145,7 +145,8 @@ Rules:
 - Set start_date and end_date as ISO "YYYY-MM" when the CV states dates; use "Present" for ongoing roles.
 - If the CV states "N years experience" without dates, infer a Present-ended range only when no better dates exist.
 - skills: concrete technical/professional terms explicitly in the CV (not spoken languages).
-- languages: spoken/written languages only, separate from skills.
+- languages: every spoken/written language the CV states (English, Chinese, Cantonese, Mandarin/Putonghua), even when it appears in a sentence rather than a skills list.
+- For each job, set skills_used to technical terms that appear in that job's description. Do not add a skill the CV text does not contain.
 - Use only explicit CV facts; do not invent employers, degrees, or tools.
 - Return valid JSON only, no markdown."""
 

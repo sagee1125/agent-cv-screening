@@ -16,6 +16,7 @@ class JDEnrichmentResult:
     education: dict[str, Any] | None = None
     experience: dict[str, Any] | None = None
     languages: list[dict[str, Any]] | None = None
+    visa: dict[str, Any] | None = None
     jd_overview: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
     raw_output: Any = None

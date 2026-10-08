@@ -34,5 +34,6 @@ class CVEnrichmentProvider(ABC):
         masked_cv_text: str,
         jd_text: str | None,
         draft_structured: dict[str, Any],
+        redacted_image_urls: list[str] | None = None,
     ) -> CVEnrichmentResult:
-        """Refine a draft CV parse using redacted text and optional JD context."""
+        """Refine a draft CV parse using redacted text, optional redacted images, and JD context."""

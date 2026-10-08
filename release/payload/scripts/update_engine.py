@@ -6,9 +6,10 @@ the installed version, applies it: refreshes the engine code and the WorkBuddy
 expert, re-runs pip only when requirements changed, and invalidates the score
 cache so new code is never silently ignored by the --resume mechanism.
 
-Quiet mode (--quiet) is what the expert calls before the first screen of a
-conversation: any failure exits 0 silently so a screening never blocks on the
-network.
+Quiet mode (--quiet) is what the expert calls on the first message of a
+conversation. It always prints one update_status line and exits 0, including
+when the check fails, so a screening is never blocked and the expert can tell
+HR when the installed copy could not be updated.
 
 Cache rules (repo FR-10): on a version change, move (never delete) each report
 folder's detail-*.json, rows.json, board-row-*.json and report-fingerprints.json
@@ -40,6 +41,14 @@ CACHE_PATTERNS = ("detail-*.json", "rows.json", "board-row-*.json", "report-fing
 
 def log(message: str) -> None:
     print(message, flush=True)
+
+
+# One machine-readable line. Quiet mode prints this and nothing else.
+def emit_status(status: str, installed: str, latest: str, reason: str = "") -> None:
+    line = f"update_status={status} installed={installed} latest={latest}"
+    if reason:
+        line += f" reason={reason}"
+    log(line)
 
 
 def engine_root() -> Path:
@@ -100,7 +109,7 @@ def bust_score_caches(quiet: bool) -> int:
     return moved
 
 
-def apply_update(payload_zip: Path, quiet: bool) -> None:
+def apply_update(payload_zip: Path, quiet: bool) -> bool:
     import setup_engine  # shipped beside this file
 
     root = engine_root()
@@ -147,7 +156,8 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
         if requirements_changed:
             venv_python = root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
             if venv_python.is_file():
-                log("[..] dependencies changed - updating the Python environment...")
+                if not quiet:
+                    log("[..] dependencies changed - updating the Python environment...")
                 # uv-created venvs have no pip inside them, so prefer the uv
                 # binary the launcher left in <engine>/tools/.
                 uv = root / "tools" / ("uv.exe" if sys.platform == "win32" else "uv")
@@ -167,11 +177,12 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
             # previous one back, or a half-applied update would be reported as
             # done and never retried.
             (root / "version.json").write_text(json.dumps(previous_stamp, indent=2) + "\n", encoding="utf-8")
-            log("[ERROR] the dependency update failed - the version stamp stays at "
-                f"{previous_stamp.get('version', '?')},")
-            log("        so the next run retries the update automatically. The screening engine")
-            log("        may not start until it succeeds.")
-            return
+            if not quiet:
+                log("[ERROR] the dependency update failed - the version stamp stays at "
+                    f"{previous_stamp.get('version', '?')},")
+                log("        so the next run retries the update automatically. The screening engine")
+                log("        may not start until it succeeds.")
+            return False
 
         stamp = read_version_stamp(root)
         stamp["version"] = new_version
@@ -182,32 +193,37 @@ def apply_update(payload_zip: Path, quiet: bool) -> None:
         bust_score_caches(quiet)
         if not quiet:
             log(f"[ok] updated to version {new_version}.")
+        return True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Update the CV screening engine from GitHub releases.")
-    parser.add_argument("--quiet", action="store_true", help="Silent when up to date or offline; for the expert.")
+    parser.add_argument("--quiet", action="store_true", help="Print only the update_status line; for the expert.")
     parser.add_argument("--check", action="store_true", help="Report only; do not apply.")
     parser.add_argument("--force", action="store_true", help="Apply even when not newer.")
     args = parser.parse_args()
 
     root = engine_root()
     local = read_version_stamp(root)
+    installed = str(local.get("version") or "0")
     try:
         release = fetch_json(API_LATEST)
         remote_version = str(release.get("tag_name", "")).lstrip("v")
     except Exception as error:  # offline, rate-limited, blocked: never block a screen
         if not args.quiet:
             log(f"[skip] could not check for updates: {error}")
+        emit_status("failed", installed, "unknown", "offline")
         return 0
 
-    if version_tuple(remote_version) <= version_tuple(local.get("version", "0")) and not args.force:
+    if version_tuple(remote_version) <= version_tuple(installed) and not args.force:
         if not args.quiet:
-            log(f"[ok] up to date (installed {local.get('version')}, latest {remote_version}).")
+            log(f"[ok] up to date (installed {installed}, latest {remote_version}).")
+        emit_status("up_to_date", installed, remote_version)
         return 0
 
     if args.check:
-        log(f"[update available] installed {local.get('version')}, latest {remote_version}.")
+        log(f"[update available] installed {installed}, latest {remote_version}.")
+        emit_status("available", installed, remote_version)
         return 0
 
     try:
@@ -216,13 +232,17 @@ def main() -> int:
             if not args.quiet:
                 log(f"[..] downloading version {remote_version}...")
             download(ASSET_URL, payload_zip)
-            apply_update(payload_zip, args.quiet)
+            applied = apply_update(payload_zip, args.quiet)
     except Exception as error:
-        if args.quiet:
-            return 0
-        log(f"[ERROR] update failed: {error}")
-        log("The installed engine is untouched and still works. Try again later.")
-        return 1
+        if not args.quiet:
+            log(f"[ERROR] update failed: {error}")
+            log("The installed engine is untouched and still works. Try again later.")
+        emit_status("failed", installed, remote_version, "download")
+        return 0 if args.quiet else 1
+    if not applied:
+        emit_status("failed", installed, remote_version, "dependencies")
+        return 0 if args.quiet else 1
+    emit_status("updated", remote_version, remote_version)
     return 0
 
 

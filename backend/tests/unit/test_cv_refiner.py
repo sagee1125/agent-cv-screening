@@ -60,3 +60,26 @@ def test_merge_keeps_base_when_refiner_adds_nothing() -> None:
     merged = merge_cv_refinement(base, refined)
     assert len(merged["experience"]) == 1
     assert merged["experience"][0]["start_date"] == "2021-01"
+
+
+# Refined languages replace a wrong first pass, and skills absent from the CV are dropped.
+def test_merge_overwrites_languages_and_drops_unmentioned_skills() -> None:
+    base = {"languages": [{"language": "French", "level": None}], "skills": ["sql"], "experience": []}
+    refined = {
+        "languages": [{"language": "English", "level": "fluent"}, {"language": "Chinese", "level": "business"}],
+        "skills": ["sql", "telepathy"],
+        "experience": [],
+    }
+    merged = merge_cv_refinement(
+        base,
+        refined,
+        evidence_text="Fluent in English and Chinese. SQL and Excel.",
+    )
+    names = {item["language"] for item in merged["languages"]}
+    assert names == {"French", "English", "Chinese"}
+    skill_names = {
+        (item.get("canonical_skill") if isinstance(item, dict) else str(item)).casefold()
+        for item in merged["skills"]
+    }
+    assert "telepathy" not in skill_names
+    assert any("sql" in name for name in skill_names)

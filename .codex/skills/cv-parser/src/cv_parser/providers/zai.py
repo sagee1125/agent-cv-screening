@@ -23,25 +23,37 @@ class ZaiCVRefiner(CVEnrichmentProvider):
         masked_cv_text: str,
         jd_text: str | None,
         draft_structured: dict[str, Any],
+        redacted_image_urls: list[str] | None = None,
     ) -> CVEnrichmentResult:
         from screening_core.config import settings
         from screening_core.llm_client import LLMClient
 
-        if not masked_cv_text.strip():
+        images = [url for url in (redacted_image_urls or []) if str(url).strip()]
+        if not masked_cv_text.strip() and not images:
             return CVEnrichmentResult(
                 provider_name=self.name,
-                error="empty_masked_text",
-                notes=["No redacted CV text to refine."],
+                error="empty_redacted_content",
+                notes=["No redacted CV text or page image to refine."],
             )
 
         client = self._llm_client or LLMClient()
         user_prompt = build_cv_refiner_user_prompt(masked_cv_text, draft_structured, jd_text)
-        model = getattr(settings, "cv_parser_llm_model", None) or settings.llm_model
+        if images and not masked_cv_text.strip():
+            user_prompt += (
+                "\n\nThe CV text layer is empty. Read only the attached redacted page images. "
+                "Do not infer a name, email, phone, or address.\n"
+            )
+        user_content: str | list[dict[str, Any]] = user_prompt
+        if images and not masked_cv_text.strip():
+            user_content = [{"type": "text", "text": user_prompt}]
+            user_content.extend({"type": "image_url", "image_url": {"url": url}} for url in images)
+        text_model = getattr(settings, "cv_parser_llm_model", None) or settings.llm_model
+        model = settings.llm_vision_model if isinstance(user_content, list) else text_model
         try:
             response = await client.chat_completion_messages(
                 [
                     {"role": "system", "content": CV_REFINER_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": user_content},
                 ],
                 model=model,
                 response_format={"type": "json_object"},
@@ -67,7 +79,8 @@ class ZaiCVRefiner(CVEnrichmentProvider):
         structured = normalize_refiner_payload(parsed)
         experience = structured.get("experience") if isinstance(structured.get("experience"), list) else []
         skills = structured.get("skills") if isinstance(structured.get("skills"), list) else []
-        if not experience and not skills:
+        languages = structured.get("languages") if isinstance(structured.get("languages"), list) else []
+        if not experience and not skills and not languages:
             return CVEnrichmentResult(
                 provider_name=self.name,
                 error="LLM returned no experience or skills.",

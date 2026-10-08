@@ -157,3 +157,23 @@ def test_hkid_and_salary_coexist_with_other_pii() -> None:
     assert "HKD 25,000" not in masked
     assert "david.chan@example.com" not in masked
     assert "Engineer at ACME" in masked
+
+
+# Street and labeled addresses are masked before any external CV call.
+def test_address_is_masked_and_listed_for_redaction() -> None:
+    raw_text = (
+        "Ada Chan\n"
+        "Address: Flat A, 12 Queen Street, Hong Kong\n"
+        "居住：皇后大道中88號\n"
+        "Email: ada.chan@example.com\n"
+        "3 years experience in SQL\n"
+    )
+    masked = mask_pii_text(raw_text)
+    assert "12 Queen Street" not in masked
+    assert "皇后大道中88號" not in masked
+    assert "ada.chan@example.com" not in masked
+    assert "[ADDRESS_REDACTED]" in masked
+    assert "3 years experience in SQL" in masked
+    values = " ".join(contact_values_for_redaction(raw_text))
+    assert "12 Queen Street" in values
+    assert "皇后大道中88號" in values

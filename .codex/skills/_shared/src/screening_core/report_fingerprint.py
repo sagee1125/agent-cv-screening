@@ -21,7 +21,7 @@ REPORT_FINGERPRINT_VERSION = "hr-report-v7"
 INPUT_FINGERPRINT_VERSION = "hr-input-v2"
 # Bump when structured JD parsing changes. A stored jd-parse.json from an older
 # value is discarded on the next screen, so HR does not have to delete anything.
-JD_PARSER_LOGIC_VERSION = "jd-logic-v2"
+JD_PARSER_LOGIC_VERSION = "jd-logic-v3"
 # Bump when the legacy ScorerService dimension scoring changes.
 LEGACY_SCORER_LOGIC_VERSION = "legacy-scorer-v1"
 FINGERPRINTS_NAME = "report-fingerprints.json"

@@ -69,7 +69,7 @@ from cv_parser.prompts import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v6-hybrid-refiner"
+PARSER_CACHE_VERSION = "pii-redaction-v7-address-local"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent
@@ -157,25 +157,40 @@ class CVParserService:
         masked_text: str,
         jd_text: str | None,
         parse_path: str,
-    ) -> tuple[dict[str, Any], str]:
+        redacted_image_urls: list[str] | None = None,
+    ) -> tuple[dict[str, Any], str, str | None]:
         """Merge hybrid refinement into the draft when a provider is configured."""
         provider = self._enrichment_provider
-        if provider is None or not settings.cv_parser_hybrid_enabled or not masked_text.strip():
-            return structured, parse_path
+        images = [url for url in (redacted_image_urls or []) if str(url).strip()]
+        if provider is None or not settings.cv_parser_hybrid_enabled:
+            return structured, parse_path, None
+        if not masked_text.strip() and not images:
+            return structured, parse_path, "hybrid_skipped=no_redacted_content"
         try:
             result = await provider.refine(
                 masked_cv_text=masked_text,
                 jd_text=jd_text,
                 draft_structured=structured,
+                redacted_image_urls=images,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("CV hybrid refiner failed")
-            return structured, parse_path
+            return structured, parse_path, f"hybrid_refiner={exc}"
         if not result.succeeded or not result.structured:
-            return structured, parse_path
-        merged = merge_cv_refinement(structured, result.structured)
+            reason = result.error or "empty"
+            return structured, parse_path, f"hybrid_refiner={reason}"
+        merged = merge_cv_refinement(structured, result.structured, evidence_text=masked_text)
         hybrid_path = parse_path if parse_path.endswith("_hybrid") else f"{parse_path}_hybrid"
-        return merged, hybrid_path
+        return merged, hybrid_path, None
+
+    # Append a hybrid note onto an existing error string without dropping the first cause.
+    @staticmethod
+    def _note_error(error_message: str | None, note: str | None) -> str | None:
+        if not note:
+            return error_message
+        if error_message:
+            return f"{error_message}; {note}"
+        return note
 
     # Parses one CV PDF into structured JSON, using cache when possible.
     async def parse_cv(self, file_path: str, jd_text: str | None = None) -> dict[str, Any]:
@@ -232,8 +247,12 @@ class CVParserService:
             structured = self._merge_contact_hints(self._normalize_schema(safe_llm_payload), contact_hints)
             structured = self._apply_content_fallback(raw_text, structured)
             parse_path = llm_result.get("parse_path", "vision")
-            structured, parse_path = await self._apply_hybrid_refiner(
-                structured, masked_text, jd_text, parse_path
+            structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
+                structured,
+                masked_text,
+                jd_text,
+                parse_path,
+                redacted_image_urls=llm_result.get("redacted_image_urls"),
             )
             cache_payload = {
                 "structured_data": structured,
@@ -242,7 +261,7 @@ class CVParserService:
                 "extraction_seed": 42,
                 "status": "success",
                 "parse_path": parse_path,
-                "error_message": None,
+                "error_message": self._note_error(None, hybrid_note),
             }
         except Exception as image_exc:
             logger.exception("Vision parse failed; considering text fallback.")
@@ -251,7 +270,7 @@ class CVParserService:
                 structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
                 structured = self._apply_content_fallback(raw_text, structured)
                 parse_path = "rule_fallback"
-                structured, parse_path = await self._apply_hybrid_refiner(
+                structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
                     structured, masked_text, jd_text, parse_path
                 )
                 cache_payload = {
@@ -261,7 +280,10 @@ class CVParserService:
                     "extraction_seed": 42,
                     "status": "fallback" if parse_path == "rule_fallback" else "success",
                     "parse_path": parse_path,
-                    "error_message": f"vision_error={image_exc}; text_fallback_disabled=true",
+                    "error_message": self._note_error(
+                        f"vision_error={image_exc}; text_fallback_disabled=true",
+                        hybrid_note,
+                    ),
                 }
             else:
                 try:
@@ -280,7 +302,7 @@ class CVParserService:
                     )
                     structured = self._apply_content_fallback(raw_text, structured)
                     parse_path = "text_fallback"
-                    structured, parse_path = await self._apply_hybrid_refiner(
+                    structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
                         structured, masked_text, jd_text, parse_path
                     )
                     cache_payload = {
@@ -290,7 +312,7 @@ class CVParserService:
                         "extraction_seed": 42,
                         "status": "success",
                         "parse_path": parse_path,
-                        "error_message": None,
+                        "error_message": self._note_error(None, hybrid_note),
                     }
                 except Exception as text_exc:
                     logger.exception("Text parse also failed; using rule-based contact fallback.")
@@ -306,7 +328,7 @@ class CVParserService:
                     structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
                     structured = self._apply_content_fallback(raw_text, structured)
                     parse_path = "rule_fallback"
-                    structured, parse_path = await self._apply_hybrid_refiner(
+                    structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
                         structured, masked_text, jd_text, parse_path
                     )
                     cache_payload = {
@@ -316,7 +338,10 @@ class CVParserService:
                         "extraction_seed": 42,
                         "status": "fallback" if parse_path == "rule_fallback" else "success",
                         "parse_path": parse_path,
-                        "error_message": f"vision_error={image_exc}; text_error={text_exc}{length_note}",
+                        "error_message": self._note_error(
+                            f"vision_error={image_exc}; text_error={text_exc}{length_note}",
+                            hybrid_note,
+                        ),
                     }
         await self.cache.set(cache_key, cache_payload)
         return {
@@ -370,6 +395,7 @@ class CVParserService:
                     **primary_result,
                     "parsed": merged_payload,
                     "parse_path": "vision_focus" if pass_count == 2 else "vision",
+                    "redacted_image_urls": image_urls,
                 }
             except Exception as exc:
                 last_exc = exc

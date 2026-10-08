@@ -128,3 +128,22 @@ def test_unchanged_requirements_skip_pip_but_still_advance(tmp_path, monkeypatch
     assert pip_calls == []
     assert read_stamp(root)["version"] == "1.1.9"
     assert busted == [True]
+
+
+# Quiet mode still prints one status line when the version check cannot reach the network.
+def test_quiet_offline_prints_a_failed_status(tmp_path, monkeypatch, capsys) -> None:
+    module = load_module()
+    root = tmp_path / "engine"
+    make_installed_engine(root, version="1.2.16")
+    monkeypatch.setattr(module, "engine_root", lambda: root)
+
+    def offline(_url: str, timeout: float = 10.0):
+        raise OSError("offline")
+
+    monkeypatch.setattr(module, "fetch_json", offline)
+    monkeypatch.setattr(sys, "argv", ["update_engine.py", "--quiet"])
+    assert module.main() == 0
+    out = capsys.readouterr().out
+    assert "update_status=failed" in out
+    assert "installed=1.2.16" in out
+    assert "reason=offline" in out

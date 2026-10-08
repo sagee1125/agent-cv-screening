@@ -32,6 +32,18 @@ DATE_RANGE_PATTERN = re.compile(
 NAME_LABEL_PATTERN = re.compile(
     r"(?im)^\s*(?:full\s+name|name)\s*[:：]\s*([^\n]{1,64})\s*$"
 )
+# Labeled contact-address lines, plus a street line that is not a date or a phone.
+ADDRESS_LABEL_PATTERN = re.compile(
+    r"(?im)^\s*(?:address|residential\s+address|home\s+address|mailing\s+address|"
+    r"correspondence\s+address|地址|住址|通訊地址|通讯地址)\s*[:：]\s*(.+)$"
+)
+STREET_ADDRESS_PATTERN = re.compile(
+    r"(?i)\b\d{1,5}\s+[A-Za-z0-9.'-]{2,}(?:\s+[A-Za-z0-9.'-]{2,}){0,5}\s+"
+    r"(?:street|st\.|road|rd\.|avenue|ave\.|lane|drive|court|place|terrace)\b"
+)
+CJK_ADDRESS_PATTERN = re.compile(
+    r"[\u4e00-\u9fff]{1,16}(?:路|街|道|巷|弄)[\u4e00-\u9fff0-9０-９\-－]{0,12}(?:號|号)?"
+)
 SECTION_HEADINGS = {
     "about",
     "career objective",
@@ -68,6 +80,7 @@ CONTACT_PLACEHOLDERS = {
     "url": "[URL_REDACTED]",
     "hkid": "[HKID_REDACTED]",
     "salary": "[SALARY_REDACTED]",
+    "address": "[ADDRESS_REDACTED]",
 }
 
 
@@ -138,6 +151,21 @@ def is_phone_candidate(candidate: str) -> bool:
     return 8 <= digit_count <= 15
 
 
+# Collect labeled and street-shaped address spans. Dates and phone-only lines are skipped.
+def extract_address_spans(raw_text: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for match in ADDRESS_LABEL_PATTERN.finditer(raw_text):
+        value = match.group(1).strip()
+        if value:
+            spans.append((match.start(1), match.end(1), value))
+    for pattern in (STREET_ADDRESS_PATTERN, CJK_ADDRESS_PATTERN):
+        for match in pattern.finditer(raw_text):
+            value = match.group(0).strip()
+            if value and not is_phone_candidate(value):
+                spans.append((match.start(), match.end(), value))
+    return spans
+
+
 # Detects all structured contact spans and locally inferred candidate-name spans.
 def detect_contact_entities(
     raw_text: str,
@@ -165,6 +193,9 @@ def detect_contact_entities(
 
     for match in SALARY_PATTERN.finditer(raw_text):
         entities.append(PIIEntity("salary", match.group(0).strip(), match.start(), match.end()))
+
+    for start, end, value in extract_address_spans(raw_text):
+        entities.append(PIIEntity("address", value, start, end))
 
     for name in extract_name_candidates(raw_text, extra_names):
         flexible_name_pattern = r"\s+".join(re.escape(part) for part in name.split())
@@ -207,6 +238,7 @@ def extract_contact_hints_local(
         "phone": first_value("phone"),
         "hkid": first_value("hkid"),
         "salary": first_value("salary"),
+        "address": first_value("address"),
     }
 
 
@@ -245,5 +277,17 @@ def strip_contact_fields(payload: dict[str, object]) -> dict[str, object]:
     return {
         key: value
         for key, value in payload.items()
-        if key.casefold() not in {"name", "email", "phone", "telephone", "mobile"}
+        if key.casefold()
+        not in {
+            "name",
+            "email",
+            "phone",
+            "telephone",
+            "mobile",
+            "address",
+            "home_address",
+            "mailing_address",
+            "residential_address",
+            "location",
+        }
     }

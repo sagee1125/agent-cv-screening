@@ -530,6 +530,26 @@ def _normalize_language_level(level: Any) -> str | None:
     return None
 
 
+_SPOKEN_LANGUAGE_CUES = (
+    (re.compile(r"\benglish\b", re.IGNORECASE), "English"),
+    (re.compile(r"\bchinese\b|中文|漢語|汉语", re.IGNORECASE), "Chinese"),
+    (re.compile(r"\bcantonese\b|粵語|粤语", re.IGNORECASE), "Cantonese"),
+    (re.compile(r"\b(?:mandarin|putonghua)\b|普通話|普通话", re.IGNORECASE), "Mandarin"),
+)
+
+
+# Read spoken-language mentions from CV prose, not only from a skills list.
+def extract_spoken_languages_from_text(raw_text: str) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for pattern, display in _SPOKEN_LANGUAGE_CUES:
+        if display.casefold() in seen or not pattern.search(raw_text or ""):
+            continue
+        seen.add(display.casefold())
+        found.append({"language": display, "level": None})
+    return found
+
+
 # Detect language tokens embedded in a raw skills list (e.g. ["English", "Python"]).
 def extract_languages_from_skills(
     value: Any,
@@ -1311,7 +1331,7 @@ def extract_publications_fallback(raw_text: str) -> list[dict[str, Any]]:
 def extract_location_fallback(raw_text: str) -> dict[str, Any] | None:
     lines = extract_section_lines(
         raw_text,
-        ("location", "address", "based in", "residence"),
+        ("location", "based in", "residence"),
         ("experience", "education", "skills", "projects", "publications", "certifications"),
     )
     for line in lines[:1]:
@@ -1391,6 +1411,10 @@ def apply_content_fallback(raw_text: str, structured: dict[str, Any]) -> dict[st
         enriched["skills"] = normalize_skill_items(extract_skills_fallback(raw_text), source="fallback")
     elif not enriched.get("languages"):
         enriched["languages"] = extract_languages_from_skills(extract_skills_fallback(raw_text))
+    enriched["languages"] = _merge_languages(
+        enriched.get("languages") or [],
+        extract_spoken_languages_from_text(raw_text),
+    )
     if not enriched.get("education"):
         enriched["education"] = extract_education_fallback(raw_text)
     if not enriched.get("experience"):

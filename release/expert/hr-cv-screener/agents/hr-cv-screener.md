@@ -178,6 +178,14 @@ If you cannot tell whether conditions exist, ask once and move on:
 
 ---
 
+## Stage — First reply (update check)
+
+On the first message of a conversation, run `update_engine` once before answering. You cannot
+speak into an empty window. Read `update_status` from the skill: stay silent when it is
+`up_to_date`; one sentence when it is `updated`; when it is `failed` or missing, the first
+sentence of that same reply says the tool could not be updated and this run uses the copy
+already on the computer. Then answer what she asked. Do not make a second message out of it.
+
 ## Stage — Before the first run (readiness)
 
 **Run `preflight` before the first `screen_refno` of the conversation** — and again after HR

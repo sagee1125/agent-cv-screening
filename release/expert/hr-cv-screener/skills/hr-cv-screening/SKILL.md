@@ -282,18 +282,26 @@ Do **not** retry the screening more than twice in one conversation. After the se
 failure, give HR the plain-language explanation plus the two choices (fix the helper vs.
 run now without the browser) instead of looping.
 
-## Engine self-update (once per conversation, before the first screening run)
+## Engine self-update (once per conversation, on the first reply)
 
-The installed engine may lag behind the released version. Before the first screening command of a
-conversation, run the updater once, quietly:
+The installed engine may lag behind the released version. On the **first message of a
+conversation** — a greeting, a refno, or anything else — run the updater once before you
+answer, then answer her in the same reply. You cannot speak into an empty window: she has
+to send a message or click a prompt first. This check is that first reply, not a second one.
 
 - Windows: `C:\agent-cv-screening\update_engine.cmd --quiet`
 - macOS: `~/agent-cv-screening/update_engine.command --quiet`
 
-Rules: at most once per conversation. If it prints "up to date" or nothing, continue silently and
-never mention it to HR. If it applies an update, say one line ("I've updated the screening tool —
-starting now"); the next run re-scores from scratch, which is intended. If the updater is missing,
-offline, or fails, continue with the installed engine and never surface the failure.
+The command prints one line, `update_status=... installed=... latest=...`. At most once per
+conversation. Then:
+
+- `up_to_date` — say nothing about the update. Answer what she asked.
+- `updated` — one sentence, then her answer: "I've updated the screening tool — starting now."
+  繁中：「篩選工具已更新，現在開始。」 The next screen rebuilds CVs and scores, which is intended.
+- `failed`, or the command prints nothing — the **first sentence** of this reply tells her,
+  in her language, then you continue with what she asked. Do not stop the screening.
+  - English: "I could not update the screening tool, so this run uses the copy already on this computer."
+  - 繁中：「篩選工具這次未能更新，所以仍用這部電腦上現有的版本。」
 
 For demo-mode jobs on any platform you can pass `--driver http` (the public demo needs no
 browser). Screening the real PolyU records pages uses the human browser flow, on Windows and

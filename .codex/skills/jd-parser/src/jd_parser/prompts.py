@@ -60,12 +60,13 @@ def build_jd_structure_user_prompt(jd_text: str, preprocessed_payload: dict[str,
 
 The evidence is hints only. The advertisement is the source of truth.
 
-Keys:
+Keys (fill every bucket the advertisement states; omit only what the text does not say):
 - must_skills: string[] of concrete skills the applicant must have
 - preferred_skills: string[] of advantage-only skills
 - education: {{"minimum_degree": "bachelor"|"master"|"phd"|"none", "field_of_study": string, "is_mandatory": bool}}
-- experience: {{"minimum_years": number|null}}
+- experience: {{"minimum_years": number|null, "raw_text": string}}
 - languages: [{{"language": string, "level": "native"|"fluent"|"business"|"basic", "is_mandatory": bool}}]
+- visa: {{"requirement_type": "required"|"not_required"|"unknown", "target_region": string|null}}
 - reasoning_trace: [{{"skill", "bucket", "evidence", "confidence"}}]
 
 Rules:
