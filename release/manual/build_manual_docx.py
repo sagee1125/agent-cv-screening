@@ -96,9 +96,9 @@ BLOCKS: list[tuple[str, object]] = [
     ("ph", "a screening request typed into the Vera chat window"),
     ("p", "**For internal University jobs, four things must be true while the screening runs:**"),
     ("bullets", [
-        "Chrome is open",
+        "Chrome is open in a **normal window**, not Incognito / InPrivate",
         "the **Kimi browser extension** is enabled — check **chrome://extensions**",
-        "you are signed in on the PolyU JES internal pages and already inside the system",
+        "you are signed in at **https://jobs.polyu.edu.hk/internal** (the public homepage is not enough)",
         "the computer is on the campus network or connected to the University VPN",
     ]),
     ("ph", "chrome://extensions showing the Kimi extension enabled"),

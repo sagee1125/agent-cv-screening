@@ -144,8 +144,9 @@ Never, because a command was refused:
   `login` (prod only — a positive test: HR is inside `/internal/` **and** the records
   table rendered). A failed check means **hand the run back to HR with the one fix it
   names** (`daemon_unreachable` → start/open Chrome so the helper starts;
-  `extension_disabled` → re-enable the extension; `not_signed_in` → sign in to the
-  internal system) — do **not** run the screen anyway and do not retry silently. The
+  `extension_disabled` → re-enable the extension; `not_signed_in` → sign in at
+  `https://jobs.polyu.edu.hk/internal` in a **normal Chrome window, not Incognito** —
+  opening the public homepage is not enough) — do **not** run the screen anyway and do not retry silently. The
   check is cheap: re-run it after HR fixes something instead of assuming.
 - `--driver webbridge` is the default and must stay default: HR watches the browser find
   the job, so you never silently fall back to `--driver http`. Use `--driver http` only
@@ -174,11 +175,13 @@ report. When a check fails, tell HR the one thing to fix, wait for her, then re-
 
 **The one message to HR, in her language, said once** — never interrogate her item by item:
 
-- English: "Before we start: please make sure **Chrome is open**, the **Kimi extension is
-  enabled** in `chrome://extensions`, and — for internal jobs — that you are **signed in to
-  the internal recruitment system**. Tell me when ready."
-- 繁中：「開始前請確認：**Chrome 已開啟**、`chrome://extensions` 內 **Kimi 擴充功能已啟用**，
-  內部職位還要**已登入內部招聘系統**。好了請告訴我。」
+- English: "Before we start: please make sure **Chrome is open in a normal window (not
+  Incognito)**, the **Kimi extension is enabled** in `chrome://extensions`, and — for
+  internal jobs — that you are **signed in at https://jobs.polyu.edu.hk/internal** (opening
+  the public homepage is not enough). Tell me when ready."
+- 繁中：「開始前請確認：**Chrome 已用一般視窗開啟（不要用無痕）**、`chrome://extensions` 內
+  **Kimi 擴充功能已啟用**，內部職位還要**已登入 https://jobs.polyu.edu.hk/internal**（只開官網
+  首頁不夠）。好了請告訴我。」
 
 ### What an extension failure means — read `checks[].reason`, do not guess
 
@@ -189,10 +192,38 @@ her language rather than inventing your own:
 
 | `checks[].reason` | What is actually wrong | What HR does |
 |---|---|---|
-| `extension_not_installed` | the browser's profile holds no Kimi extension | install it (formerly Kimi WebBridge) — Chrome Web Store: `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc`, or Kimi's own page when the store is blocked: `https://www.kimi.com/products/kimi-browser-extension` |
-| `extension_off` | installed, but the browser disabled it | `chrome://extensions` → switch **Kimi** on and accept the permission prompt |
-| `browser_not_running` | installed and enabled, but no browser is open | open Chrome |
+| `extension_not_installed` | the browser's profile holds no Kimi extension | install it (formerly Kimi WebBridge) in a **normal Chrome window, not Incognito** — Chrome Web Store: `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc`, or Kimi's own page when the store is blocked: `https://www.kimi.com/products/kimi-browser-extension` |
+| `extension_off` | installed, but the browser disabled it | `chrome://extensions` in a **normal window (not Incognito)** → switch **Kimi** on and accept the permission prompt |
+| `browser_not_running` | installed and enabled, but no browser is open | open a **normal Chrome window (not Incognito)** |
 | `extension_disabled` | **not determined**: the profile could not be read, or it is installed and on and still not attaching | the generic sentence — open Chrome (or Edge) with Kimi enabled |
+
+`ask.questions` always contains **both** the English sentence and the Traditional Chinese
+sentence. Deliver **one** of them — the half that matches HR's latest message. Never invent a
+third wording, never Simplified, and never paste both halves into the same reply.
+
+Ready lines (same meaning as `ask.questions`):
+
+- `extension_not_installed`
+  - EN: "The Kimi browser extension is not installed. Please install it in a **normal Chrome
+    window (not Incognito)** from `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc`
+    (or `https://www.kimi.com/products/kimi-browser-extension` if the store is blocked), then tell me."
+  - 繁中：「這台電腦尚未安裝 Kimi 瀏覽器擴充。請用**一般 Chrome 視窗（不要用無痕）**安裝：
+    `https://chromewebstore.google.com/detail/kimi/fldmhceldgbpfpkbgopacenieobmligc`（商店打不開則用
+    `https://www.kimi.com/products/kimi-browser-extension`）。好了請告訴我。」
+- `extension_off`
+  - EN: "Kimi is installed but switched off. In a **normal Chrome window (not Incognito)** open
+    `chrome://extensions`, enable **Kimi**, then tell me."
+  - 繁中：「Kimi 擴充已安裝但被停用。請用**一般 Chrome 視窗（不要用無痕）**開啟
+    `chrome://extensions`，啟用 **Kimi**。好了請告訴我。」
+- `browser_not_running`
+  - EN: "Please open a **normal Chrome window (not Incognito)**, then tell me."
+  - 繁中：「請開啟**一般 Chrome 視窗（不要用無痕）**。好了請告訴我。」
+- `not_signed_in`
+  - EN: "You are not signed in to the internal job pages. Opening the public homepage is not
+    enough. Please sign in at `https://jobs.polyu.edu.hk/internal` in a **normal Chrome window
+    (not Incognito)**, then tell me."
+  - 繁中：「你尚未登入內部招聘系統。只開官網首頁不夠。請用**一般 Chrome 視窗（不要用無痕）**登入
+    `https://jobs.polyu.edu.hk/internal`。好了請告訴我。」
 
 Only `extension_not_installed` justifies telling HR to install anything. If the reason is
 anything else, do not suggest installing: the extension is already on the computer.
@@ -644,13 +675,16 @@ one a result came from when it could matter.
   returns.
 - **Prod** — `https://jobs.polyu.edu.hk/internal/` (records list:
   `/internal/records.php`). Needs the campus network / VPN, HR signed in to the
-  internal system in the Chrome the run uses, and the preflight `login` check passing:
-  it passes only when the run lands inside `/internal/` **and** the records table
-  rendered — a positive test, never a guess from a redirect. The run re-checks this
-  itself just before it reads the page, so a session that expired after the preflight
-  stops the run with the sign-in question instead of reporting a job that does not
-  exist. If HR is told to sign in, she signs in to the internal system in Chrome and
-  asks again — never hand her a cookie, password or token prompt.
+  internal system in a **normal Chrome window (not Incognito)** that the run uses, and
+  the preflight `login` check passing: it passes only when the run lands inside
+  `/internal/` **and** the records table rendered — a positive test, never a guess from
+  a redirect. Opening `https://jobs.polyu.edu.hk` without signing into `/internal/` is
+  not enough. Incognito will not work: the extension and the login session are not
+  visible to WebBridge there. The run re-checks this itself just before it reads the
+  page, so a session that expired after the preflight stops the run with the sign-in
+  question instead of reporting a job that does not exist. If HR is told to sign in, she
+  signs in at `https://jobs.polyu.edu.hk/internal` in a normal Chrome window and asks
+  again — never hand her a cookie, password or token prompt.
 
 Never ask HR for cookies, passwords or tokens in either mode — the browser session HR
 already has is the only credential this skill touches.

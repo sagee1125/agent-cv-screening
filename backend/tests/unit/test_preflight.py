@@ -241,6 +241,12 @@ def test_cli_extension_not_installed_carries_both_links(monkeypatch, capsys) -> 
     projected = " ".join(envelope["ask"]["questions"])
     assert module.STORE_URL in projected
     assert module.PRODUCT_URL in projected
+    assert "Incognito" in projected
+    assert "無痕" in projected
+    from host_envelope.project import ASK_QUESTION_LIMIT
+
+    for sentence in envelope["ask"]["questions"]:
+        assert len(sentence) <= ASK_QUESTION_LIMIT
 
 
 # Installed but switched off is its own sentence: "enable it" is not "install it".
@@ -319,6 +325,10 @@ def test_cli_prod_not_signed_in(monkeypatch, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["missing"] == ["jas_session"]
     assert payload["checks"][-1] == {"check": "login", "ok": False, "reason": "not_signed_in", "version": None}
+    question = " ".join(payload["questions"])
+    assert "Incognito" in question
+    assert "無痕" in question
+    assert "https://jobs.polyu.edu.hk/internal" in question
 
 
 # A signed-in internal browser passes all three checks.

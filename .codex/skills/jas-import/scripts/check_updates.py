@@ -35,13 +35,15 @@ ASK_REFNO = (
     "請發送崗位參考編號，或貼上內部招聘記錄頁的連結。",
 )
 ASK_JAS_SESSION = (
-    "Please allow access to the internal job records page so the update check can continue.",
-    "請允許存取內部招聘記錄頁，以便檢查更新。",
+    "Please sign in at https://jobs.polyu.edu.hk/internal in a normal Chrome window "
+    "(not Incognito) so the update check can continue.",
+    "請用一般 Chrome 視窗（不要用無痕）登入 https://jobs.polyu.edu.hk/internal ，以便檢查更新。",
 )
 ASK_WEBRIDGE = (
-    "Please start Kimi WebBridge and open Chrome/Edge with its extension connected "
-    "(or rerun with --driver http for the public demo).",
-    "請啟動 Kimi WebBridge，並開啟已連接擴充的 Chrome/Edge（公開 demo 可直接改用 --driver http）。",
+    "Please start Kimi WebBridge and open a normal Chrome/Edge window (not Incognito) with its "
+    "extension connected (or rerun with --driver http for the public demo).",
+    "請啟動 Kimi WebBridge，並用一般 Chrome/Edge 視窗（不要用無痕）連上擴充"
+    "（公開 demo 可直接改用 --driver http）。",
 )
 
 # WebBridge failures that mean "the browser is not usable yet" rather than a real error.

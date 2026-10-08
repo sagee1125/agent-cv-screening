@@ -78,8 +78,9 @@ ASK_REFNO = (
     "請發送崗位參考編號，或貼上內部招聘記錄頁的連結。",
 )
 ASK_JAS_SESSION = (
-    "Please allow access to the internal job records page so this screening can continue.",
-    "請允許存取內部招聘記錄頁，以便繼續篩選。",
+    "Please sign in at https://jobs.polyu.edu.hk/internal in a normal Chrome window "
+    "(not Incognito) so this screening can continue.",
+    "請用一般 Chrome 視窗（不要用無痕）登入 https://jobs.polyu.edu.hk/internal ，以便繼續篩選。",
 )
 ASK_JD = (
     "Save the job records page as HTML in the folder, then try again.",

@@ -25,6 +25,7 @@ from screening_core.input_policy import ALLOWED_URL_HOSTS, extra_allowed_hosts_f
 from screening_core.site_mode import SITE_MODE_ENV, SiteModeError, apply_site_defaults
 from webridge_collect.client import WebBridgeClient, WebBridgeError, close_session_tabs, ensure_webbridge_daemon
 from webridge_collect.collect import COLLECT_ROOT_NAME, build_records_url, collect_job
+from webridge_collect.login import ASK_LOGIN
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -35,17 +36,10 @@ ASK_REFNO = (
     "請發送崗位參考編號，或貼上內部招聘記錄頁的連結。",
 )
 ASK_WEBRIDGE = (
-    "Please start Kimi WebBridge and open Chrome/Edge with its extension connected "
-    "(or rerun with --driver http for the public demo).",
-    "請啟動 Kimi WebBridge，並開啟已連接擴充的 Chrome/Edge（公開 demo 可直接改用 --driver http）。",
-)
-
-# The same wording the readiness check uses for the same failure, so HR reads one sentence about
-# signing in whichever path noticed it first.
-ASK_LOGIN = (
-    "You are not signed in to the internal job pages. Please sign in to the internal system in "
-    "Chrome, then ask me again.",
-    "你尚未登入內部招聘系統。請先在 Chrome 登入內部系統，然後再叫我。",
+    "Please start Kimi WebBridge and open a normal Chrome/Edge window (not Incognito) with its "
+    "extension connected (or rerun with --driver http for the public demo).",
+    "請啟動 Kimi WebBridge，並用一般 Chrome/Edge 視窗（不要用無痕）連上擴充"
+    "（公開 demo 可直接改用 --driver http）。",
 )
 
 # WebBridge failures that mean "the browser is not usable yet" rather than a real error.

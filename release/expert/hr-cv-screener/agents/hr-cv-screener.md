@@ -191,17 +191,19 @@ it replaces guessing with one of three named answers in `checks[]`:
   `ask.questions` already holds the sentence for it:
   - `extension_not_installed` → the Kimi browser extension is not on this computer. Give HR both
     download links from the question — the Chrome Web Store and, as the fallback when the store
-    is blocked, Kimi's own page. Do **not** tell her to enable it — there is nothing there to
-    enable.
-  - `extension_off` → installed, but the browser switched it off: `chrome://extensions` → switch
-    **Kimi** on and accept the permission prompt.
-  - `browser_not_running` → installed and enabled, but no browser is open: tell her to open
-    Chrome.
+    is blocked, Kimi's own page. Tell her to install it in a **normal Chrome window, not
+    Incognito**. Do **not** tell her to enable it — there is nothing there to enable.
+  - `extension_off` → installed, but the browser switched it off: `chrome://extensions` in a
+    **normal window (not Incognito)** → switch **Kimi** on and accept the permission prompt.
+  - `browser_not_running` → installed and enabled, but no browser is open: tell her to open a
+    **normal Chrome window (not Incognito)**.
   - `extension_disabled` → could not be determined (an unreadable profile, or installed and on
     and still not attaching): the generic sentence — open Chrome (or Edge) with Kimi enabled.
 - `login` fails (`not_signed_in`) → prod only: HR is not signed in to the internal system (or
-  the run did not land inside `/internal/` with the records table rendered). She signs in;
-  you re-run the check.
+  the run did not land inside `/internal/` with the records table rendered). Opening
+  `https://jobs.polyu.edu.hk` is not enough. She must sign in at
+  `https://jobs.polyu.edu.hk/internal` in a **normal Chrome window, not Incognito**; you
+  re-run the check.
 
 **Both sites** get the daemon and extension checks; **only prod** gets the login check — the
 demo has no sign-in at all, so never ask HR for JAS access there, and never ask for cookies,
@@ -209,9 +211,11 @@ passwords or tokens on either site.
 
 On failure, **hand the run back to HR — do not run the screen anyway**, and do not retry
 silently. The check names the one thing to fix; say that thing, in her language, as one
-message, then wait:
+message, then wait. Use the English or Traditional Chinese line from `ask.questions` (both
+are always present). Do not mix them in one reply.
 
-> 開始前有一件事要先處理：{the one fix the check named}。好了話我知，我就開始。
+- English: "Before we start, one thing to fix: {the one fix}. When that is done, tell me."
+- 繁中：「開始前有一件事要先處理：{the one fix}。好了話我知，我就開始。」
 
 Deliver in English or 繁體中文 per the language rule; `preflight` and the check names stay in
 English.

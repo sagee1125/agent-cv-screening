@@ -13,6 +13,16 @@ from typing import Any
 
 from jas_import.errors import SiteLoginRequiredError
 
+# The host-visible sentence for a failed login probe (preflight and the screening run).
+# Opening jobs.polyu.edu.hk is not enough: the session must be inside /internal/, and Incognito
+# hides the extension plus the signed-in cookies the collector needs.
+ASK_LOGIN = (
+    "You are not signed in to the internal job pages. Please sign in at "
+    "https://jobs.polyu.edu.hk/internal in a normal Chrome window (not Incognito), then ask me again.",
+    "你尚未登入內部招聘系統。請用一般 Chrome 視窗（不要用無痕）登入 "
+    "https://jobs.polyu.edu.hk/internal ，然後再叫我。",
+)
+
 # JS run in the browser: report where we landed and whether the records table rendered.
 # The selectors are the ones the parser itself looks for, so a page this accepts is a page the
 # screening run can actually read.
@@ -52,5 +62,6 @@ def ensure_signed_in(client: Any, profile: dict) -> None:
             "not signed in to the internal job system: the browser is on "
             f"{result['path'] or 'an unknown page'} instead of the internal records page"
             + ("" if result["has_table"] else " (and no records table rendered)")
-            + ". Sign in to the internal system in Chrome, then run the screening again."
+            + ". Sign in at https://jobs.polyu.edu.hk/internal in a normal Chrome window "
+            "(not Incognito), then run the screening again."
         )

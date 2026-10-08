@@ -43,7 +43,7 @@ from webridge_collect.client import (
     start_webbridge_daemon,
     webbridge_status,
 )
-from webridge_collect.login import probe_sign_in
+from webridge_collect.login import ASK_LOGIN, probe_sign_in
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -80,31 +80,29 @@ ASK_DAEMON = (
 # other way to be told where to get it, and "contact us" costs a round trip. The store listing is
 # the one-click path; the vendor's own page is the fallback when the Web Store is unreachable.
 ASK_EXTENSION = (
-    "Kimi WebBridge is running, but no browser extension is connected. Please open Chrome (or "
-    "Edge) with the Kimi browser extension enabled, then ask me again.",
-    "Kimi WebBridge 已在運行，但沒有瀏覽器擴充連上。請開啟 Chrome（或 Edge）並啟用 Kimi 瀏覽器擴充，"
-    "然後再叫我。",
+    "Kimi WebBridge is running, but no browser extension is connected. Please open a normal "
+    "Chrome (or Edge) window — not Incognito — with the Kimi extension enabled, then ask me again.",
+    "Kimi WebBridge 已在運行，但沒有瀏覽器擴充連上。請用一般 Chrome（或 Edge）視窗（不要用無痕）"
+    "並啟用 Kimi 瀏覽器擴充，然後再叫我。",
 )
 ASK_EXTENSION_MISSING = (
     "The Kimi browser extension is not installed on this computer. Install it from the Chrome Web "
-    f"Store ({STORE_URL}), or from Kimi's own page ({PRODUCT_URL}), then ask me again.",
+    f"Store ({STORE_URL}), or from Kimi's own page ({PRODUCT_URL}), then ask me again. Use a "
+    "normal window, not Incognito.",
     f"這台電腦尚未安裝 Kimi 瀏覽器擴充功能。請從 Chrome 線上應用程式商店安裝（{STORE_URL}），"
-    f"或到 Kimi 官方頁面下載（{PRODUCT_URL}），然後再叫我。",
+    f"或到 Kimi 官方頁面下載（{PRODUCT_URL}），然後再叫我。請用一般視窗，不要用無痕。",
 )
 ASK_EXTENSION_OFF = (
     "The Kimi browser extension is installed but switched off. Please open chrome://extensions "
-    "and enable Kimi, then ask me again.",
-    "Kimi 瀏覽器擴充功能已安裝但被停用。請開啟 chrome://extensions 啟用 Kimi，然後再叫我。",
+    "in a normal Chrome window (not Incognito) and enable Kimi, then ask me again.",
+    "Kimi 瀏覽器擴充功能已安裝但被停用。請用一般 Chrome 視窗（不要用無痕）開啟 "
+    "chrome://extensions 啟用 Kimi，然後再叫我。",
 )
 ASK_BROWSER_CLOSED = (
     "The Kimi browser extension is installed and enabled, but no browser is open. Please open "
-    "Chrome, then ask me again.",
-    "Kimi 瀏覽器擴充功能已安裝並已啟用，但沒有開啟瀏覽器。請開啟 Chrome，然後再叫我。",
-)
-ASK_LOGIN = (
-    "You are not signed in to the internal job pages. Please sign in to the internal system in "
-    "Chrome, then ask me again.",
-    "你尚未登入內部招聘系統。請先在 Chrome 登入內部系統，然後再叫我。",
+    "a normal Chrome window (not Incognito), then ask me again.",
+    "Kimi 瀏覽器擴充功能已安裝並已啟用，但沒有開啟瀏覽器。請開啟一般 Chrome 視窗（不要用無痕），"
+    "然後再叫我。",
 )
 
 # The sentence that goes with each reason. The fallback covers "could not tell".
