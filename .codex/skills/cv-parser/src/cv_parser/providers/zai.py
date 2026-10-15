@@ -26,39 +26,34 @@ class ZaiCVRefiner(CVEnrichmentProvider):
         redacted_image_urls: list[str] | None = None,
     ) -> CVEnrichmentResult:
         from screening_core.config import settings
-        from screening_core.llm_client import LLMClient
+        from screening_core.llm_client import LLMClient, cv_llm_timeout
 
-        images = [url for url in (redacted_image_urls or []) if str(url).strip()]
-        if not masked_cv_text.strip() and not images:
+        # Page images stay on the machine even if a caller still passes URLs.
+        if not masked_cv_text.strip():
+            note = "No redacted CV text to refine."
+            if redacted_image_urls:
+                note = "No redacted CV text to refine. Page images are not sent."
             return CVEnrichmentResult(
                 provider_name=self.name,
                 error="empty_redacted_content",
-                notes=["No redacted CV text or page image to refine."],
+                notes=[note],
             )
 
         client = self._llm_client or LLMClient()
         user_prompt = build_cv_refiner_user_prompt(masked_cv_text, draft_structured, jd_text)
-        if images and not masked_cv_text.strip():
-            user_prompt += (
-                "\n\nThe CV text layer is empty. Read only the attached redacted page images. "
-                "Do not infer a name, email, phone, or address.\n"
-            )
-        user_content: str | list[dict[str, Any]] = user_prompt
-        if images and not masked_cv_text.strip():
-            user_content = [{"type": "text", "text": user_prompt}]
-            user_content.extend({"type": "image_url", "image_url": {"url": url}} for url in images)
         text_model = getattr(settings, "cv_parser_llm_model", None) or settings.llm_model
-        model = settings.llm_vision_model if isinstance(user_content, list) else text_model
+        model = text_model
         try:
             response = await client.chat_completion_messages(
                 [
                     {"role": "system", "content": CV_REFINER_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
+                    {"role": "user", "content": user_prompt},
                 ],
                 model=model,
                 response_format={"type": "json_object"},
                 temperature=0,
                 seed=42,
+                timeout=cv_llm_timeout(),
             )
         except Exception as exc:
             return CVEnrichmentResult(

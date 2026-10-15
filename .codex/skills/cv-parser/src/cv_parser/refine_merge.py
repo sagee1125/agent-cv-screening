@@ -18,6 +18,27 @@ def normalize_refiner_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return normalize_schema(cleaned)
 
 
+# True when the first pass is missing jobs, dates, skills, or spoken languages.
+def draft_needs_hybrid_pass(structured: dict[str, Any]) -> bool:
+    experience = structured.get("experience") if isinstance(structured.get("experience"), list) else []
+    if not experience:
+        return True
+    dated = sum(
+        1
+        for item in experience
+        if isinstance(item, dict)
+        and (str(item.get("start_date") or "").strip() or str(item.get("end_date") or "").strip())
+    )
+    # More than half the jobs have no dates.
+    if dated * 2 < len(experience):
+        return True
+    skills = structured.get("skills") if isinstance(structured.get("skills"), list) else []
+    if len(skills) < 2:
+        return True
+    languages = structured.get("languages") if isinstance(structured.get("languages"), list) else []
+    return not languages
+
+
 # Count experience rows that carry a parseable start_date.
 def _dated_experience_count(items: list[dict[str, Any]]) -> int:
     return sum(1 for item in items if isinstance(item, dict) and item.get("start_date"))

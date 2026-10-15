@@ -576,7 +576,7 @@ def test_cv_parser_cli_wraps_skill_function(tmp_path, monkeypatch, capsys) -> No
         "file_hash": "abc123",
         "cache_hit": False,
         "status": "success",
-        "parse_path": "vision",
+        "parse_path": "text",
         "structured_data": {
             "name": "Test User",
             "email": None,

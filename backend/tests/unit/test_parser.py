@@ -704,3 +704,79 @@ def test_declared_experience_years_from_summary() -> None:
     assert len(structured["experience"]) == 1
     row = structured["experience"][0]
     assert row["start_date"] and row["end_date"] == "Present"
+
+
+class VisionRejectingLLM(DummyLLM):
+    """Fails the test if a page image is attached to any model call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.image_call = False
+
+    # Records a multimodal call so the test can prove none was made.
+    async def chat_completion_messages(self, messages: list[dict[str, Any]], **__: Any) -> dict[str, Any]:
+        self.image_call = True
+        content = messages[-1]["content"] if messages else ""
+        assert not isinstance(content, list)
+        raise AssertionError("page images must not be sent")
+
+
+# The external call is redacted text only. Page images are not uploaded.
+@pytest.mark.asyncio
+async def test_parse_cv_sends_redacted_text_not_page_images() -> None:
+    llm = VisionRejectingLLM()
+    service = CVParserService(llm_client=llm, cache=DummyCache())
+
+    async def fake_extract(_: str) -> LocalCVDocument:
+        return LocalCVDocument(
+            raw_text="Alice Local\nalice.local@example.com\n+852 6123 4567\nSkills\nPython",
+            page_texts=(),
+            ocr_lines=(),
+            ocr_page_indexes=frozenset(),
+        )
+
+    service._extract_local_document = fake_extract  # type: ignore[method-assign]
+    result = await service.parse_cv("resume.pdf")
+
+    assert result["parse_path"] == "text"
+    assert result["status"] == "success"
+    assert llm.called is True
+    assert llm.image_call is False
+    assert llm.user_prompt is not None
+    assert "Alice Local" not in llm.user_prompt
+    assert "alice.local@example.com" not in llm.user_prompt
+
+
+# A role and its date on the same row stay together. They are not split into two columns.
+def test_layout_keeps_role_dates_on_the_same_row(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "dated-roles.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=595, height=400)
+    page.insert_text((72, 120), "Business Analyst", fontsize=12)
+    page.insert_text((430, 120), "2020 - 2024", fontsize=12)
+    page.insert_text((72, 200), "Data Specialist", fontsize=12)
+    page.insert_text((430, 200), "2016 - 2019", fontsize=12)
+    document.save(pdf_path)
+    document.close()
+
+    text = extract_local_cv_document(pdf_path).raw_text
+    assert text.index("Business Analyst") < text.index("2020 - 2024") < text.index("Data Specialist")
+    assert text.index("Data Specialist") < text.index("2016 - 2019")
+
+
+# A real two-column page is read down the left column before the right column.
+def test_layout_reads_left_column_before_right(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "two-column.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=1000, height=500)
+    page.insert_text((40, 80), "Left column research methods and study design notes", fontsize=12)
+    page.insert_text((40, 140), "Left column fieldwork sample and analysis notes", fontsize=12)
+    page.insert_text((560, 80), "Right column teaching duties and course design notes", fontsize=12)
+    page.insert_text((560, 140), "Right column supervision record and seminar notes", fontsize=12)
+    document.save(pdf_path)
+    document.close()
+
+    text = extract_local_cv_document(pdf_path).raw_text
+    assert text.index("Left column research") < text.index("Left column fieldwork")
+    assert text.index("Left column fieldwork") < text.index("Right column teaching")
+    assert text.index("Right column teaching") < text.index("Right column supervision")

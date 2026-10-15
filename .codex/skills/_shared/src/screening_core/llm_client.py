@@ -17,10 +17,34 @@ from screening_core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# A full CV JSON from glm-4-flash was measured at 62–135s. Job ads are shorter.
+LLM_CV_READ_TIMEOUT_SECONDS = 180.0
+LLM_JD_READ_TIMEOUT_SECONDS = 60.0
+LLM_CONNECT_TIMEOUT_SECONDS = 20.0
+
+
+# Builds the wait limit for one model call. Connect stays short so a dead network fails fast.
+def llm_call_timeout(read_seconds: float) -> httpx.Timeout:
+    return httpx.Timeout(read_seconds, connect=LLM_CONNECT_TIMEOUT_SECONDS)
+
+
+# Wait used for CV parsing and CV refinement.
+def cv_llm_timeout() -> httpx.Timeout:
+    return llm_call_timeout(LLM_CV_READ_TIMEOUT_SECONDS)
+
+
+# Wait used for job-ad refinement and other short calls.
+def jd_llm_timeout() -> httpx.Timeout:
+    return llm_call_timeout(LLM_JD_READ_TIMEOUT_SECONDS)
+
 
 # Builds an httpx client that verifies TLS with the OS certificate store.
 def _os_trust_http_client() -> httpx.Client:
-    return httpx.Client(verify=ssl.create_default_context(), timeout=60.0)
+    # The client ceiling is the longer CV wait. Each call still passes its own limit.
+    return httpx.Client(
+        verify=ssl.create_default_context(),
+        timeout=cv_llm_timeout(),
+    )
 
 
 class LLMClient:
@@ -45,6 +69,7 @@ class LLMClient:
         response_format: dict[str, str] | None = None,
         temperature: float = 0,
         seed: int = 42,
+        timeout: httpx.Timeout | float | None = None,
     ) -> dict[str, Any]:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -56,8 +81,10 @@ class LLMClient:
             response_format=response_format,
             temperature=temperature,
             seed=seed,
+            timeout=timeout,
         )
 
+    # Sends chat messages. Omitting timeout uses the shorter job-ad wait, not the CV wait.
     @retry(wait=wait_exponential(multiplier=1, min=1, max=8), stop=stop_after_attempt(3), reraise=True)
     async def chat_completion_messages(
         self,
@@ -68,8 +95,10 @@ class LLMClient:
         temperature: float = 0,
         seed: int = 42,
         allow_json_repair: bool = True,
+        timeout: httpx.Timeout | float | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
+        request_timeout = jd_llm_timeout() if timeout is None else timeout
         request_kwargs: dict[str, Any] = {
             "model": model or self._model,
             "messages": [
@@ -79,6 +108,7 @@ class LLMClient:
             "temperature": temperature,
             "response_format": response_format,
             "seed": seed,
+            "timeout": request_timeout,
         }
         try:
             response = await asyncio.to_thread(self._client.chat.completions.create, **request_kwargs)
@@ -117,6 +147,7 @@ class LLMClient:
                         raw_content=content,
                         model=request_kwargs["model"],
                         seed=seed,
+                        timeout=request_timeout,
                     )
                     content = repaired["raw_content"]
                     parsed = repaired["parsed"]
@@ -200,6 +231,7 @@ class LLMClient:
         raw_content: str,
         model: str,
         seed: int,
+        timeout: httpx.Timeout | float | None = None,
     ) -> dict[str, Any]:
         repair_system = (
             "You repair malformed JSON. "
@@ -221,4 +253,5 @@ class LLMClient:
             temperature=0,
             seed=seed,
             allow_json_repair=False,
+            timeout=timeout,
         )

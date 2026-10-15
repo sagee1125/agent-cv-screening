@@ -75,12 +75,12 @@ Important defaults and fixed behaviors in code:
 
 - `backend/app/config.py`
   - default `llm_model` is `glm-4-flash`
-  - default `llm_vision_model` is `glm-4v-flash`
+  - `llm_vision_model` remains in settings and is not used for CV parsing
 - `docker-compose.yml`
   - `LLM_MODEL` fallback default is `glm-4-flash`
 - `backend/app/services/cv_parser/service.py`
-  - many parser calls use fixed `temperature=0` and `seed=42`
-  - vision retry, focus pass, and text fallback are configurable, but call-time parameters remain fixed
+  - the parser reads each page locally, redacts the text, then calls `glm-4-flash` at `temperature=0` and `seed=42`
+  - page images are not uploaded
 
 ## JD Parser Modes
 

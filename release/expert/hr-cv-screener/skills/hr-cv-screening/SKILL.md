@@ -296,8 +296,9 @@ The command prints one line, `update_status=... installed=... latest=...`. At mo
 conversation. Then:
 
 - `up_to_date` — say nothing about the update. Answer what she asked.
-- `updated` — one sentence, then her answer: "I've updated the screening tool — starting now."
-  繁中：「篩選工具已更新，現在開始。」 The next screen rebuilds CVs and scores, which is intended.
+- `updated` — one sentence, then her answer: "I've updated the screening tool — the first screening of a job will take longer, because the resumes are read again."
+  繁中：「篩選工具已更新，這個職位第一次篩選會久一點，因為簡歷會重新讀一遍。」
+  Say that sentence only. The first screening of each job after the update reads the resumes again, so it takes longer. Do not say this when the status is `up_to_date`.
 - `failed`, or the command prints nothing — the **first sentence** of this reply tells her,
   in her language, then you continue with what she asked. Do not stop the screening.
   - English: "I could not update the screening tool, so this run uses the copy already on this computer."

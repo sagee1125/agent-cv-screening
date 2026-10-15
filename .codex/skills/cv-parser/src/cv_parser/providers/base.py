@@ -23,7 +23,7 @@ class CVEnrichmentResult:
 
 
 class CVEnrichmentProvider(ABC):
-    """Base class for CV enrichment (hybrid LLM refinement after vision/text parse)."""
+    """Base class for CV enrichment (hybrid LLM refinement after the text parse)."""
 
     name: str = "base"
 
@@ -36,4 +36,4 @@ class CVEnrichmentProvider(ABC):
         draft_structured: dict[str, Any],
         redacted_image_urls: list[str] | None = None,
     ) -> CVEnrichmentResult:
-        """Refine a draft CV parse using redacted text, optional redacted images, and JD context."""
+        """Refine a draft CV parse from redacted text and JD context. Ignore any image URLs."""

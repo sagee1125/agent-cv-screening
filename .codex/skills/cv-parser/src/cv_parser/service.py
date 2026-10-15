@@ -1,4 +1,4 @@
-# Orchestrates privacy-safe local PII extraction and external CV content parsing.
+# Orchestrates local layout reading, text redaction, and a text-only external parse.
 from __future__ import annotations
 
 import asyncio
@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from cv_parser.providers.base import CVEnrichmentProvider
-from cv_parser.refine_merge import merge_cv_refinement
+from cv_parser.refine_merge import draft_needs_hybrid_pass, merge_cv_refinement
 
 from screening_core.config import settings
 from screening_core.hash_cache import HashCache
-from screening_core.llm_client import LLMClient
+from screening_core.llm_client import LLMClient, cv_llm_timeout
 from cv_parser.local_ner import LocalNERResult, detect_local_pii
 from cv_parser.helpers import (
     apply_content_fallback,
@@ -49,7 +49,7 @@ from cv_parser.helpers import (
     to_clean_text,
     unique_keep_order,
 )
-from cv_parser.ocr import LocalCVDocument, OCRLine, extract_local_cv_document
+from cv_parser.ocr import LocalCVDocument, extract_local_cv_document
 from cv_parser.pdf_utils import (
     extract_with_pdfplumber,
     extract_with_pymupdf,
@@ -58,18 +58,13 @@ from cv_parser.pdf_utils import (
     render_pdf_pages_as_data_urls,
 )
 from cv_parser.pii import (
-    contact_values_for_redaction,
     mask_pii_text,
     strip_contact_fields,
 )
-from cv_parser.prompts import (
-    PARSER_SYSTEM_PROMPT,
-    PARSER_VISION_FOCUS_PROMPT,
-    PARSER_VISION_USER_PROMPT,
-)
+from cv_parser.prompts import PARSER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v7-address-local"
+PARSER_CACHE_VERSION = "pii-redaction-v9-skill-phrase"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent
@@ -157,21 +152,20 @@ class CVParserService:
         masked_text: str,
         jd_text: str | None,
         parse_path: str,
-        redacted_image_urls: list[str] | None = None,
     ) -> tuple[dict[str, Any], str, str | None]:
-        """Merge hybrid refinement into the draft when a provider is configured."""
+        """Merge hybrid refinement into the draft. Page images are never attached."""
         provider = self._enrichment_provider
-        images = [url for url in (redacted_image_urls or []) if str(url).strip()]
         if provider is None or not settings.cv_parser_hybrid_enabled:
             return structured, parse_path, None
-        if not masked_text.strip() and not images:
+        if not masked_text.strip():
             return structured, parse_path, "hybrid_skipped=no_redacted_content"
+        if not draft_needs_hybrid_pass(structured):
+            return structured, parse_path, "hybrid_skipped=draft_complete"
         try:
             result = await provider.refine(
                 masked_cv_text=masked_text,
                 jd_text=jd_text,
                 draft_structured=structured,
-                redacted_image_urls=images,
             )
         except Exception as exc:
             logger.exception("CV hybrid refiner failed")
@@ -216,7 +210,6 @@ class CVParserService:
         sensitive_values = list(local_pii.sensitive_values)
         contact_hints = self._extract_contact_hints(raw_text, local_names, sensitive_values)
         masked_text = mask_pii_text(raw_text, local_names, sensitive_values)
-        pii_values = contact_values_for_redaction(raw_text, local_names, sensitive_values)
         if not contact_hints.get("name"):
             logger.warning("Local name detection failed; blocking all external parser calls.")
             structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
@@ -236,37 +229,47 @@ class CVParserService:
                 "cache_hit": False,
                 **cache_payload,
             }
-        try:
-            llm_result = await self._parse_with_pdf_images(
-                file_path=file_path,
-                jd_text=jd_text,
-                pii_values=pii_values,
-                ocr_lines=local_document.ocr_lines,
-            )
-            safe_llm_payload = strip_contact_fields(llm_result["parsed"])
-            structured = self._merge_contact_hints(self._normalize_schema(safe_llm_payload), contact_hints)
-            structured = self._apply_content_fallback(raw_text, structured)
-            parse_path = llm_result.get("parse_path", "vision")
-            structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
-                structured,
-                masked_text,
-                jd_text,
-                parse_path,
-                redacted_image_urls=llm_result.get("redacted_image_urls"),
-            )
-            cache_payload = {
-                "structured_data": structured,
-                "raw_llm_response": safe_llm_payload,
-                "extraction_model": llm_result["model"],
-                "extraction_seed": 42,
-                "status": "success",
-                "parse_path": parse_path,
-                "error_message": self._note_error(None, hybrid_note),
-            }
-        except Exception as image_exc:
-            logger.exception("Vision parse failed; considering text fallback.")
-            if not settings.llm_text_fallback_enabled:
-                logger.exception("Text fallback disabled; using rule-based fallback.")
+        if settings.llm_text_fallback_enabled:
+            try:
+                user_prompt = self._build_prompt(raw_text=masked_text, jd_text=jd_text)
+                llm_result = await self.llm_client.chat_completion(
+                    PARSER_SYSTEM_PROMPT,
+                    user_prompt,
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    seed=42,
+                    timeout=cv_llm_timeout(),
+                )
+                safe_llm_payload = strip_contact_fields(llm_result["parsed"])
+                structured = self._merge_contact_hints(
+                    self._normalize_schema(safe_llm_payload),
+                    contact_hints,
+                )
+                structured = self._apply_content_fallback(raw_text, structured)
+                parse_path = "text"
+                structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
+                    structured, masked_text, jd_text, parse_path
+                )
+                cache_payload = {
+                    "structured_data": structured,
+                    "raw_llm_response": safe_llm_payload,
+                    "extraction_model": llm_result["model"],
+                    "extraction_seed": 42,
+                    "status": "success",
+                    "parse_path": parse_path,
+                    "error_message": self._note_error(None, hybrid_note),
+                }
+            except Exception as text_exc:
+                logger.exception("Text parse failed; using rule-based contact fallback.")
+                # An uncap'd JD can be refused for length. Name what was sent so the recorded
+                # error says why instead of reading like a generic API failure; the model's own
+                # limit, if its message states one, rides through inside text_exc.
+                length_note = ""
+                if _looks_like_length_rejection(text_exc):
+                    length_note = (
+                        "; prompt_rejected_for_length=true"
+                        f" cv_chars={len(masked_text)} jd_chars={len(jd_text or '')}"
+                    )
                 structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
                 structured = self._apply_content_fallback(raw_text, structured)
                 parse_path = "rule_fallback"
@@ -276,163 +279,38 @@ class CVParserService:
                 cache_payload = {
                     "structured_data": structured,
                     "raw_llm_response": None,
-                    "extraction_model": settings.llm_vision_model,
+                    "extraction_model": settings.llm_model,
                     "extraction_seed": 42,
                     "status": "fallback" if parse_path == "rule_fallback" else "success",
                     "parse_path": parse_path,
                     "error_message": self._note_error(
-                        f"vision_error={image_exc}; text_fallback_disabled=true",
+                        f"text_error={text_exc}{length_note}",
                         hybrid_note,
                     ),
                 }
-            else:
-                try:
-                    user_prompt = self._build_prompt(raw_text=masked_text, jd_text=jd_text)
-                    llm_result = await self.llm_client.chat_completion(
-                        PARSER_SYSTEM_PROMPT,
-                        user_prompt,
-                        response_format={"type": "json_object"},
-                        temperature=0,
-                        seed=42,
-                    )
-                    safe_llm_payload = strip_contact_fields(llm_result["parsed"])
-                    structured = self._merge_contact_hints(
-                        self._normalize_schema(safe_llm_payload),
-                        contact_hints,
-                    )
-                    structured = self._apply_content_fallback(raw_text, structured)
-                    parse_path = "text_fallback"
-                    structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
-                        structured, masked_text, jd_text, parse_path
-                    )
-                    cache_payload = {
-                        "structured_data": structured,
-                        "raw_llm_response": safe_llm_payload,
-                        "extraction_model": llm_result["model"],
-                        "extraction_seed": 42,
-                        "status": "success",
-                        "parse_path": parse_path,
-                        "error_message": self._note_error(None, hybrid_note),
-                    }
-                except Exception as text_exc:
-                    logger.exception("Text parse also failed; using rule-based contact fallback.")
-                    # An uncap'd JD can be refused for length. Name what was sent so the recorded
-                    # error says why instead of reading like a generic API failure; the model's own
-                    # limit, if its message states one, rides through inside text_exc.
-                    length_note = ""
-                    if _looks_like_length_rejection(text_exc):
-                        length_note = (
-                            "; prompt_rejected_for_length=true"
-                            f" cv_chars={len(masked_text)} jd_chars={len(jd_text or '')}"
-                        )
-                    structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
-                    structured = self._apply_content_fallback(raw_text, structured)
-                    parse_path = "rule_fallback"
-                    structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
-                        structured, masked_text, jd_text, parse_path
-                    )
-                    cache_payload = {
-                        "structured_data": structured,
-                        "raw_llm_response": None,
-                        "extraction_model": settings.llm_vision_model,
-                        "extraction_seed": 42,
-                        "status": "fallback" if parse_path == "rule_fallback" else "success",
-                        "parse_path": parse_path,
-                        "error_message": self._note_error(
-                            f"vision_error={image_exc}; text_error={text_exc}{length_note}",
-                            hybrid_note,
-                        ),
-                    }
+        else:
+            logger.info("External text model disabled; using rule-based fallback.")
+            structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
+            structured = self._apply_content_fallback(raw_text, structured)
+            parse_path = "rule_fallback"
+            structured, parse_path, hybrid_note = await self._apply_hybrid_refiner(
+                structured, masked_text, jd_text, parse_path
+            )
+            cache_payload = {
+                "structured_data": structured,
+                "raw_llm_response": None,
+                "extraction_model": "local-rules",
+                "extraction_seed": 42,
+                "status": "fallback" if parse_path == "rule_fallback" else "success",
+                "parse_path": parse_path,
+                "error_message": self._note_error("text_model_disabled=true", hybrid_note),
+            }
         await self.cache.set(cache_key, cache_payload)
         return {
             "file_hash": file_hash,
             "cache_hit": False,
             **cache_payload,
         }
-
-    async def _parse_with_pdf_images(
-        self,
-        *,
-        file_path: str,
-        jd_text: str | None,
-        pii_values: list[str],
-        ocr_lines: tuple[OCRLine, ...],
-    ) -> dict[str, Any]:
-        image_urls = await asyncio.to_thread(
-            self._render_redacted_pdf_pages_as_data_urls,
-            file_path,
-            settings.llm_vision_max_pages,
-            pii_values,
-            ocr_lines,
-        )
-        last_exc: Exception | None = None
-        attempts = max(1, settings.llm_vision_retry_attempts)
-        for attempt in range(1, attempts + 1):
-            try:
-                primary_result = await self._run_vision_prompt(
-                    image_urls=image_urls,
-                    jd_text=jd_text,
-                    user_prompt=PARSER_VISION_USER_PROMPT,
-                )
-                merged_payload = primary_result["parsed"]
-                pass_count = 1
-
-                if settings.llm_vision_focus_pass_enabled:
-                    primary_structured = self._normalize_schema(merged_payload)
-                    if self._needs_focus_pass(primary_structured):
-                        focus_result = await self._run_vision_prompt(
-                            image_urls=image_urls,
-                            jd_text=jd_text,
-                            user_prompt=PARSER_VISION_FOCUS_PROMPT,
-                        )
-                        merged_payload = self._merge_prefer_non_empty(
-                            base=merged_payload,
-                            preferred=focus_result["parsed"],
-                            keys=("education", "experience"),
-                        )
-                        pass_count = 2
-                return {
-                    **primary_result,
-                    "parsed": merged_payload,
-                    "parse_path": "vision_focus" if pass_count == 2 else "vision",
-                    "redacted_image_urls": image_urls,
-                }
-            except Exception as exc:
-                last_exc = exc
-                logger.warning(
-                    "Vision parse attempt failed attempt=%s/%s error=%s",
-                    attempt,
-                    attempts,
-                    exc,
-                )
-
-        assert last_exc is not None
-        raise last_exc
-
-    async def _run_vision_prompt(
-        self,
-        *,
-        image_urls: list[str],
-        jd_text: str | None,
-        user_prompt: str,
-    ) -> dict[str, Any]:
-        user_content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
-        if jd_text:
-            user_content.append({"type": "text", "text": f"JD Context:\n{jd_text}"})
-        user_content.extend(
-            {"type": "image_url", "image_url": {"url": image_url}}
-            for image_url in image_urls
-        )
-        return await self.llm_client.chat_completion_messages(
-            [
-                {"role": "system", "content": PARSER_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            model=settings.llm_vision_model,
-            response_format={"type": "json_object"},
-            temperature=0,
-            seed=42,
-        )
 
     def _build_prompt(self, *, raw_text: str, jd_text: str | None) -> str:
         return self.build_compressed_prompt(raw_text=raw_text, jd_text=jd_text)
@@ -450,28 +328,6 @@ class CVParserService:
         except Exception as exc:
             logger.exception("Failed to extract PDF text or local OCR file=%s", file_path)
             raise ValueError("Failed to extract PDF text with local OCR.") from exc
-
-    @staticmethod
-    def _needs_focus_pass(structured: dict[str, Any]) -> bool:
-        education = structured.get("education") or []
-        experience = structured.get("experience") or []
-        return len(education) == 0 or len(experience) == 0
-
-    @staticmethod
-    def _merge_prefer_non_empty(
-        *,
-        base: dict[str, Any],
-        preferred: dict[str, Any],
-        keys: tuple[str, ...],
-    ) -> dict[str, Any]:
-        merged = dict(base) if isinstance(base, dict) else {}
-        if not isinstance(preferred, dict):
-            return merged
-        for key in keys:
-            value = preferred.get(key)
-            if value not in (None, "", []):
-                merged[key] = value
-        return merged
 
 
 # Builds a CV parser with the shared LLM client and on-disk hash cache.

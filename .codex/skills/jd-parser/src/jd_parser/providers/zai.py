@@ -31,7 +31,7 @@ class ZaiJDRefiner(JDEnrichmentProvider):
         preprocessed_payload: dict[str, Any],
         rule_structured: dict[str, Any],
     ) -> JDEnrichmentResult:
-        from screening_core.llm_client import LLMClient
+        from screening_core.llm_client import LLMClient, jd_llm_timeout
 
         client = self._llm_client or LLMClient()
         messages = [
@@ -42,6 +42,7 @@ class ZaiJDRefiner(JDEnrichmentProvider):
             response = await client.chat_completion_messages(
                 messages,
                 response_format={"type": "json_object"},
+                timeout=jd_llm_timeout(),
             )
         except Exception as exc:
             return JDEnrichmentResult(

@@ -91,7 +91,7 @@ flowchart TB
 | Layer                           | LLM?                          | What it may do                                            | Who typically triggers it |
 | ------------------------------- | ----------------------------- | --------------------------------------------------------- | ------------------------- |
 | **Host conversation**           | ✅ (host model)               | Dialogue, clarification, summarization for HR             | Codex / Cursor            |
-| CV parse                        | ✅ required for vision/text   | Extract structured profile (privacy-redacted)             | cv-parser skill           |
+| CV parse                        | ✅ required (redacted text)  | Extract structured profile (privacy-redacted)             | cv-parser skill           |
 | JD parse                        | ⚙️ optional (`hybrid`/`qwen`) | Refine skills on top of rule parser                       | REST or future skill move |
 | screening-agent `--planner llm` | ⚙️ optional                   | Dev / fallback tool picker when host does not orchestrate | CLI only today            |
 | Matching / scoring / ranking    | ❌ never                      | Pure Python; reproducible                                 | scorer skill              |
@@ -136,7 +136,7 @@ Modules are listed in **product priority** (embeddable execution first, web comp
 | #   | Module                             | Product role                                                                 | Tech                                                                                                            |
 | --- | ---------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | 1   | **Codex skills + screening-agent** | **Primary embed surface** — `SKILL.md` contracts + CLIs for hosts            | `.codex/skills/*`, `screening_core`, subprocess pipeline                                                        |
-| 2   | **CV Parser**                      | PDF → structured candidate data (multimodal, privacy-first)                  | PyMuPDF, pypdf, pdfplumber, RapidOCR (ONNX), OpenCV, GLiNER, zai-sdk (`glm-4v-flash` / `glm-4-flash`), tenacity |
+| 2   | **CV Parser**                      | PDF → structured candidate data (local layout, privacy-first)                | PyMuPDF, pypdf, pdfplumber, RapidOCR (ONNX), OpenCV, GLiNER, zai-sdk (`glm-4-flash`), tenacity |
 | 3   | **JD Parser**                      | JD → must/preferred skills, languages, education, visa, experience (3 modes) | PyYAML, regex, zai-sdk; optional torch/transformers (Qwen3-0.6B)                                                |
 | 4   | **Skill Taxonomy + Matcher**       | Canonicalize skills, synonym & parent/child matching                         | PyYAML (`data/taxonomy/skill_taxonomy.yaml`), SQLAlchemy sync                                                   |
 | 5   | **Scorer / Ranker**                | Two engines: **legacy** 8-dimension score, or **matching** 5-dimension radar | Pure Python + `Decimal` (no LLM)                                                                                |
@@ -157,24 +157,23 @@ Modules are listed in **product priority** (embeddable execution first, web comp
 ```mermaid
 flowchart TD
     A[CV PDF] --> B{Text layer?}
-    B -- yes --> D[Embedded text]
-    B -- no / scanned --> E[RapidOCR local OCR]
+    B -- yes --> D[Local layout text]
+    B -- no / scanned --> E[RapidOCR on the full page]
     D --> F[Local PII detection]
     E --> F
     F --> G[Regex heuristics + GLiNER on-device NER]
-    G --> H[Mask PII + redact page images]
-    H --> I[Vision LLM glm-4v-flash temp=0 seed=42]
-    I -->|"missing edu/exp"| I2["Focus pass (2nd vision call)"]
+    G --> H[Mask name, email, phone, address in text]
+    H --> I[Text LLM glm-4-flash temp=0 seed=42]
     I --> J[Normalize schema]
-    I2 --> J
     J --> K{Restore contact fields from local hints only}
-    K --> L[Structured candidate JSON]
-    L --> M[MD5 hash cache]
+    K --> L[Optional hybrid pass on the same redacted text]
+    L --> M[Structured candidate JSON]
+    M --> N[MD5 hash cache]
 ```
 
-**Fallback chain:** `vision → vision_focus → text LLM (masked text) → rule-based`, each tagged as a `parse_path` (`vision`, `text_fallback`, `rule_fallback`, `privacy_rule_fallback`).
+**Fallback chain:** `text LLM (masked text) → rule-based`, tagged as `parse_path` `text`, `text_hybrid`, `rule_fallback`, or `privacy_rule_fallback`. Page images stay on the machine. If no local name is detected, the external call is blocked.
 
-**Privacy design:** contact info (name/email/phone) is detected **locally** and re-attached locally; anything the LLM returns in those fields is **stripped**. If no local name is detected, the external LLM call is **blocked** (privacy guard).
+**Privacy design:** name, email, phone, and address are detected **locally** and re-attached locally; anything the LLM returns in those fields is **stripped**. If no local name is detected, the external LLM call is **blocked** (privacy guard). Page images are not uploaded.
 
 ---
 
@@ -232,7 +231,7 @@ Hosts should **not** expose raw JSON envelopes to HR; they translate manifests, 
 
 | Skill folder      | CLI script            | Package (`src/`)                                                  | AI?                                                     |
 | ----------------- | --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------- |
-| `cv-parser`       | `run_cv_parse.py`     | `cv_parser/`                                                      | ✅ LLM (vision + text fallback)                         |
+| `cv-parser`       | `run_cv_parse.py`     | `cv_parser/`                                                      | ✅ LLM (redacted text only, `glm-4-flash`)              |
 | `jd-parser`       | `run_jd_parse.py`     | `jd_parser/` (rule parser; hybrid/qwen providers REST-only)       | ❌ CLI rule; REST ⚙️ hybrid/qwen                        |
 | `scorer`          | `run_score.py`        | `scorer/` including `matching/` engine + `skill_matcher`          | ❌ deterministic                                        |
 | `report-gen`      | `run_report.py`       | `report_gen/`                                                     | ❌ reportlab / openpyxl                                 |

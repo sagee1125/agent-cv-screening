@@ -432,6 +432,16 @@ def extract_title_from_text(text: str | None) -> str | None:
     return None
 
 
+SKILL_PHRASE_MAX_WORDS = 5
+
+
+# A skill is a short noun phrase. Longer text is a sentence fragment, not a skill.
+def skill_phrase_is_compact(text: str) -> bool:
+    words = str(text).split()
+    return 0 < len(words) <= SKILL_PHRASE_MAX_WORDS
+
+
+# Turns raw skill labels into unique structured skills, dropping sentence-length phrases.
 def normalize_skill_items(
     value: Any,
     *,
@@ -454,7 +464,7 @@ def normalize_skill_items(
         if raw is None:
             continue
         text = str(raw).strip()
-        if not text:
+        if not text or not skill_phrase_is_compact(text):
             continue
         kind, canonical = classify_skill_token(text, loader)
         if kind == "language" or not canonical:
@@ -732,6 +742,8 @@ def _canonicalize_skills_used(value: Any) -> list[str]:
     canonicals: list[str] = []
     seen: set[str] = set()
     for token in tokens:
+        if not skill_phrase_is_compact(token):
+            continue
         canonical = canonicalize_skill(token, taxonomy)
         if canonical and canonical not in seen:
             seen.add(canonical)

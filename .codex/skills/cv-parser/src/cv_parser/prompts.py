@@ -93,16 +93,16 @@ Output schema:
 
 
 Rules:
-- Name, email, and phone have already been removed locally. Do not return or infer identity fields.
+- Name, email, phone, and address have already been removed locally. Do not return or infer identity fields.
 - Only extract information explicitly stated in the CV. Do not infer.
-- For skills, extract exact terms used (do not standardize). Do NOT include spoken languages here.
+- A skill is a standalone ability noun: a tool, method, or short domain term such as "Python" or "data governance". Do not emit a sentence, a duty, or a phrase longer than five words. Do NOT include spoken languages in skills.
 - Put spoken/written languages (English, Chinese, Mandarin, etc.) in "languages", NOT in "skills".
 - Each education entry = ONE degree. Merge all info about that degree into ONE object.
 - Each experience entry = ONE job. Merge ALL bullet points and descriptions into ONE description string.
 - Do NOT split descriptions across multiple objects.
 - For start_date/end_date, convert the visible date to ISO "YYYY-MM" when possible. Use null if uncertain.
 - For an ongoing job, set end_date to "Present" and is_current to true.
-- For skills_used (experience and projects), list only concrete technical skills mentioned there.
+- For skills_used (experience and projects), list only standalone ability nouns mentioned there, each at most five words.
 - For work_authorization.status, use "unknown" when the CV does not state work eligibility. Do not guess.
 - For location, only fill country/city when explicitly stated; otherwise put the raw phrase and leave the rest null.
 - If you cannot determine a field, use null (not empty string).
@@ -144,9 +144,9 @@ Rules:
 - Merge all bullets for the same job into one description string.
 - Set start_date and end_date as ISO "YYYY-MM" when the CV states dates; use "Present" for ongoing roles.
 - If the CV states "N years experience" without dates, infer a Present-ended range only when no better dates exist.
-- skills: concrete technical/professional terms explicitly in the CV (not spoken languages).
+- skills: standalone ability nouns explicitly in the CV (a tool, method, or short domain term). Not a sentence, not a duty, not spoken languages, and not longer than five words.
 - languages: every spoken/written language the CV states (English, Chinese, Cantonese, Mandarin/Putonghua), even when it appears in a sentence rather than a skills list.
-- For each job, set skills_used to technical terms that appear in that job's description. Do not add a skill the CV text does not contain.
+- For each job, set skills_used to standalone ability nouns that appear in that job's description, each at most five words. Do not add a skill the CV text does not contain.
 - Use only explicit CV facts; do not invent employers, degrees, or tools.
 - Return valid JSON only, no markdown."""
 

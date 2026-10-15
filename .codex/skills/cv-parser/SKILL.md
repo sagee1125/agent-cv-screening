@@ -34,7 +34,7 @@ venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file <
   "file_hash": "md5 of the CV",
   "cache_hit": false,
   "status": "success",
-  "parse_path": "vision | vision_focus | text_fallback | rule_fallback",
+  "parse_path": "text | text_hybrid | rule_fallback | privacy_rule_fallback",
   "structured_data": {
     "name": "Alice",
     "email": "alice@example.com",
@@ -45,7 +45,7 @@ venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file <
     "publications": [{"title": "...", "journal": "IEEE", "year": "2023"}]
   },
   "raw_llm_response": {...} | null,
-  "extraction_model": "glm-4v-flash",
+  "extraction_model": "glm-4-flash",
   "extraction_seed": 42,
   "error_message": null
 }
@@ -56,7 +56,9 @@ venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file <
 
 ## Behavior notes
 
-- Results cache under `./data/cache` keyed by file MD5; re-parsing the same file returns cached output.
+- The CV is read on this machine (page layout, and OCR when a page has no text layer). Name, email, phone, and address are replaced locally. Only that redacted text is sent to `glm-4-flash`. Page images are not uploaded.
+- A missing local name blocks the external call (`privacy_rule_fallback`).
+- Results cache under `./data/cache` keyed by file MD5 plus the parser version; a version change rebuilds the parse.
 - On failure the script prints `{"status": "error", "error_message": "..."}` to stderr and exits 1; on success it exits 0.
 - The REST endpoint `POST /api/v1/candidates/upload` runs the exact same code path.
 

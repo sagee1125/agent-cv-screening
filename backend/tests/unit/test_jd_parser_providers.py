@@ -43,10 +43,12 @@ class FakeLLM:
         temperature: float = 0,
         seed: int = 42,
         allow_json_repair: bool = True,
+        timeout: Any = None,
     ) -> dict[str, Any]:
         """Record the call and return the canned payload or raise the configured error."""
         self.calls += 1
         self.last_messages = messages
+        assert timeout is None or getattr(timeout, "read", None) == 60
         if self.error:
             raise self.error
         return {"model": model or "fake", "parsed": self.payload, "raw_content": json.dumps(self.payload)}
