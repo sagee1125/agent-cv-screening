@@ -34,7 +34,7 @@ venv/Scripts/python.exe .codex/skills/cv-parser/scripts/run_cv_parse.py --file <
   "file_hash": "md5 of the CV",
   "cache_hit": false,
   "status": "success",
-  "parse_path": "text | text_hybrid | rule_fallback | privacy_rule_fallback",
+  "parse_path": "text | text_hybrid | rule_fallback | privacy_rule_fallback | local_unreadable",
   "structured_data": {
     "name": "Alice",
     "email": "alice@example.com",

@@ -170,12 +170,7 @@ def build_cv_refiner_user_prompt(
     jd_block = ""
     if jd_text and jd_text.strip():
         jd_block = f"\n\nJob context (for relevance only, do not copy requirements as CV facts):\n{jd_text[:4000]}\n"
-    return f"""Refine this draft CV parse using the redacted CV text below.
-
-Focus:
-1) Split experience into one object per job with correct company/title when visible.
-2) Fill start_date/end_date (ISO YYYY-MM) or Present.
-3) Expand skills and per-job skills_used from explicit mentions.
+    return f"""Refine this draft using the redacted CV text. Follow the system rules.
 
 Draft JSON (first pass):
 {draft_json}

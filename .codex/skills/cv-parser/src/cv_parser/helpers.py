@@ -1166,8 +1166,7 @@ def compress_cv_text(*, raw_text: str, max_chars: int | None) -> str:
 def build_compressed_prompt(*, raw_text: str, jd_text: str | None, max_chars: int = 12000) -> str:
     compressed_cv_text = compress_cv_text(raw_text=raw_text, max_chars=max_chars)
     segments = [
-        "Task: Parse the CV text below into the target JSON schema from system prompt.",
-        "Rules: Use explicit facts only. Merge one job into one experience object. Merge one degree into one education object.",
+        "Task: Parse the CV text below into the target JSON schema from the system prompt. Use explicit facts only.",
         f"CV Text (compressed):\n{compressed_cv_text}",
     ]
     if jd_text:

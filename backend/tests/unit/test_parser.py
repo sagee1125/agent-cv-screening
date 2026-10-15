@@ -495,12 +495,16 @@ async def test_image_only_pdf_fails_closed_before_calling_llm(tmp_path: Path) ->
     document.save(pdf_path)
     document.close()
     llm = DummyLLM()
-    service = CVParserService(llm_client=llm, cache=DummyCache())
+    cache = DummyCache()
+    service = CVParserService(llm_client=llm, cache=cache)
 
-    with pytest.raises(ValueError, match="Failed to extract PDF text with local OCR"):
-        await service.parse_cv(str(pdf_path))
+    result = await service.parse_cv(str(pdf_path))
 
     assert llm.called is False
+    assert result["status"] == "fallback"
+    assert result["parse_path"] == "local_unreadable"
+    assert result["error_message"] == "scan_unreadable=no_text"
+    assert cache.saved_value is None
 
 
 # Verifies uncertain local name extraction blocks both Vision and text LLM calls.

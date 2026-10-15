@@ -287,9 +287,7 @@ def extract_local_cv_document(path: Path) -> LocalCVDocument:
             page_texts.append(embedded_text)
 
         raw_text = "\n\n".join(text for text in page_texts if text).strip()
-        if not raw_text:
-            if settings.cv_ocr_enabled:
-                raise ValueError("Local OCR could not extract text from the PDF.")
+        if not raw_text and not settings.cv_ocr_enabled:
             raise ValueError("PDF has no extractable text and local OCR is disabled.")
         logger.info(
             "Local CV extraction complete pages=%s ocr_pages=%s",

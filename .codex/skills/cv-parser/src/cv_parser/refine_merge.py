@@ -1,6 +1,7 @@
 # Merges hybrid LLM CV refinement into a first-pass structured profile.
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from cv_parser.helpers import (
@@ -44,12 +45,110 @@ def _dated_experience_count(items: list[dict[str, Any]]) -> int:
     return sum(1 for item in items if isinstance(item, dict) and item.get("start_date"))
 
 
+# Folds hyphens and underscores so "scikit-learn" matches the canonical "scikit_learn".
+def _match_fold(text: str) -> str:
+    folded = text.casefold().replace("_", " ").replace("-", " ")
+    return " ".join(folded.split())
+
+
 # True when a skill label is an explicit substring of the redacted CV text.
 def _mentioned_in_cv(label: str, evidence_text: str) -> bool:
-    needle = " ".join(label.split()).strip()
+    needle = _match_fold(label)
     if not needle or not evidence_text.strip():
         return True
-    return needle.casefold() in evidence_text.casefold()
+    return needle in _match_fold(evidence_text)
+
+
+# Labels to try, preferring the original wording over the canonical id.
+def _labels_for_mention(item: Any) -> list[str]:
+    if not isinstance(item, dict):
+        return [str(item)]
+    labels: list[str] = []
+    for key in ("raw", "name", "display_name", "canonical_skill"):
+        value = str(item.get(key) or "").strip()
+        if value and value not in labels:
+            labels.append(value)
+    return labels
+
+
+_SKILL_HEADERS = ("skills", "technical skills", "tech stack", "core competencies", "技能", "专业技能")
+_EXPERIENCE_HEADERS = (
+    "experience",
+    "work experience",
+    "professional experience",
+    "employment",
+    "工作经历",
+    "工作經驗",
+    "工作经验",
+)
+_PROJECT_HEADERS = ("projects", "selected projects", "项目", "项目经历", "项目经验")
+_OTHER_HEADERS = ("education", "academic background", "学历", "教育背景", "publications", "certifications")
+
+
+# Returns the lines under one heading, stopping at the next known heading.
+def _section_block(raw_text: str, headers: tuple[str, ...], stop_headers: tuple[str, ...]) -> str:
+    lines = [re.sub(r"\s+", " ", line).strip() for line in raw_text.splitlines()]
+    lines = [line for line in lines if line]
+    header_keys = {header.casefold() for header in headers}
+    stop_keys = {header.casefold() for header in stop_headers}
+    active = False
+    collected: list[str] = []
+    for line in lines:
+        key = line.casefold().rstrip(":").strip()
+        if key in header_keys:
+            active = True
+            continue
+        if active and key in stop_keys:
+            break
+        if active:
+            collected.append(line)
+    return "\n".join(collected)
+
+
+# Narrow skill evidence only after a skills heading is found. An Experience heading alone is not enough.
+def skill_evidence_text(masked_text: str) -> str:
+    skill_block = _section_block(
+        masked_text,
+        _SKILL_HEADERS,
+        _EXPERIENCE_HEADERS + _PROJECT_HEADERS + _OTHER_HEADERS,
+    )
+    if not skill_block:
+        return masked_text
+    experience_block = _section_block(
+        masked_text,
+        _EXPERIENCE_HEADERS,
+        _SKILL_HEADERS + _PROJECT_HEADERS + _OTHER_HEADERS,
+    )
+    project_block = _section_block(
+        masked_text,
+        _PROJECT_HEADERS,
+        _SKILL_HEADERS + _EXPERIENCE_HEADERS + _OTHER_HEADERS,
+    )
+    return "\n".join(part for part in (skill_block, experience_block, project_block) if part)
+
+
+# Drops skill labels that are outside the skills block and the job or project descriptions.
+def retain_skill_mentions(structured: dict[str, Any], masked_text: str) -> dict[str, Any]:
+    if not masked_text.strip():
+        return structured
+    updated = dict(structured)
+    corpus = skill_evidence_text(masked_text)
+    skills = updated.get("skills") if isinstance(updated.get("skills"), list) else []
+    updated["skills"] = _filter_mentioned(skills, corpus)
+    skill_block = _section_block(
+        masked_text,
+        _SKILL_HEADERS,
+        _EXPERIENCE_HEADERS + _PROJECT_HEADERS + _OTHER_HEADERS,
+    )
+    for key in ("experience", "projects"):
+        rows = updated.get(key) if isinstance(updated.get(key), list) else []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            description = str(item.get("description") or "").strip()
+            job_evidence = "\n".join(part for part in (skill_block, description) if part).strip() or corpus
+            item["skills_used"] = _filter_mentioned(item.get("skills_used") or [], job_evidence)
+    return updated
 
 
 # Drop refined skills the redacted CV text does not actually contain.
@@ -58,11 +157,8 @@ def _filter_mentioned(items: list[Any], evidence_text: str) -> list[Any]:
         return items
     kept: list[Any] = []
     for item in items or []:
-        if isinstance(item, dict):
-            label = str(item.get("name") or item.get("display_name") or item.get("canonical_skill") or "")
-        else:
-            label = str(item)
-        if _mentioned_in_cv(label.replace("_", " "), evidence_text):
+        labels = [label for label in _labels_for_mention(item) if label.strip()]
+        if not labels or any(_mentioned_in_cv(label, evidence_text) for label in labels):
             kept.append(item)
     return kept
 
@@ -149,17 +245,28 @@ def merge_cv_refinement(
         base_norm["experience"] = ref_exp
 
     base_skills = base_norm.get("skills") if isinstance(base_norm.get("skills"), list) else []
+    skill_corpus = skill_evidence_text(evidence_text) if evidence_text.strip() else ""
     ref_skills = _filter_mentioned(
         ref_norm.get("skills") if isinstance(ref_norm.get("skills"), list) else [],
-        evidence_text,
+        skill_corpus or evidence_text,
     )
     if ref_skills:
         base_norm["skills"] = _merge_skills(base_skills, ref_skills)
 
     if use_refined_experience and evidence_text.strip():
+        skill_block = _section_block(
+            evidence_text,
+            _SKILL_HEADERS,
+            _EXPERIENCE_HEADERS + _PROJECT_HEADERS + _OTHER_HEADERS,
+        )
         for item in base_norm.get("experience") or []:
             if isinstance(item, dict):
-                item["skills_used"] = _filter_mentioned(item.get("skills_used") or [], evidence_text)
+                description = str(item.get("description") or "").strip()
+                job_evidence = "\n".join(part for part in (skill_block, description) if part).strip()
+                item["skills_used"] = _filter_mentioned(
+                    item.get("skills_used") or [],
+                    job_evidence or skill_corpus or evidence_text,
+                )
 
     base_languages = base_norm.get("languages") if isinstance(base_norm.get("languages"), list) else []
     ref_languages = ref_norm.get("languages") if isinstance(ref_norm.get("languages"), list) else []

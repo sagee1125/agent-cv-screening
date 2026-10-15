@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cv_parser.providers.base import CVEnrichmentProvider
-from cv_parser.refine_merge import draft_needs_hybrid_pass, merge_cv_refinement
+from cv_parser.refine_merge import draft_needs_hybrid_pass, merge_cv_refinement, retain_skill_mentions
 
 from screening_core.config import settings
 from screening_core.hash_cache import HashCache
@@ -64,7 +64,7 @@ from cv_parser.pii import (
 from cv_parser.prompts import PARSER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v9-skill-phrase"
+PARSER_CACHE_VERSION = "pii-redaction-v10-skill-evidence"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent
@@ -154,6 +154,8 @@ class CVParserService:
         parse_path: str,
     ) -> tuple[dict[str, Any], str, str | None]:
         """Merge hybrid refinement into the draft. Page images are never attached."""
+        if masked_text.strip():
+            structured = retain_skill_mentions(structured, masked_text)
         provider = self._enrichment_provider
         if provider is None or not settings.cv_parser_hybrid_enabled:
             return structured, parse_path, None
@@ -202,6 +204,25 @@ class CVParserService:
 
         local_document = await self._extract_local_document(file_path)
         raw_text = local_document.raw_text
+        if len(raw_text.strip()) < settings.cv_ocr_min_page_chars:
+            logger.warning("CV text is too short to send; keeping local rules.")
+            structured = self._merge_contact_hints(self._normalize_schema({}), {})
+            structured = self._apply_content_fallback(raw_text, structured)
+            # Do not cache an empty read. A later screen can try local recognition again.
+            cache_payload = {
+                "structured_data": structured,
+                "raw_llm_response": None,
+                "extraction_model": "local-rules",
+                "extraction_seed": 42,
+                "status": "fallback",
+                "parse_path": "local_unreadable",
+                "error_message": "scan_unreadable=no_text",
+            }
+            return {
+                "file_hash": file_hash,
+                "cache_hit": False,
+                **cache_payload,
+            }
         heuristic_hints = self._extract_contact_hints(raw_text)
         local_pii = LocalNERResult(names=(), sensitive_values=())
         if local_document.ocr_page_indexes or not heuristic_hints.get("name"):

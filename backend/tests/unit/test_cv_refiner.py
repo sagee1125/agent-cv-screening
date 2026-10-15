@@ -7,7 +7,7 @@ import pytest
 
 from cv_parser.helpers import normalize_skill_items
 from cv_parser.providers.zai import ZaiCVRefiner
-from cv_parser.refine_merge import draft_needs_hybrid_pass, merge_cv_refinement
+from cv_parser.refine_merge import draft_needs_hybrid_pass, merge_cv_refinement, retain_skill_mentions
 from cv_parser.service import CVParserService
 
 
@@ -129,6 +129,50 @@ def test_thin_draft_needs_hybrid() -> None:
             "experience": [{"start_date": "2020-01"}],
         }
     ) is True
+
+
+# A tool named only under education is not kept once a skills heading and a job heading exist.
+def test_skills_must_appear_in_the_skills_block_or_a_job() -> None:
+    text = (
+        "Skills\n"
+        "Python, SQL\n"
+        "Experience\n"
+        "Analyst at Acme\n"
+        "Built data pipelines\n"
+        "Education\n"
+        "Thesis on Kubernetes\n"
+    )
+    kept = retain_skill_mentions(
+        {
+            "skills": ["Python", "SQL", "Kubernetes"],
+            "experience": [{"description": "Built data pipelines", "skills_used": ["SQL", "Kubernetes"]}],
+        },
+        text,
+    )
+    names = {str(item).casefold() for item in kept["skills"]}
+    assert "python" in names
+    assert "sql" in names
+    assert "kubernetes" not in names
+    used = {str(item).casefold() for item in kept["experience"][0]["skills_used"]}
+    assert "sql" in used
+    assert "kubernetes" not in used
+
+
+# An Experience heading alone must not drop a skill that only appears in the opening lines.
+def test_experience_heading_alone_keeps_skills_from_the_profile() -> None:
+    text = "Proficient in Python and SPSS.\nExperience\nAnalyst at Acme\nBuilt data pipelines\n"
+    kept = retain_skill_mentions({"skills": ["Python", "SPSS"], "experience": []}, text)
+    names = {str(item).casefold() for item in kept["skills"]}
+    assert names == {"python", "spss"}
+
+
+# Canonical ids still match the original hyphenated wording.
+def test_hyphenated_skill_matches_its_canonical_id() -> None:
+    kept = retain_skill_mentions(
+        {"skills": [{"raw": "scikit-learn", "canonical_skill": "scikit_learn"}], "experience": []},
+        "Skills\nscikit-learn\nExperience\nAnalyst\n",
+    )
+    assert kept["skills"]
 
 
 # Sentence-length skill phrases are dropped. Short names stay, including duplicates.
