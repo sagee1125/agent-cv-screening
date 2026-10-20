@@ -41,6 +41,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import traceback
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -411,4 +412,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except BaseException:
+        # Unhandled errors (crashed fetches, tar problems, anything unexpected)
+        # must still land in the diagnostics file: otherwise the workflow's
+        # issue opens with an empty body and nothing is learned off-runner.
+        record("== unhandled exception (full traceback below)")
+        record(traceback.format_exc())
+        raise
