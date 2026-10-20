@@ -62,12 +62,12 @@ def record(text: str) -> None:
         handle.write(text if text.endswith("\n") else text + "\n")
 
 UV_ASSETS = {
-    ("windows", "AMD64"): "uv-x86_64-pc-windows-msvc.zip",
-    ("windows", "ARM64"): "uv-aarch64-pc-windows-msvc.zip",
+    ("windows", "x86_64"): "uv-x86_64-pc-windows-msvc.zip",
+    ("windows", "arm64"): "uv-aarch64-pc-windows-msvc.zip",
     ("darwin", "arm64"): "uv-aarch64-apple-darwin.tar.gz",
     ("darwin", "x86_64"): "uv-x86_64-apple-darwin.tar.gz",
     ("linux", "x86_64"): "uv-x86_64-unknown-linux-gnu.tar.gz",
-    ("linux", "aarch64"): "uv-aarch64-unknown-linux-gnu.tar.gz",
+    ("linux", "arm64"): "uv-aarch64-unknown-linux-gnu.tar.gz",
 }
 
 
@@ -94,7 +94,18 @@ def system_key() -> tuple[str, str]:
 
 def uv_asset() -> str:
     system, machine = system_key()
-    key = (system, "AMD64" if machine in ("AMD64", "X86_64") else "ARM64" if "ARM" in machine.upper() else machine)
+    # Normalize both sides to lowercase canonical keys. The lookup used to
+    # combine a lowercased machine ("arm64") with an uppercased table key
+    # ("ARM64") - a SystemExit on every Apple Silicon machine, one second
+    # into the rehearsal, printed as "no uv asset mapping for
+    # ('darwin', 'ARM64')".
+    name = machine.lower()
+    if name in ("amd64", "x86_64"):
+        key = (system, "x86_64")
+    elif "arm" in name:
+        key = (system, "arm64")
+    else:
+        key = (system, name)
     if key not in UV_ASSETS:
         raise SystemExit(f"[ERROR] no uv asset mapping for {key}")
     return UV_ASSETS[key]
