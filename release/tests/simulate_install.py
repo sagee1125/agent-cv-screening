@@ -181,8 +181,26 @@ def main() -> int:
     )
     args = parser.parse_args()
     DIAGNOSTICS.write_text("", encoding="utf-8")  # one fresh file per rehearsal run
+    record("== simulate_install started: setup-bat=" + str(args.setup_bat)
+           + " setup-command=" + str(args.setup_command)
+           + " platform=" + sys.platform
+           + " python=" + sys.version.replace("\n", " "))
 
     if not args.zip.exists():
+        # The workflow downloads the artifact straight into release/dist, so a
+        # missing zip here means the download step landed somewhere else. Say
+        # where things actually are, or remote debugging of a 1-second failure
+        # reaches a dead end.
+        record(f"== zip missing: expected at {args.zip}")
+        record(f"== cwd: {Path.cwd()}")
+        dist = args.zip.parent
+        if dist.is_dir():
+            record("== " + str(dist) + " contents: " + ", ".join(p.name for p in dist.iterdir()))
+        else:
+            record(f"== {dist} does not exist")
+        parent = dist.parent
+        if parent.is_dir():
+            record(f"== {parent} contents: " + ", ".join(p.name for p in parent.iterdir()))
         raise SystemExit(f"[ERROR] zip not found: {args.zip} - build it with release/build_release.py first.")
 
     import tempfile
@@ -193,6 +211,7 @@ def main() -> int:
     pkg = sandbox_root / "pkg"
     with zipfile.ZipFile(args.zip) as archive:
         archive.extractall(pkg)
+    record("== zip extracted")
     log(f"sandbox: {sandbox_root}")
 
     env = dict(os.environ)
@@ -230,6 +249,7 @@ def main() -> int:
     })
 
     uv = prepare_uv(cache_root)
+    record("== uv prepared: " + str(uv))
     venv_python = sandbox_root / "agent-cv-screening" / "venv" / (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
     )
@@ -414,7 +434,8 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except SystemExit:
+    except SystemExit as stopped:
+        record(f"== SystemExit: {stopped}")
         raise
     except BaseException:
         # Unhandled errors (crashed fetches, tar problems, anything unexpected)
