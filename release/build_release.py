@@ -13,6 +13,10 @@ expects when it runs from the extracted zip):
                                     requirements.txt, .env.example,
                                     version.json  <- build version stamp)
 
+Beside the zip, the build also writes CV-Screening-Setup.zip.sha256 (sha256sum
+format); the self-updater in update_engine.py verifies every download against
+it before applying the update.
+
 The asset name is intentionally version-free so the self-updater can always
 fetch releases/latest/download/CV-Screening-Setup.zip; the version lives in
 engine/version.json and in the git tag.
@@ -45,6 +49,14 @@ ENGINE_COPY = (".codex", "data/taxonomy", "site_profiles.json", ".env.example")
 EXPERT_EXCLUDE = ("TESTING.md",)
 IGNORE_DIRS = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "_backup-*")
 EXECUTABLE_NAMES = ("setup.command", "update_engine.command", "screen.command")
+
+# The Python minor version the launches provision and the engine is tested on.
+# The launchers pin `uv python install 3.12`; the updater reads the stamped
+# requires_python from engine/version.json and rebuilds the private venv when
+# a release declares a different minor. Change this only together with the
+# launchers - and expect the first release after a change to take every
+# installation through a one-time ~5 minute rebuild.
+REQUIRES_PYTHON = "3.12"
 
 # Files that must never end up in a public release.
 FORBIDDEN_IN_ZIP = (".env", "id_rsa", "*.pem", "jas_state")
@@ -118,7 +130,13 @@ def stage_engine(stage: Path, version: str) -> str:
     engine_requirements = RELEASE_ROOT / "engine-requirements.txt"
     shutil.copy2(engine_requirements, engine / "requirements.txt")
     digest = hashlib.sha256((engine / "requirements.txt").read_bytes()).hexdigest()
-    stamp = {"version": version, "requirements_sha256": digest}
+    stamp = {
+        "version": version,
+        "requirements_sha256": digest,
+        # What the self-updater compares the installed private venv against; a
+        # release declaring a different minor triggers a one-time venv rebuild.
+        "requires_python": REQUIRES_PYTHON,
+    }
     (engine / "version.json").write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
     return digest
 
@@ -186,6 +204,13 @@ def write_zip(stage: Path, output: Path) -> str:
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, content)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    # The sidecar the updater verifies the download against before applying it
+    # (sha256sum's own two-space format, so forensic tools read it too). It
+    # ships as a second release asset with the same version-free asset name
+    # pattern, fetched through the same not-rate-limited releases/latest/
+    # download/ endpoint as the zip.
+    sidecar = output.with_name(output.name + ".sha256")
+    sidecar.write_text(f"{digest}  {output.name}\n", encoding="utf-8", newline="\n")
     return digest
 
 
@@ -232,6 +257,7 @@ def main() -> int:
     print(f"     version {args.version} | {entries} files | {size_kb:.0f} KB")
     print(f"     requirements sha256 {requirements_sha[:16]}...")
     print(f"     zip sha256 {digest}")
+    print(f"     checksum sidecar {output.name}.sha256")
     print("Next: commit, tag vX.Y.Z and push - CI attaches this zip to the GitHub release.")
     return 0
 

@@ -400,6 +400,14 @@ def main() -> int:
             "fresh install stamps the shipped version",
             installed_stamp.get("version") == stamp.get("version"),
         )
+        # The updater compares this against its venv (pyvenv.cfg) to decide
+        # when the private environment must be rebuilt; a missing or malformed
+        # field silently disables that on every machine.
+        stamp_python = str(installed_stamp.get("requires_python") or "")
+        check(
+            "engine stamp declares requires_python",
+            re.fullmatch(r"\d+\.\d+", stamp_python) is not None,
+        )
         env_text = (install_root / ".env").read_text(encoding="utf-8")
         check(".env has the supplied key", "ZAI_API_KEY=simulate-test-key" in env_text)
         check(".env disables the local NER model", "CV_LOCAL_NER_ENABLED=false" in env_text)

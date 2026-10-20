@@ -6,6 +6,12 @@ the installed version, applies it: refreshes the engine code and the WorkBuddy
 expert, re-runs pip only when requirements changed, and invalidates the score
 cache so new code is never silently ignored by the --resume mechanism.
 
+Every download is verified against the release's sha256 sidecar
+(CV-Screening-Setup.zip.sha256, written by build_release.py) before it is
+applied; a mismatch aborts the whole update. When a release declares a
+different requires_python, the private venv is rebuilt beside itself and
+swapped in only after every rebuild step succeeded.
+
 The check never touches api.github.com: unauthenticated API calls are capped
 at 60 per hour per IP and an office shares one public address. The release tag
 is instead read from the redirect of releases/latest/download/CV-Screening-
@@ -27,12 +33,14 @@ update, and a full re-parse would not be score-neutral.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 from datetime import datetime
@@ -40,6 +48,7 @@ from pathlib import Path
 
 REPO_SLUG = "sagee1125/agent-cv-screening"
 ASSET_URL = f"https://github.com/{REPO_SLUG}/releases/latest/download/CV-Screening-Setup.zip"
+CHECKSUM_URL = f"https://github.com/{REPO_SLUG}/releases/latest/download/CV-Screening-Setup.zip.sha256"
 USER_AGENT = "agent-cv-screening-updater"
 
 # Cache families a code update invalidates (FR-10). Move, never delete.
@@ -96,6 +105,145 @@ def download(url: str, destination: Path, timeout: float = 120.0) -> None:
         shutil.copyfileobj(response, handle)
 
 
+def verify_checksum(payload_zip: Path, quiet: bool) -> None:
+    """Compare the downloaded zip against the release's own sha256 sidecar.
+
+    A mismatch must abort hard: this zip is about to overwrite the engine
+    that currently works, and a truncated or tampered download must not get
+    that far. The sidecar ships beside the asset (build_release.py writes
+    it) through the same not-rate-limited releases/latest/download endpoint.
+    Two tolerances, on purpose:
+    - a missing sidecar (404) means the release predates checksums (v1.2.29
+      and earlier) - behave exactly as before, with a note;
+    - any other fetch failure also degrades to today's behavior, because the
+      zip itself is already fully on disk (integrity guaranteed by TLS) and
+      the sidecar fetch adds a second network dependency to a first-boot
+      path that must not grow new failure modes.
+    """
+    digest = hashlib.sha256()
+    with payload_zip.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    try:
+        request = urllib.request.Request(CHECKSUM_URL, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=30.0) as response:
+            text = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            if not quiet:
+                log(f"[..] checksum sidecar fetch failed ({error}); skipping verification.")
+        return
+    except Exception as error:
+        if not quiet:
+            log(f"[..] checksum sidecar fetch failed ({error}); skipping verification.")
+        return
+    expected = None
+    for token in text.split():
+        if len(token) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in token):
+            expected = token.lower()
+            break
+    if not expected:
+        if not quiet:
+            log("[..] the checksum sidecar is unreadable; skipping verification.")
+        return
+    if actual != expected:
+        raise RuntimeError("the checksum of the downloaded package does not match the release sidecar")
+    if not quiet:
+        log("[ok] verified the downloaded package against the release sidecar.")
+
+
+def venv_python_version(root: Path) -> str:
+    """The major.minor the private venv actually runs, from pyvenv.cfg.
+
+    engine/version.json's requires_python says what a release NEEDS; this is
+    what the machine HAS. The cfg is written either by `uv venv` (the
+    launchers) or by the venv module (older installs), whose key names
+    differ, so scan every value for a plain major.minor. If the cfg is gone,
+    the interpreter running this update is the last resort - the launchers
+    always invoke the updater through the venv's own python.
+    """
+    cfg = root / "venv" / "pyvenv.cfg"
+    if cfg.is_file():
+        try:
+            for line in cfg.read_text(encoding="utf-8-sig").splitlines():
+                match = re.search(r"(\d+\.\d+)\.\d+", line.split("=", 1)[-1])
+                if match:
+                    return match.group(1)
+        except OSError:
+            pass
+    return f"{sys.version_info[0]}.{sys.version_info[1]}"
+
+
+def python_bump_needed(required: str, root: Path) -> bool:
+    # Both sides must be known; an unknown installed version (broken cfg AND
+    # auto-detect gone) means we must not risk tearing the venv down.
+    if not required:
+        return False
+    current = venv_python_version(root)
+    if not current:
+        return False
+    return current != required
+
+
+def reprovision_venv(root: Path, python_version: str, requirements: Path, quiet: bool) -> bool:
+    """Rebuild the private venv for a new interpreter version.
+
+    A requirements refresh alone can fail harmlessly - the old environment
+    stays reachable and the next run retries. An interpreter swap cannot,
+    because the venv must be emptied to change the interpreter it hosts. So
+    the new environment is built to a sibling directory in full (python
+    fetch, venv create, pinned requirements) and only swapped in after every
+    step succeeded; a dead network or a missing wheel leaves the current
+    environment untouched.
+
+    The swap renames the old venv away instead of deleting it: on Windows the
+    updater itself runs from that venv's python and running executables can
+    be renamed but not deleted. What is left is swept on the next update
+    (sweep_retired_venvs), once no process runs from it anymore.
+    """
+    uv = root / "tools" / ("uv.exe" if sys.platform == "win32" else "uv")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    staging = root / f"venv-new-{stamp}"
+    retired = root / f"venv-old-{stamp}"
+    try:
+        if not uv.is_file():
+            raise RuntimeError("the uv helper is missing - expected it in <engine>/tools")
+        if not quiet:
+            log(f"[..] the release needs Python {python_version}; the private environment is being rebuilt.")
+            log("     This downloads Python once and takes a few minutes. The current engine keeps working.")
+        commands = (
+            [str(uv), "python", "install", python_version],
+            [str(uv), "venv", "--python", python_version, str(staging)],
+            [str(uv), "pip", "install", "--python",
+             str(staging / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")), "-r", str(requirements)],
+        )
+        for command in commands:
+            if subprocess.run(command, check=False).returncode != 0:
+                raise RuntimeError(f"this step failed: {' '.join(command[:2])} ...")
+        new_python = staging / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        if not new_python.is_file():
+            raise RuntimeError("the rebuilt environment has no interpreter")
+        (root / "venv").rename(retired)   # rename a running image works; deletion does not
+    except Exception as error:
+        shutil.rmtree(staging, ignore_errors=True)
+        if not quiet:
+            log(f"[ERROR] the environment rebuild failed: {error}")
+            log("        The installed environment is untouched and still works.")
+        return False
+    staging.rename(root / "venv")         # cannot fail after the rename above succeeded
+    shutil.rmtree(retired, ignore_errors=True)  # best effort; a remainder is swept later
+    return True
+
+
+def sweep_retired_venvs(root: Path) -> None:
+    # venv-old-* folders a previous rebuild left behind: their interpreter is
+    # no longer running, so what Windows refused to delete mid-update can go
+    # now. Best effort in every way - a leftover is only wasted disk space.
+    for retired in root.glob("venv-old-*"):
+        shutil.rmtree(retired, ignore_errors=True)
+
+
 def bust_score_caches(quiet: bool) -> int:
     reports_root = Path.home() / "Desktop" / "workbuddy-cv-screen"
     if not reports_root.is_dir():
@@ -124,6 +272,7 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
     import setup_engine  # shipped beside this file
 
     root = engine_root()
+    sweep_retired_venvs(root)
     # Captured before the copy below overwrites version.json with the new stamp:
     # if the dependency step then fails, this is what gets restored so the next
     # conversation retries the whole update.
@@ -136,18 +285,24 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
         new_stamp = staged / "version.json"
         if not staged.is_dir() or not new_stamp.is_file():
             raise RuntimeError("downloaded package does not look like an engine release")
-        new_version = json.loads(new_stamp.read_text(encoding="utf-8")).get("version", "0")
+        new_stamp_data = json.loads(new_stamp.read_text(encoding="utf-8"))
+        new_version = str(new_stamp_data.get("version") or "0")
+        new_required = str(new_stamp_data.get("requires_python") or "")
 
         requirements_changed = False
         old_req = root / "requirements.txt"
         new_req = staged / "requirements.txt"
         if new_req.is_file() and old_req.is_file():
-            import hashlib
-
             def digest(path: Path) -> str:
                 return hashlib.sha256(path.read_bytes()).hexdigest()
 
             requirements_changed = digest(new_req) != digest(old_req)
+
+        # The environment is checked for an interpreter bump BEFORE anything is
+        # copied: the decision compares pyvenv.cfg (excluded from the copy)
+        # against the release's requires_python, and doing it early keeps the
+        # copy-idempotent-retry story intact (a failed rebuild retries whole).
+        rebuild = python_bump_needed(new_required, root)
 
         ignore = shutil.ignore_patterns(
             "__pycache__", "*.pyc", ".pytest_cache", "_backup-*", ".env", "venv"
@@ -164,7 +319,13 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
         # half-applied update (new engine code, missing deps) as done -- the one
         # failure that must not be silent, because nothing else retries it.
         deps_ok = True
-        if requirements_changed:
+        if rebuild:
+            # A new interpreter minor invalidates the whole private venv (its
+            # wheels are ABI-bound). The rebuild installs the new requirements
+            # itself, so this branch covers both a bump and a requirements
+            # change; the plain pip path below only fires without a bump.
+            deps_ok = reprovision_venv(root, new_required, new_req, quiet)
+        elif requirements_changed:
             venv_python = root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
             if venv_python.is_file():
                 if not quiet:
@@ -271,6 +432,7 @@ def main() -> int:
                 if not args.quiet:
                     log(f"[..] downloading version {remote_version}...")
                 download(ASSET_URL, payload_zip)
+            verify_checksum(payload_zip, args.quiet)
             applied = apply_update(payload_zip, args.quiet)
         except Exception as error:
             if not args.quiet:

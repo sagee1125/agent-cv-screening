@@ -25,8 +25,10 @@ jobs:
       - name: Simulate a clean install (quality gate)
         run: python release/tests/simulate_install.py --zip release/dist/CV-Screening-Setup.zip
 
-      # The zip waits here as an artifact. The publish job attaches it to the
-      # GitHub release only AFTER every platform rehearsal below has passed.
+      # The zip waits here as an artifact together with its sha256 sidecar (the
+      # self-updater verifies every download against it). The publish job
+      # attaches them to the GitHub release only AFTER every platform rehearsal
+      # below has passed.
       # Until then the updater keeps treating the previous release as latest -
       # which is the point: a broken installer must never become what HR
       # downloads. This did happen before v1.2.19 got its launcher rehearsals:
@@ -34,7 +36,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: CV-Screening-Setup.zip
-          path: release/dist/CV-Screening-Setup.zip
+          path: |
+            release/dist/CV-Screening-Setup.zip
+            release/dist/CV-Screening-Setup.zip.sha256
           if-no-files-found: error
 
   # These two jobs are what the old pipeline never had: they execute the
@@ -116,7 +120,7 @@ jobs:
           name: CV-Screening-Setup.zip
           path: dist
 
-      - name: Attach zip to the GitHub release
+      - name: Attach zip and checksum sidecar to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           # This job has no checkout, so gh cannot read its own git remotes -
@@ -127,4 +131,6 @@ jobs:
             --title "CV Screening $GITHUB_REF_NAME" \
             --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" \
-            dist/CV-Screening-Setup.zip --clobber
+            dist/CV-Screening-Setup.zip \
+            dist/CV-Screening-Setup.zip.sha256 \
+            --clobber

@@ -194,22 +194,23 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def payload_engine_version(pkg: Path) -> str:
-    """Version the release build stamped into this payload's engine/version.json.
+def payload_version_stamp(pkg: Path) -> dict:
+    """The stamped fields from this payload's engine/version.json, {} if absent.
 
-    setup.bat and setup.command do not pass --version, so this is the version a
-    fresh install must report. Stamping the argparse default "0.0.0" instead
-    made every new install look older than the release it shipped: the expert's
-    first update check re-downloaded and re-applied the very same version, and
-    told HR the tool had "been updated" minutes after it was installed.
+    setup.bat and setup.command do not pass --version, so this is where a
+    fresh install's stamp comes from. Stamping the argparse default "0.0.0"
+    instead made every new install look older than the release it shipped:
+    the expert's first update check re-downloaded and re-applied the very
+    same version, and told HR the tool had "been updated" minutes after it
+    was installed. requires_python must ride along too, or the updater's
+    interpreter-rebuild decision silently has nothing to compare against.
     """
-    stamp = pkg / "engine" / "version.json"
+    stamp_file = pkg / "engine" / "version.json"
     try:
-        parsed = json.loads(stamp.read_text(encoding="utf-8"))
+        parsed = json.loads(stamp_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):  # missing, unreadable or not JSON
-        return ""
-    version = parsed.get("version") if isinstance(parsed, dict) else None
-    return str(version).strip() if version else ""
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def venv_python_path(engine_dst: Path) -> Path:
@@ -422,9 +423,13 @@ def main() -> int:
     config_dir = workbuddy_config_dir()
     install_expert(pkg, engine_dst, config_dir)
 
+    engine_stamp = payload_version_stamp(pkg)
     stamp = {
-        "version": args.version or payload_engine_version(pkg) or "0.0.0",
+        "version": args.version or engine_stamp.get("version") or "0.0.0",
         "requirements_sha256": sha256_of(engine_dst / "requirements.txt"),
+        # The interpreter the launchers provisioned from this payload; a later
+        # updater compares the venv against a future release's requirements.
+        "requires_python": engine_stamp.get("requires_python") or "",
     }
     (engine_dst / "version.json").write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
 
