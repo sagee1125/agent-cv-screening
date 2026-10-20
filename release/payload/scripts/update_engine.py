@@ -159,19 +159,37 @@ def venv_python_version(root: Path) -> str:
     engine/version.json's requires_python says what a release NEEDS; this is
     what the machine HAS. The cfg is written either by `uv venv` (the
     launchers) or by the venv module (older installs), whose key names
-    differ, so scan every value for a plain major.minor. If the cfg is gone,
-    the interpreter running this update is the last resort - the launchers
-    always invoke the updater through the venv's own python.
+    differ, so read the known version keys BY NAME and never "the first
+    dotted number in the file": uv 0.12.18 (the pinned launcher version)
+    emits its own `uv = 0.12.18` line BEFORE `version_info = 3.12`, and a
+    blind regex read THAT - reporting the venv as Python 0.12, so every
+    update saw an interpreter mismatch and rebuilt the whole private
+    environment for nothing (the rebuild needs <engine>/tools/uv, which the
+    CI's direct-drive rehearsal never creates, so it failed there first).
+    If the cfg is gone, the interpreter running this update is the last
+    resort - the launchers always invoke the updater through the venv's own
+    python.
     """
     cfg = root / "venv" / "pyvenv.cfg"
+    home_fallback = None
     if cfg.is_file():
         try:
             for line in cfg.read_text(encoding="utf-8-sig").splitlines():
-                match = re.search(r"(\d+\.\d+)\.\d+", line.split("=", 1)[-1])
-                if match:
-                    return match.group(1)
+                key, separator, value = line.partition("=")
+                if not separator:
+                    continue
+                key = key.strip().lower()
+                if key in ("version", "version_info"):
+                    match = re.search(r"(\d+\.\d+)", value)
+                    if match:
+                        return match.group(1)
+                elif key == "home" and home_fallback is None:
+                    # uv venv homes point at `.../cpython-3.12-<platform>-none`.
+                    home_fallback = re.search(r"(?:cp|p)ython-(\d+\.\d+)", value.lower())
         except OSError:
             pass
+    if home_fallback:
+        return home_fallback.group(1)
     return f"{sys.version_info[0]}.{sys.version_info[1]}"
 
 
@@ -208,7 +226,18 @@ def reprovision_venv(root: Path, python_version: str, requirements: Path, quiet:
     retired = root / f"venv-old-{stamp}"
     try:
         if not uv.is_file():
-            raise RuntimeError("the uv helper is missing - expected it in <engine>/tools")
+            # A launcher install always fetches uv into <engine>/tools first; a
+            # direct or assisted install (setup_engine.py run with a system
+            # interpreter, no launcher) never does. A uv on PATH can still do
+            # the rebuild; without either, an interpreter bump is impossible and
+            # the update says so instead of failing on a missing file - the old
+            # environment keeps working either way.
+            on_path = shutil.which("uv")
+            if not on_path:
+                raise RuntimeError(
+                    "the uv helper is missing - expected it in <engine>/tools, and none on PATH"
+                )
+            uv = Path(on_path)
         if not quiet:
             log(f"[..] the release needs Python {python_version}; the private environment is being rebuilt.")
             log("     This downloads Python once and takes a few minutes. The current engine keeps working.")

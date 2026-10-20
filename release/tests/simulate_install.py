@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -366,6 +367,16 @@ def main() -> int:
         else:
             run("uv provisioning Python 3.12", [str(uv), "python", "install", "3.12"])
             run("uv creating the venv", [str(uv), "venv", "--python", "3.12", str(sandbox_root / "agent-cv-screening" / "venv")])
+            # The launchers leave the uv helper in <engine>/tools before anything
+            # else (setup.bat / setup.command fetch it there), so the shipped
+            # install layout always has it. The direct path drives uv from the
+            # rehearsal cache and must mirror that layout, or the updater's
+            # rebuild path (reprovision_venv) has no helper to find - it failed
+            # exactly there the first time a rehearsal met a live release that
+            # declares requires_python.
+            tools_dir = sandbox_root / "agent-cv-screening" / "tools"
+            tools_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(uv, tools_dir / uv.name)
             # antlr4-python3-runtime 4.9.3 is sdist-only; on this development machine
             # its temporary-file cleanup can trip the session's file-protection
             # watcher. A prebuilt wheel shipped in release/tests/wheels makes the
@@ -407,6 +418,30 @@ def main() -> int:
         check(
             "engine stamp declares requires_python",
             re.fullmatch(r"\d+\.\d+", stamp_python) is not None,
+        )
+        # The updater decides "rebuild the private venv?" by reading
+        # venv/pyvenv.cfg next to the installed interpreter. Its parser once
+        # read `uv = 0.12.18` - a line uv writes BEFORE `version_info` in the
+        # same cfg - as the interpreter version, saw "0.12" != "3.12", and
+        # ordered a needless full venv rebuild on every machine; the
+        # direct-drive sandbox turns that into a hard failure because it ships
+        # no tools/uv (run #46, v1.2.31). Parse the cfg through the SHIPPED
+        # updater and pin its decision, so this class of regression dies here,
+        # deterministically, before anything is tagged.
+        spec = importlib.util.spec_from_file_location(
+            "shipped_update_engine", install_root / "scripts" / "update_engine.py"
+        )
+        shipped_update_engine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shipped_update_engine)
+        parsed_minor = shipped_update_engine.venv_python_version(install_root)
+        record("== installed venv parsed as major.minor: " + parsed_minor)
+        check(
+            "pyvenv.cfg resolves to the stamped requires_python",
+            parsed_minor == stamp_python,
+        )
+        check(
+            "a release needing this minor does not trigger a venv rebuild",
+            not shipped_update_engine.python_bump_needed(stamp_python, install_root),
         )
         env_text = (install_root / ".env").read_text(encoding="utf-8")
         check(".env has the supplied key", "ZAI_API_KEY=simulate-test-key" in env_text)

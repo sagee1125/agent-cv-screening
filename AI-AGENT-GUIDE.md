@@ -6,9 +6,10 @@ learned the hard way, and a digest of every fixed bug so you do not re-diagnose 
 `AGENTS.md` (screening conversation contract, code comment rules) remains mandatory;
 this file adds the engineering view.
 
-Last updated for: **v1.2.30**, plus the post-v1.2.30 hardening batch (key.txt build
-guard, WorkBuddy-absent updater advice, install-page ordering) documented here before
-it was tagged.
+Last updated for: **v1.2.32** — it re-ships the v1.2.31 batch (key.txt build guard,
+WorkBuddy-absent updater advice, install-page ordering) plus the pyvenv.cfg parse fix
+(§6.14), because that earlier tag's CI run #46 failed at rehearse-macos and v1.2.31 was
+never published.
 
 ## 1. What this product is
 
@@ -237,6 +238,23 @@ installer protocol (§6.12) has users drop it next to setup.bat, and `payload/` 
 the zip layout, so a leftover test copy in `payload/` would publish a user's API key
 inside the public release asset.
 
+### 6.14 Reading pyvenv.cfg by key name — uv's own version line is a trap
+
+`venv_python_version` reads the installed venv's interpreter from `venv/pyvenv.cfg`
+(`requires_python` says what a release needs; the cfg says what the machine has).
+Read the **named keys** — `version` / `version_info`, with a `home`-dir
+`cpython-3.12-...` fallback — never "the first dotted number in the file": uv 0.12.18
+(the pinned launcher version) emits `uv = 0.12.18` **before** `version_info = 3.12`,
+and a blind regex read **uv's own version** — the venv looked like Python 0.12, so
+**every update** decided the interpreter had to be rebuilt (a needless ~5-minute
+rebuild per update on real machines, and a hard failure on any install without
+`<engine>/tools/uv`; the CI direct-drive rehearsal hit exactly that in the v1.2.31
+run — the first rehearsal to meet a live release carrying `requires_python`). The
+venv-module format (`version = 3.12.0`) and older uv (`version_info = 3.12.14`) parse
+correctly either way; only the pinned uv's two-part `version_info` plus its
+self-version line broke it. `reprovision_venv` also accepts a uv found on PATH, for
+installs made without a launcher.
+
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
 This is what made the product survive real HR use; do not water it down:
@@ -283,20 +301,28 @@ Any claim that is load-bearing must be verified before it is trusted:
 
 ## 10. Known open items
 
-- GitHub has 3–4 old "rehearsal diagnostics" issues left over from the v1.2.19–v1.2.28
-  debugging loop; the owner said he would close them by hand.
+- The old rehearsal-diagnostics issues (#7–#10, v1.2.19–v1.2.28 loop) are all closed.
+  #11 documents run #46 (v1.2.31, the pyvenv.cfg failure of §6.14) — close it by hand
+  once v1.2.32 is verified and shipped (the machine opening issues has no token to
+  close with).
 - The updater rehearsal in CI validates against the **previous** live release (the one
   already published), so a rehearsal for tag N exercises old-stamp behavior (no
   `requires_python`, no sidecar) and runs the tolerant path. The first release that
-  carries the new fields (v1.2.30) is validated locally and by rehearsal from v1.2.31's
-  CI onward. Keep this asymmetry in mind when a rehearsal elusively passes for what
-  looks like the wrong reason.
+  carries the new fields (v1.2.30) is validated locally and by rehearsal from
+  v1.2.31's CI onward. Keep this asymmetry in mind when a rehearsal elusively passes
+  for what looks like the wrong reason.
+  This asymmetry is also a diagnostic mechanism, and it fired as designed: v1.2.31 was
+  the first rehearsal whose target release carried `requires_python` (v1.2.30), and it
+  alone surfaced the parsing regression of §6.14 that every earlier run walked past.
 - A future `requires_python` bump procedure: change `REQUIRES_PYTHON` in
   `build_release.py` **and** the launchers' pinned `uv python install 3.x` and
   `uv venv --python 3.x` in the same commit; expect every installation to take a
   one-time ~5-minute rebuild on their next update, and verify the wheels actually ship
   for the new minor (the pinned dependency set only has wheels for certain minors —
-  see SUPPORTED_PYTHON in setup_engine.py for the verified set).
+  see SUPPORTED_PYTHON in setup_engine.py for the verified set). Post-v1.2.31 such a
+  bump is also rehearse-able end to end: the direct rehearsal path now mirrors the
+  launcher layout (uv left in `<engine>/tools`), and `reprovision_venv` accepts a uv
+  from PATH too.
 - The CI runners never have WorkBuddy installed, so the rehearsals always execute the
   installer's missing-app branch — but nothing asserts its message text, and the
   installed-app branch never runs in CI at all. Both are plain logging; a change there
