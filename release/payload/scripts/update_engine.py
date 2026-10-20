@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -273,8 +274,38 @@ def sweep_retired_venvs(root: Path) -> None:
         shutil.rmtree(retired, ignore_errors=True)
 
 
+# The engine writes HR packs through hr_output.user_desktop() (see
+# _shared/src/screening_core/hr_output.py), which on Windows looks beyond the
+# plain Desktop: OneDrive redirection - the pack then lives under
+# ~/OneDrive/Desktop/... - and a Chinese-named desktop ("桌面") are both common
+# on staff machines. bust_score_caches used to scan Path.home()/"Desktop" only,
+# so on exactly those machines an update quietly skipped cache invalidation and
+# the --resume mechanism kept serving scores produced by the OLD engine: the
+# silent stale-score failure FR-10 exists to prevent. Keep the candidates in
+# step with hr_output (its ordering, dedupe and fallback included) and stay
+# stdlib-only - this script also ships standalone inside the zip and must run
+# without the engine's own dependencies.
+def reports_desktop() -> Path:
+    homes: list[Path] = []
+    if os.name == "nt" and os.environ.get("USERPROFILE"):
+        homes.append(Path(os.environ["USERPROFILE"]))
+    home = Path.home()
+    if home not in homes:
+        homes.append(home)
+    for candidate_home in homes:
+        for candidate in (
+            candidate_home / "Desktop",
+            candidate_home / "OneDrive" / "Desktop",
+            candidate_home / "OneDrive" / "桌面",
+            candidate_home / "桌面",
+        ):
+            if candidate.is_dir():
+                return candidate
+    return homes[0] / "Desktop"
+
+
 def bust_score_caches(quiet: bool) -> int:
-    reports_root = Path.home() / "Desktop" / "workbuddy-cv-screen"
+    reports_root = reports_desktop() / "workbuddy-cv-screen"
     if not reports_root.is_dir():
         return 0
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")

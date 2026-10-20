@@ -255,6 +255,41 @@ correctly either way; only the pinned uv's two-part `version_info` plus its
 self-version line broke it. `reprovision_venv` also accepts a uv found on PATH, for
 installs made without a launcher.
 
+### 6.15 Every shipped Desktop lookup goes through the OneDrive-aware resolver (v1.2.33)
+
+The engine resolves the visible Desktop through `hr_output.user_desktop()` —
+plain `Desktop`, then `OneDrive/Desktop`, then both under the Chinese-named
+`桌面` — because OneDrive redirection and Chinese desktop names are both common
+on staff machines. Three shipped files once hardcoded `Path.home()/Desktop`
+instead and silently missed those machines:
+
+- `update_engine.py`'s cache bust skipped invalidation on exactly those
+  machines, so `--resume` kept serving scores produced by the OLD engine — the
+  stale-score failure FR-10 exists to prevent. It now mirrors `user_desktop()`
+  locally (`reports_desktop()`); the resolver must stay stdlib-only because the
+  updater also ships inside the zip and runs without the engine's deps.
+- `run_workbuddy_tool.py`'s pipeline/JAS manifest reads returned `{}` there,
+  degrading the host projection to the skill's raw stdout. They now import
+  `screening_core.hr_output.user_desktop` — `_bootstrap` already puts
+  `_shared/src` on `sys.path`, so keep it that way.
+- `webridge-collect` and the report writers were always correct: they already
+  used `hr_output`'s resolver, which is why the two regressions above could
+  hide for so long — reports still landed in the redirected folder while the
+  cleanup/projection side looked elsewhere.
+
+Rule: never introduce another `Path.home() / "Desktop"` in shipped code —
+import `user_desktop()` (engine side) or mirror `reports_desktop()` (updater
+side). Rehearsals can never prove it (CI runners have plain Desktops), so
+treat a change there as eyes-on only.
+
+Related v1.2.33 hardening in the updater launchers (`update_engine.cmd` /
+`.command`): they now only route to an install holding BOTH its private venv
+and `scripts/update_engine.py` (a pre-payload ancient layout met on a real
+machine ran the updater against its own missing file and still reported
+success), never pause under `--quiet` (the expert's hidden console must not
+block), keep the window open for double-click runs, and pass the updater's
+exit code through.
+
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
 This is what made the product survive real HR use; do not water it down:

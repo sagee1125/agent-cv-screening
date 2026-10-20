@@ -18,6 +18,13 @@ import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 
 from host_envelope.project import project_host_return, rejected_envelope
 
+# The skill may run on a machine whose visible Desktop is OneDrive-redirected or
+# carries a Chinese name ("桌面"); the engine itself resolves that through
+# hr_output.user_desktop() when it writes the HR pack, so manifest lookups must
+# resolve through the same function or they read the wrong (missing) folder on
+# exactly those machines.
+from screening_core.hr_output import user_desktop
+
 REPO_ROOT = _bootstrap.REPO_ROOT
 SKILLS_DIR = REPO_ROOT / ".codex" / "skills"
 PYTHON = sys.executable
@@ -67,7 +74,7 @@ def _read_pipeline_manifest(skill_stdout: dict[str, Any]) -> dict[str, Any]:
     hr_files = skill_stdout.get("hr_files") or ""
     if not hr_files:
         return {}
-    desktop = Path.home() / "Desktop"
+    desktop = user_desktop()
     if hr_files.startswith("Desktop/"):
         manifest_path = desktop / hr_files[len("Desktop/"):] / "_pipeline" / "manifest.json"
     else:
@@ -96,7 +103,7 @@ def _read_jas_manifest(skill_stdout: dict[str, Any]) -> dict[str, Any]:
     hr_files = skill_stdout.get("hr_files") or ""
     if not hr_files:
         return {}
-    desktop = Path.home() / "Desktop"
+    desktop = user_desktop()
     if hr_files.startswith("Desktop/"):
         manifest_path = desktop / hr_files[len("Desktop/"):] / "_pipeline" / "jas-manifest.json"
     else:
