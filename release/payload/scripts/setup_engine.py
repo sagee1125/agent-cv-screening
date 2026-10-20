@@ -314,6 +314,18 @@ def rewrite_skill_paths(skill_md: Path, engine_dst: Path) -> None:
         text = text.replace(root, token)
     if sys.platform == "win32":
         text = text.replace(token + "/", token + "\\")
+        if " " in token:
+            # The engine only lands on a path with spaces when C:\ was not
+            # writable and the launcher fell back to the user's own folder,
+            # whose name is part of the path. Bare paths with spaces tear
+            # the commands apart at the first space; the whole path quoted
+            # is what cmd.exe accepts. Every engine path in the skill stands
+            # at the start of a line or a command - none is already inside
+            # quotes - so a single wrap is unambiguous. (If the host runs
+            # commands through PowerShell instead of cmd, the same line
+            # needs a & call operator - the "When a command is refused"
+            # section tells the assistant that.)
+            text = text.replace(token, '"' + token + '"')
     skill_md.write_text(text, encoding="utf-8")
 
 

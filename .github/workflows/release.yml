@@ -84,15 +84,20 @@ jobs:
           name: CV-Screening-Setup.zip
           path: release/dist
 
-      # Two rehearsals, two step names: their pass/fail pattern is visible
-      # anonymously through the jobs API. If the direct-drive install fails,
-      # the problem is environmental (network, wheels, macOS specifics); if
-      # only the launcher step fails, the problem is in setup.command's own
-      # steps (uv fetch, private-Python provisioning). Without this split the
-      # 10-second v1.2.20 failure was undiagnosable from the outside.
-      - name: Rehearse the direct-drive install on macOS
-        run: python release/tests/simulate_install.py
+      # Two rehearsals, two step names. The first one also runs the live
+      # updater afterwards (--update stamps the install as 0.0.0 and lets it
+      # pull the released zip from github.com), so every updater change is
+      # exercised on a real OS before the zip ships: when the version check
+      # sat on the rate-limited GitHub API it failed for whole offices at
+      # once, and CI was the only place that could have caught that.
+      - name: Rehearse the direct-drive install and the updater on macOS
+        run: python release/tests/simulate_install.py --update
 
+      # If the updater step fails but the launcher one passes, the problem is
+      # environmental (network, github, wheels, macOS specifics); if only the
+      # launcher step fails, the problem is in setup.command's own steps (uv
+      # fetch, private-Python provisioning). Without this split the 10-second
+      # v1.2.20 failure was undiagnosable from the outside.
       - name: Rehearse the shipped setup.command end to end
         run: python release/tests/simulate_install.py --setup-command
 

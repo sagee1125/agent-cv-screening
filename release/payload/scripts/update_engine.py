@@ -6,6 +6,13 @@ the installed version, applies it: refreshes the engine code and the WorkBuddy
 expert, re-runs pip only when requirements changed, and invalidates the score
 cache so new code is never silently ignored by the --resume mechanism.
 
+The check never touches api.github.com: unauthenticated API calls are capped
+at 60 per hour per IP and an office shares one public address. The release tag
+is instead read from the redirect of releases/latest/download/CV-Screening-
+Setup.zip (not rate-limited); when no redirect can be parsed, the zip is
+downloaded once and its version stamp read, and that copy is reused for the
+update.
+
 Quiet mode (--quiet) is what the expert calls on the first message of a
 conversation. It always prints one update_status line and exits 0, including
 when the check fails, so a screening is never blocked and the expert can tell
@@ -21,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -31,7 +39,6 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_SLUG = "sagee1125/agent-cv-screening"
-API_LATEST = f"https://api.github.com/repos/{REPO_SLUG}/releases/latest"
 ASSET_URL = f"https://github.com/{REPO_SLUG}/releases/latest/download/CV-Screening-Setup.zip"
 USER_AGENT = "agent-cv-screening-updater"
 
@@ -73,10 +80,14 @@ def version_tuple(text: str) -> tuple:
     return tuple(parts)
 
 
-def fetch_json(url: str, timeout: float = 10.0):
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+def stamped_version(payload_zip: Path) -> str:
+    """Version the downloaded release stamps itself with (engine/version.json)."""
+    with zipfile.ZipFile(payload_zip) as archive:
+        stamp = json.loads(archive.read("engine/version.json").decode("utf-8"))
+    version = str(stamp.get("version") or "")
+    if not version:
+        raise RuntimeError("downloaded package has no engine version stamp")
+    return version
 
 
 def download(url: str, destination: Path, timeout: float = 120.0) -> None:
@@ -208,44 +219,70 @@ def main() -> int:
     root = engine_root()
     local = read_version_stamp(root)
     installed = str(local.get("version") or "0")
-    try:
-        release = fetch_json(API_LATEST)
-        remote_version = str(release.get("tag_name", "")).lstrip("v")
-    except Exception as error:  # offline, rate-limited, blocked: never block a screen
-        if not args.quiet:
-            log(f"[skip] could not check for updates: {error}")
-        emit_status("failed", installed, "unknown", "offline")
-        return 0
 
-    if version_tuple(remote_version) <= version_tuple(installed) and not args.force:
-        if not args.quiet:
-            log(f"[ok] up to date (installed {installed}, latest {remote_version}).")
-        emit_status("up_to_date", installed, remote_version)
-        return 0
-
-    if args.check:
-        log(f"[update available] installed {installed}, latest {remote_version}.")
-        emit_status("available", installed, remote_version)
-        return 0
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="cvs-dl-") as tmp:
-            payload_zip = Path(tmp) / "CV-Screening-Setup.zip"
+    # The version check no longer calls api.github.com. Unauthenticated API
+    # calls are capped at 60 per hour PER IP, and a whole office shares one
+    # public address - on a busy morning every machine's check failed at
+    # once and was reported as offline. releases/latest/download/<asset>
+    # instead redirects to the versioned asset URL, so the tag is readable
+    # from the redirect target of a HEAD request - an endpoint GitHub does
+    # not rate-limit.
+    remote_version = None
+    with tempfile.TemporaryDirectory(prefix="cvs-dl-") as tmp:
+        payload_zip = Path(tmp) / "CV-Screening-Setup.zip"
+        try:
+            probe = urllib.request.Request(ASSET_URL, headers={"User-Agent": USER_AGENT}, method="HEAD")
+            with urllib.request.urlopen(probe, timeout=30.0) as response:
+                match = re.search(r"/releases/download/([^/]+)/", response.geturl() or "")
+            if match:
+                remote_version = match.group(1).lstrip("v")
+        except Exception as error:
             if not args.quiet:
-                log(f"[..] downloading version {remote_version}...")
-            download(ASSET_URL, payload_zip)
+                log(f"[..] the release probe failed ({error}); reading the version from the download instead.")
+        if remote_version is None:
+            # No redirect to parse - some proxies rewrite it, or the network
+            # is down. Download the zip and read the stamp inside; if the
+            # network is truly down, that download raises and the offline
+            # handling below reports it exactly as before. The downloaded
+            # copy is reused for the update, so the extra bytes are not
+            # wasted.
+            try:
+                download(ASSET_URL, payload_zip)
+            except Exception as error:
+                if not args.quiet:
+                    log(f"[skip] could not check for updates: {error}")
+                emit_status("failed", installed, "unknown", "offline")
+                return 0
+            remote_version = stamped_version(payload_zip)
+
+        if version_tuple(remote_version) <= version_tuple(installed) and not args.force:
+            if not args.quiet:
+                log(f"[ok] up to date (installed {installed}, latest {remote_version}).")
+            emit_status("up_to_date", installed, remote_version)
+            return 0
+
+        if args.check:
+            log(f"[update available] installed {installed}, latest {remote_version}.")
+            emit_status("available", installed, remote_version)
+            return 0
+
+        try:
+            if not payload_zip.is_file():
+                if not args.quiet:
+                    log(f"[..] downloading version {remote_version}...")
+                download(ASSET_URL, payload_zip)
             applied = apply_update(payload_zip, args.quiet)
-    except Exception as error:
-        if not args.quiet:
-            log(f"[ERROR] update failed: {error}")
-            log("The installed engine is untouched and still works. Try again later.")
-        emit_status("failed", installed, remote_version, "download")
-        return 0 if args.quiet else 1
-    if not applied:
-        emit_status("failed", installed, remote_version, "dependencies")
-        return 0 if args.quiet else 1
-    emit_status("updated", remote_version, remote_version)
-    return 0
+        except Exception as error:
+            if not args.quiet:
+                log(f"[ERROR] update failed: {error}")
+                log("The installed engine is untouched and still works. Try again later.")
+            emit_status("failed", installed, remote_version, "download")
+            return 0 if args.quiet else 1
+        if not applied:
+            emit_status("failed", installed, remote_version, "dependencies")
+            return 0 if args.quiet else 1
+        emit_status("updated", remote_version, remote_version)
+        return 0
 
 
 if __name__ == "__main__":

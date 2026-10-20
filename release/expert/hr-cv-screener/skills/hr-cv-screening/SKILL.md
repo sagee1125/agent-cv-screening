@@ -128,6 +128,11 @@ missing Python, and it is not a reason to repair the machine.
 If the refused command contained `C:/`, run that same command once more with
 `C:\`. Change nothing else.
 
+If the command path is quoted (only possible when the engine lives under a
+Windows user name with spaces) and the host refuses it, prefix the copied
+line with `& ` and run it again - that form is for a PowerShell host. Change
+nothing else.
+
 If it is refused again, stop. Tell HR, in her language, that the screening tool
 could not be started. Do not try a third approach.
 
