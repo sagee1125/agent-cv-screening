@@ -6,7 +6,9 @@ learned the hard way, and a digest of every fixed bug so you do not re-diagnose 
 `AGENTS.md` (screening conversation contract, code comment rules) remains mandatory;
 this file adds the engineering view.
 
-Last updated for: **v1.2.30**.
+Last updated for: **v1.2.30**, plus the post-v1.2.30 hardening batch (key.txt build
+guard, WorkBuddy-absent updater advice, install-page ordering) documented here before
+it was tagged.
 
 ## 1. What this product is
 
@@ -45,10 +47,11 @@ PolyU GitLab, both interactively pushed on every release). The shipping surface:
 
 | File | Role |
 |---|---|
-| `release/payload/scripts/setup_engine.py` | installer core: env template, expert install, marketplace merge, SKILL.md path rewrite, version stamping, self-test |
+| `release/payload/scripts/setup_engine.py` | installer core: env template, expert install, marketplace merge, SKILL.md path rewrite, version stamping, WorkBuddy-presence detection, self-test |
 | `release/payload/scripts/update_engine.py` | self-updater: version check, checksum verify, apply, venv rebuild, cache busting |
 | `release/payload/setup.bat` / `setup.command` | HR launchers: pinned-uv fetch, Python provisioning, single setup call |
 | `release/payload/update_engine.cmd` / `.command` | updater entry: runs from installed engine, or updates the installed engine when launched from a downloaded zip folder |
+| `release/payload/screen.cmd` / `screen.command` | host-envelope entrypoints: run one screening command with the installed venv's python; WorkBuddy calls these, they never create another environment |
 | `release/build_release.py` | zip builder: staging, stamp, sidecar, sha256, forbidden-file guard |
 | `release/tests/simulate_install.py` | rehearsal engine (see §5) |
 | `release/expert/hr-cv-screener/skills/hr-cv-screening/SKILL.md` | the expert's operating manual, read by WorkBuddy at runtime; contains shell placeholders that the installer rewrites |
@@ -155,11 +158,16 @@ in-place deletion; do not be tempted to `rmtree` the venv while the updater runs
   normalizes the three commands to LF inside the zip, because bash on macOS cannot run a
   CRLF shell script.
 
-### 6.6 Update apply = total refresh of shipped trees (v1.2.28)
-`apply_update` deletes the destination before `copytree` for engine/expert installs, so
-files removed upstream do not linger on machines that have updated for months
-(a stale-file fix). Marketplace merge of the expert happens **outside** the wiped dir.
-`.env`, `venv` and `_backup-*` are never touched by a copy.
+### 6.6 Update apply: expert = total refresh, engine = merge (v1.2.28)
+The **expert** install is delete-first: `install_expert` removes the destination
+directory and copies the new tree, so files removed upstream do not linger on machines
+that have updated for months (the stale-file fix). The marketplace merge of the expert
+happens **outside** the wiped dir. The **engine** update is a
+`copytree(dirs_exist_ok=True)` **merge** with ignore patterns, not a wipe — the engine
+root holds live state (`venv`, `.env`, `data/`) that must survive an update.
+Consequence to remember: a file upstream *deleted* inside the engine tree keeps
+lingering on updated machines (harmless but real); only the expert tree gets the
+delete-first guarantee. `.env`, `venv` and `_backup-*` are never touched by either copy.
 
 ### 6.7 Cache rules (FR-10)
 On a version change, score-cache families (`detail-*.json`, `rows.json`,
@@ -186,6 +194,48 @@ will block HR's screening; conversely a `check` run (non-quiet) explains to the 
 After applying an update the expert tells HR to restart WorkBuddy so the new expert
 loads (wording lives in SKILL.md's "Engine self-update" section and the updater's
 non-quiet output).
+
+### 6.11 WorkBuddy may be absent — never block the install (v1.2.19)
+
+The desktop app is GUI-only (a Windows .exe or a macOS .dmg from the official install
+page): there is no CLI, no silent install and no package manager entry, so the most an
+installer can do is detect the absence and open the official page. Rules:
+
+- Detection paths: Windows `%LOCALAPPDATA%\Programs\WorkBuddyAI` (or `...\WorkBuddy`);
+  macOS `/Applications/WorkBuddy.app` or `~/Applications/WorkBuddy.app`. It is only a
+  hint — a missing app never blocks the install.
+- Either way the engine, the private venv and the expert are installed in full.
+  WorkBuddy scans `plugins/marketplaces/my-experts` on startup, so an expert written
+  before the app is installed is picked up when the app first runs.
+  `workbuddy_config_dir()` writes `~/.workbuddy-ai`, falling back to `~/.workbuddy`
+  only when that already exists.
+- The install URLs live in exactly one place (`WORKBUDDY_INSTALL_GUIDES` /
+  `WORKBUDDY_SITE` in setup_engine.py). A missing app changes only the final
+  instructions (setup_engine.py's ending) and START-HERE.txt's lead section.
+- The non-quiet updater reuses the same detection for its post-update advice
+  (post-v1.2.30): restart advice when the app is present, install-page guidance when it
+  is not. The expert's quiet path prints neither.
+
+### 6.12 The API-key protocol (three entry points, one file)
+
+HR supplies `ZAI_API_KEY` themselves; nothing is invented. `write_env` priority: an
+existing real key in `.env` is kept verbatim on re-runs; otherwise `key.txt` (first
+non-empty line — read, then **deleted**, so no copy lingers); otherwise the
+`CVS_API_KEY` environment variable (what the rehearsal, and an assistant installing on
+the user's behalf, use); otherwise a hidden getpass prompt (visible input only when the
+console cannot hide it). With no usable key a placeholder is written and the installer
+says so — screening fails authentication until `.env` is edited and setup is re-run.
+Nothing else may join that chain: a key must never travel through a command line or a
+chat message.
+
+### 6.13 Private files never ship (build guard)
+
+`sanity_checks` in `build_release.py` scans the staged tree for every name in
+`FORBIDDEN_IN_ZIP` (`.env`, `key.txt`, `id_rsa`, `*.pem`, `jas_state`) and one hit
+aborts the build before a zip exists. `key.txt` joined the list post-v1.2.30: the
+installer protocol (§6.12) has users drop it next to setup.bat, and `payload/` mirrors
+the zip layout, so a leftover test copy in `payload/` would publish a user's API key
+inside the public release asset.
 
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
@@ -247,6 +297,10 @@ Any claim that is load-bearing must be verified before it is trusted:
   one-time ~5-minute rebuild on their next update, and verify the wheels actually ship
   for the new minor (the pinned dependency set only has wheels for certain minors —
   see SUPPORTED_PYTHON in setup_engine.py for the verified set).
+- The CI runners never have WorkBuddy installed, so the rehearsals always execute the
+  installer's missing-app branch — but nothing asserts its message text, and the
+  installed-app branch never runs in CI at all. Both are plain logging; a change there
+  needs eyes, not just green CI.
 
 ## 11. Change style
 

@@ -474,14 +474,17 @@ def main() -> int:
     # - so hand the user the install page instead of telling them to restart an
     # app that does not exist yet. The install is NOT interrupted either way.
     guide = workbuddy_install_guide()
-    opened = open_in_default_browser(guide)
     log("Next steps:")
-    if opened:
-        log("  1. WorkBuddy is not on this computer yet. The install page has")
-        log("     been opened in your browser. If it did not open, go to:")
-    else:
-        log("  1. WorkBuddy is not on this computer yet. Open this install page:")
+    # The page address is printed BEFORE the browser is opened: on macOS the
+    # browser comes to the front and can cover this window, so a user whose
+    # auto-open silently failed would otherwise never see where to go.
+    log("  1. WorkBuddy is not on this computer yet. Opening the install page in")
+    log("     your browser now. If it does not open, go to:")
     log(f"       {guide}")
+    opened = open_in_default_browser(guide)
+    if not opened:
+        log("       (the browser could not be opened automatically -")
+        log("        use the address above by hand)")
     log("     Install WorkBuddy from that page, then open it.")
     log("  2. Open  Experts -> My Experts -> Vera.")
     log("     If she is not there, quit WorkBuddy completely and open it again.")

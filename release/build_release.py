@@ -58,8 +58,13 @@ EXECUTABLE_NAMES = ("setup.command", "update_engine.command", "screen.command")
 # installation through a one-time ~5 minute rebuild.
 REQUIRES_PYTHON = "3.12"
 
-# Files that must never end up in a public release.
-FORBIDDEN_IN_ZIP = (".env", "id_rsa", "*.pem", "jas_state")
+# Files that must never end up in a public release. key.txt rides along because the
+# installer's API-key protocol has users drop it next to setup.bat (setup_engine.py
+# reads it and deletes it at install time) and payload/ mirrors the zip layout - so
+# a single test copy left in payload/ would publish that user's API key inside the
+# public release asset. sanity_checks below scans the staged tree for every name
+# here and one hit aborts the whole build.
+FORBIDDEN_IN_ZIP = (".env", "key.txt", "id_rsa", "*.pem", "jas_state")
 
 
 def sync_expert(live: Path, snapshot: Path) -> None:

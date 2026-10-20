@@ -25,5 +25,9 @@ release/dist/
 # Local caches for the release self-test simulation.
 release/tests/.cache/
 
+# Rehearsal diagnostics file (simulate_install.py rewrites it on every run; CI
+# pushes it into an issue on failure, it is never a repo artifact).
+release/tests/rehearsal-output.txt
+
 # Local backups of the expert package (not for version control)
 _expert-backup-*/

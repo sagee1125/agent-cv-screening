@@ -268,6 +268,32 @@ def bust_score_caches(quiet: bool) -> int:
     return moved
 
 
+def restart_advice() -> list[str]:
+    """The lines printed after a successful non-quiet update.
+
+    The restart advice assumes WorkBuddy is on this machine - but the engine
+    installs without the app on purpose (setup_engine.py never blocks on a
+    missing WorkBuddy), and a manual update_engine.cmd run from a downloaded
+    zip then told the user to restart an app that was never installed. The
+    expert's own path is quiet and never prints this. Reuse the installer's
+    detection so both entry points tell the same story.
+    """
+    import setup_engine  # shipped beside this file
+
+    if setup_engine.workbuddy_app_installed():
+        return [
+            "     Please restart WorkBuddy (quit it completely, then open it",
+            "     again) so the updated expert is loaded.",
+        ]
+    return [
+        "     WorkBuddy is not installed on this computer yet, so there is",
+        "     nothing to restart. The updated engine and expert are already in",
+        "     place; install WorkBuddy from",
+        f"     {setup_engine.workbuddy_install_guide()}",
+        "     and Vera will be waiting under Experts -> My Experts.",
+    ]
+
+
 def apply_update(payload_zip: Path, quiet: bool) -> bool:
     import setup_engine  # shipped beside this file
 
@@ -365,8 +391,8 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
         bust_score_caches(quiet)
         if not quiet:
             log(f"[ok] updated to version {new_version}.")
-            log("     Please restart WorkBuddy (quit it completely, then open it")
-            log("     again) so the updated expert is loaded.")
+            for line in restart_advice():
+                log(line)
         return True
 
 
