@@ -54,6 +54,10 @@ WINDOWS
 1. Double-click  setup.bat
 2. When it asks for your personal API key, paste it and press Enter
    (the input is hidden on screen - that is normal).
+   Option for the no-paste case: save your key as a plain text file named
+   key.txt (first line of the file = the key), in this folder next to
+   setup.bat. The installer reads it by itself and deletes it afterwards -
+   the key never appears on screen or in any chat message.
 3. Wait for the two lines:
        Self-test passed - the screening engine works on this computer.
        Install complete.

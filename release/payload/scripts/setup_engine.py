@@ -320,7 +320,16 @@ def rewrite_skill_paths(skill_md: Path, engine_dst: Path) -> None:
 def install_expert(pkg: Path, engine_dst: Path, config_dir: Path) -> None:
     src = pkg / "expert" / "hr-cv-screener"
     dst = config_dir / "plugins" / "marketplaces" / "my-experts" / "plugins" / "hr-cv-screener"
-    shutil.copytree(src, dst, dirs_exist_ok=True)
+    # Replace the whole expert directory instead of copying over it. Bare
+    # copytree(dirs_exist_ok=True) kept files a newer release had deleted
+    # (renamed skills, dropped examples) on the user's machine forever, and
+    # WorkBuddy would keep serving those stale fragments. The marketplace
+    # manifest below lives OUTSIDE dst, so it survives this wipe and keeps
+    # its merge behaviour. If the copy after the wipe fails (disk full, disk
+    # error), rerunning setup restores the expert in full.
+    if dst.is_dir():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
     rewrite_skill_paths(dst / "skills" / "hr-cv-screening" / "SKILL.md", engine_dst)
 
     manifest_dir = config_dir / "plugins" / "marketplaces" / "my-experts" / ".codebuddy-plugin"
