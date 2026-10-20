@@ -61,10 +61,16 @@ jobs:
       - name: Rehearse the shipped setup.bat end to end
         run: python release/tests/simulate_install.py --setup-bat
 
+      - name: Push rehearsal diagnostics as an issue (Actions logs need a login; issues do not)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "rehearsal diagnostics - ${{ github.job }} (run ${{ github.run_id }})" --body-file release/tests/rehearsal-output.txt
+
   rehearse-macos:
     needs: build
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -77,8 +83,23 @@ jobs:
           name: CV-Screening-Setup.zip
           path: release/dist
 
+      # Two rehearsals, two step names: their pass/fail pattern is visible
+      # anonymously through the jobs API. If the direct-drive install fails,
+      # the problem is environmental (network, wheels, macOS specifics); if
+      # only the launcher step fails, the problem is in setup.command's own
+      # steps (uv fetch, private-Python provisioning). Without this split the
+      # 10-second v1.2.20 failure was undiagnosable from the outside.
+      - name: Rehearse the direct-drive install on macOS
+        run: python release/tests/simulate_install.py
+
       - name: Rehearse the shipped setup.command end to end
         run: python release/tests/simulate_install.py --setup-command
+
+      - name: Push rehearsal diagnostics as an issue (Actions logs need a login; issues do not)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "rehearsal diagnostics - ${{ github.job }} (run ${{ github.run_id }})" --body-file release/tests/rehearsal-output.txt
 
   publish:
     needs: [build, rehearse-windows, rehearse-macos]

@@ -49,6 +49,17 @@ REPO = Path(__file__).resolve().parents[2]
 CACHE = Path(__file__).resolve().parent / ".cache"
 UV_VERSION = "0.12.18"
 
+# Every rehearsal step's captured output lands here, so a CI failure can be
+# diagnosed without repository log access: GitHub keeps Actions logs behind a
+# login, but the workflow pushes this one file into an issue whenever a step
+# fails, and issues are readable by anyone.
+DIAGNOSTICS = Path(__file__).resolve().parent / "rehearsal-output.txt"
+
+
+def record(text: str) -> None:
+    with DIAGNOSTICS.open("a", encoding="utf-8") as handle:
+        handle.write(text if text.endswith("\n") else text + "\n")
+
 UV_ASSETS = {
     ("windows", "AMD64"): "uv-x86_64-pc-windows-msvc.zip",
     ("windows", "ARM64"): "uv-aarch64-pc-windows-msvc.zip",
@@ -70,6 +81,7 @@ def check(name: str, ok: bool) -> bool:
     print(("PASS " if ok else "FAIL ") + name, flush=True)
     if not ok:
         failures.append(name)
+        record(f"== CHECK FAILED: {name}")
     return ok
 
 
@@ -167,6 +179,7 @@ def main() -> int:
              "uses the script's own `uv pip install` with no local wheel cache.",
     )
     args = parser.parse_args()
+    DIAGNOSTICS.write_text("", encoding="utf-8")  # one fresh file per rehearsal run
 
     if not args.zip.exists():
         raise SystemExit(f"[ERROR] zip not found: {args.zip} - build it with release/build_release.py first.")
@@ -232,6 +245,8 @@ def main() -> int:
                                 stdin=subprocess.DEVNULL if stdin_devnull else None)
         try:
             out, err = proc.communicate(timeout=timeout)
+            with DIAGNOSTICS.open("a", encoding="utf-8") as handle:
+                handle.write(f"== {label}: exit {proc.returncode}\n{out or ''}\n--- stderr ---\n{err or ''}\n")
         except subprocess.TimeoutExpired:
             # Dev-machine quirk (observed 2026-09-25): a step can complete all of
             # its work and still fail to exit - a flaky interpreter-shutdown race
@@ -250,6 +265,8 @@ def main() -> int:
             if pass_marker and pass_marker in partial:
                 log(f"[WARN] {label}: work completed but the process did not exit;"
                     " killed the lingering tree and continued (dev-machine shutdown race).")
+                record(f"== {label}: timed out but marker present; killed the lingering process tree."
+                       " Captured output until the kill:\n" + partial)
                 return partial
             log(partial[-2000:])
             log((err or "")[-2000:])
@@ -378,7 +395,8 @@ def main() -> int:
             check("prod site mode survived the update", "JES_SITE_MODE=1" in env_after)
             new_stamp = json.loads(version_file.read_text(encoding="utf-8"))
             check("version stamp advanced to the live release", new_stamp.get("version") not in ("", "0.0.0"))
-    except SystemExit:
+    except SystemExit as stopped:
+        record(f"== stopped early: {stopped}")
         if not failures:
             failures.append("a step failed")
     finally:
