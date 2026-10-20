@@ -24,6 +24,71 @@ jobs:
       - name: Simulate a clean install (quality gate)
         run: python release/tests/simulate_install.py --zip release/dist/CV-Screening-Setup.zip
 
+      # The zip waits here as an artifact. The publish job attaches it to the
+      # GitHub release only AFTER every platform rehearsal below has passed.
+      # Until then the updater keeps treating the previous release as latest -
+      # which is the point: a broken installer must never become what HR
+      # downloads. This did happen before v1.2.19 got its launcher rehearsals:
+      # the zip was attached the moment the ubuntu gate passed.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CV-Screening-Setup.zip
+          path: release/dist/CV-Screening-Setup.zip
+          if-no-files-found: error
+
+  # These two jobs are what the old pipeline never had: they execute the
+  # scripts HR actually double-clicks. The ubuntu simulation drives uv and
+  # setup_engine.py by hand, which exercises the installer logic but never the
+  # launcher that fetches uv, unpacks it and provisions Python - and those
+  # launcher steps are the ones that break on real machines (bad uv release,
+  # ARM64 asset names, privileged locations).
+  rehearse-windows:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: CV-Screening-Setup.zip
+          path: release/dist
+
+      - name: Rehearse the shipped setup.bat end to end
+        run: python release/tests/simulate_install.py --setup-bat
+
+  rehearse-macos:
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: CV-Screening-Setup.zip
+          path: release/dist
+
+      - name: Rehearse the shipped setup.command end to end
+        run: python release/tests/simulate_install.py --setup-command
+
+  publish:
+    needs: [build, rehearse-windows, rehearse-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CV-Screening-Setup.zip
+          path: dist
+
       - name: Attach zip to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -32,4 +97,4 @@ jobs:
             --title "CV Screening $GITHUB_REF_NAME" \
             --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" \
-            release/dist/CV-Screening-Setup.zip --clobber
+            dist/CV-Screening-Setup.zip --clobber

@@ -5,14 +5,16 @@ Run this BEFORE tagging a release:
 
     python release/tests/simulate_install.py            # uses release/dist/CV-Screening-Setup.zip
     python release/tests/simulate_install.py --zip <path>
-    python release/tests/simulate_install.py --setup-bat   # install by running the shipped setup.bat
+    python release/tests/simulate_install.py --setup-bat     # install by running the shipped setup.bat
+    python release/tests/simulate_install.py --setup-command # install by running the shipped setup.command
     python release/tests/simulate_install.py --update   # also rehearses the live updater
 
 By default the install steps are driven directly (uv, then setup_engine.py), which is fast and
-keeps the product's own logic out of the way. `--setup-bat` instead runs the script HR actually
-double-clicks, end to end, so the uv fetch and unpack are covered as well - those are the steps
-that fail on a real machine and the direct path never executes. It is slower (it re-downloads uv)
-and it needs Windows.
+keeps the product's own logic out of the way. `--setup-bat` (Windows) and `--setup-command`
+(macOS) instead run the script HR actually double-clicks, end to end, so the uv fetch and the
+private-Python provisioning are covered too - those are the steps that fail on a real machine
+and the direct path never executes. They are slower (they re-download uv); `--setup-bat` needs
+Windows, `--setup-command` needs macOS.
 
 What it does, in a disposable sandbox (a fake HOME, nothing touches your real
 profile or the live WorkBuddy config):
@@ -157,6 +159,13 @@ def main() -> int:
              "driving uv and setup_engine.py by hand. Slower, Windows-only, and it needs pypi to "
              "answer because it uses the script's own `uv pip install` with no local wheel cache.",
     )
+    parser.add_argument(
+        "--setup-command",
+        action="store_true",
+        help="Install by running the shipped setup.command (the file HR double-clicks on the "
+             "Mac). Slower, macOS-only; like --setup-bat it needs pypi to answer because it "
+             "uses the script's own `uv pip install` with no local wheel cache.",
+    )
     args = parser.parse_args()
 
     if not args.zip.exists():
@@ -281,6 +290,22 @@ def main() -> int:
                 ["cmd", "/c", str(staged)],
                 cwd=pkg, timeout=1200, pass_marker="Install complete.",
                 stdin_devnull=True, env_override=setup_bat_env)
+        elif args.setup_command:
+            # The path HR actually takes on the Mac: setup.command fetches its own
+            # uv, provisions private Python 3.12, installs the pinned requirements
+            # and then calls setup_engine.py. Run it verbatim rather than
+            # reimplementing it. It reads TARGET from $HOME, and env already points
+            # HOME at the sandbox profile, so the install lands inside the sandbox
+            # with no staging - the same thing the Windows rehearsal needs a patched
+            # line for. Its uv/Python caches also default to HOME-derived paths,
+            # which keeps everything inside the sandbox.
+            if sys.platform != "darwin":
+                raise SystemExit("[ERROR] --setup-command only applies to macOS; "
+                                 "setup.command is a bash script.")
+            run("setup.command (the HR installer, end to end)",
+                ["bash", str(pkg / "setup.command")],
+                cwd=pkg, timeout=1500, pass_marker="Install complete.",
+                stdin_devnull=True)
         else:
             run("uv provisioning Python 3.12", [str(uv), "python", "install", "3.12"])
             run("uv creating the venv", [str(uv), "venv", "--python", "3.12", str(sandbox_root / "agent-cv-screening" / "venv")])

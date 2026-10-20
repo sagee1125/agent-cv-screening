@@ -193,6 +193,8 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
         bust_score_caches(quiet)
         if not quiet:
             log(f"[ok] updated to version {new_version}.")
+            log("     Please restart WorkBuddy (quit it completely, then open it")
+            log("     again) so the updated expert is loaded.")
         return True
 
 

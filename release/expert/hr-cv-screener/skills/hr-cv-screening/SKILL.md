@@ -296,9 +296,13 @@ The command prints one line, `update_status=... installed=... latest=...`. At mo
 conversation. Then:
 
 - `up_to_date` — say nothing about the update. Answer what she asked.
-- `updated` — one sentence, then her answer: "I've updated the screening tool — the first screening of a job will take longer, because the resumes are read again."
-  繁中：「篩選工具已更新，這個職位第一次篩選會久一點，因為簡歷會重新讀一遍。」
-  Say that sentence only. The first screening of each job after the update reads the resumes again, so it takes longer. Do not say this when the status is `up_to_date`.
+- `updated` — two short sentences, then her answer: "I've updated the screening tool — the first screening of a job will take longer, because the resumes are read again. When this screening is finished, please quit WorkBuddy completely and open it again once, so the updated part takes effect."
+  繁中：「篩選工具已更新，這個職位第一次篩選會久一點，因為簡歷會重新讀一遍。這個職位篩完之後，請把 WorkBuddy 完全關閉再重新打開一次，讓更新完全生效。」
+  Say those sentences only. The restart line matters: the updater replaced the expert's own
+  files on disk, and a running WorkBuddy session keeps the copy it loaded at startup - the
+  restart is what makes the new version the one WorkBuddy actually runs. If she screens several
+  jobs in one sitting, the restart waits until she is done with the current screening. Do not
+  say any of this when the status is `up_to_date`.
 - `failed`, or the command prints nothing — the **first sentence** of this reply tells her,
   in her language, then you continue with what she asked. Do not stop the screening.
   - English: "I could not update the screening tool, so this run uses the copy already on this computer."

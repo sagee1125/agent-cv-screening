@@ -133,6 +133,8 @@ New versions are published on GitHub. The expert checks quietly before each
 screening session and applies updates automatically; your API key, saved
 conditions and past reports are always kept. You can also update manually:
 double-click  update_engine.cmd  (Windows) or  update_engine.command  (Mac).
+After an update, quit WorkBuddy completely and open it again, so the updated
+expert is loaded.
 
 
 PRIVACY
