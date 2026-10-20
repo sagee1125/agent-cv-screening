@@ -1,6 +1,8 @@
 # [AGENTS.md](http://AGENTS.md)
 
-Project rules for all agents working in this repository.
+Project rules for all agents working in this repository. For the engineering view —
+what ships, how the release pipeline works, every invariant and fixed bug — read
+[AI-AGENT-GUIDE.md](./AI-AGENT-GUIDE.md) before your first change.
 
 ## HR screening entry point
 
