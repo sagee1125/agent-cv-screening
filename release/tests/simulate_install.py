@@ -227,6 +227,10 @@ def main() -> int:
 
     env = dict(os.environ)
     env.update({"USERPROFILE": str(home), "HOME": str(home)})
+    # Every install path below must be non-interactive: the installer prompts
+    # for the HR API key otherwise, and a sandbox rehearsal has nobody to
+    # type it. setup_engine.py reads this before it prompts.
+    env.update({"CVS_API_KEY": "simulate-test-key"})
     # Keep uv's caches inside release/tests/.cache: repeat runs are fast and
     # nothing leaks into the developer's real profile.
     cache_root = Path(__file__).resolve().parent / ".cache"
@@ -254,14 +258,18 @@ def main() -> int:
         # The shipped script calls plain `uv pip install`, so the wheel cache has to arrive
         # through the environment (see the note on antlr4 below).
         "UV_FIND_LINKS": str(Path(__file__).resolve().parent / "wheels"),
-        # setup_engine.py reads this before it would prompt, so the rehearsal never blocks on
-        # the interactive key prompt.
-        "CVS_API_KEY": "simulate-test-key",
     })
 
     uv = prepare_uv(cache_root)
     record("== uv prepared: " + str(uv))
-    venv_python = sandbox_root / "agent-cv-screening" / "venv" / (
+    # Where the engine lands. setup.bat installs to the ROOT the patched TARGET
+    # line names; setup.command installs to $HOME, and this rehearsal points
+    # HOME at the sandbox profile (home/ below the root). All post-install
+    # checks must look where the launcher actually wrote.
+    install_root = sandbox_root / "agent-cv-screening"
+    if args.setup_command:
+        install_root = home / "agent-cv-screening"
+    venv_python = install_root / "venv" / (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
     )
 
@@ -386,20 +394,20 @@ def main() -> int:
         # where a fresh install stamped 0.0.0 and immediately re-downloaded the same
         # release on the expert's first update check.
         installed_stamp = json.loads(
-            (sandbox_root / "agent-cv-screening" / "version.json").read_text(encoding="utf-8")
+            (install_root / "version.json").read_text(encoding="utf-8")
         )
         check(
             "fresh install stamps the shipped version",
             installed_stamp.get("version") == stamp.get("version"),
         )
-        env_text = (sandbox_root / "agent-cv-screening" / ".env").read_text(encoding="utf-8")
+        env_text = (install_root / ".env").read_text(encoding="utf-8")
         check(".env has the supplied key", "ZAI_API_KEY=simulate-test-key" in env_text)
         check(".env disables the local NER model", "CV_LOCAL_NER_ENABLED=false" in env_text)
         check(".env enables the prod site mode", "JES_SITE_MODE=1" in env_text)
         expert_md = home / ".workbuddy-ai" / "plugins" / "marketplaces" / "my-experts" / "plugins" / "hr-cv-screener" / "agents" / "hr-cv-screener.md"
         check("expert installed for WorkBuddy", expert_md.is_file())
         skill_text = (expert_md.parent.parent / "skills" / "hr-cv-screening" / "SKILL.md").read_text(encoding="utf-8")
-        installed = str(sandbox_root / "agent-cv-screening")
+        installed = str(install_root)
         check(
             "expert skill paths rewritten to the engine dir",
             "C:/agent-cv-screening" not in skill_text
@@ -408,21 +416,21 @@ def main() -> int:
         )
 
         jd_output = run("engine smoke test (rule-mode JD parse)",
-                        [str(venv_python), str(sandbox_root / "agent-cv-screening" / ".codex" / "skills" / "jd-parser" / "scripts" / "run_jd_parse.py"),
+                        [str(venv_python), str(install_root / ".codex" / "skills" / "jd-parser" / "scripts" / "run_jd_parse.py"),
                          "--jd-text", "Requirements: Bachelor degree in Computer Science; programming experience in Python."],
-                        cwd=str(sandbox_root / "agent-cv-screening"))
+                        cwd=str(install_root))
         check("JD parse produced a parse_path", '"parse_path"' in jd_output)
 
         if args.update:
             log("[..] rehearsing the live updater against github.com ...")
-            version_file = sandbox_root / "agent-cv-screening" / "version.json"
+            version_file = install_root / "version.json"
             version_file.write_text(json.dumps({"version": "0.0.0", "requirements_sha256": ""}), encoding="utf-8")
             out = run("updater applies the latest release",
-                      [str(venv_python), str(sandbox_root / "agent-cv-screening" / "scripts" / "update_engine.py")],
-                      cwd=str(sandbox_root / "agent-cv-screening"),
+                      [str(venv_python), str(install_root / "scripts" / "update_engine.py")],
+                      cwd=str(install_root),
                       pass_marker="updated to version")
             check("updater applied the latest release", "updated to version" in out)
-            env_after = (sandbox_root / "agent-cv-screening" / ".env").read_text(encoding="utf-8")
+            env_after = (install_root / ".env").read_text(encoding="utf-8")
             check("API key survived the update", "ZAI_API_KEY=simulate-test-key" in env_after)
             check("prod site mode survived the update", "JES_SITE_MODE=1" in env_after)
             new_stamp = json.loads(version_file.read_text(encoding="utf-8"))
