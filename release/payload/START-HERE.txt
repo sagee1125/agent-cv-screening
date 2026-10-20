@@ -1,7 +1,23 @@
 CV Screening - Setup Instructions (Windows and Mac)
-====================================================
+===================================================
 
-You need: this folder, your personal API key (in the encrypted spreadsheet we
+YOU NEED WORKBUDDY FIRST
+------------------------
+Vera (the CV screening expert) lives INSIDE the WorkBuddy desktop app, so
+WorkBuddy must be on this computer before you can use her. If it is already
+installed, just continue below - the installer will find it. If NOT, you can
+still run this installer now: everything installs normally, your API key is
+kept, and WorkBuddy will pick the expert up the first time it opens. Just
+download and install WorkBuddy from the official page for your system:
+
+    Windows: https://www.workbuddy.ai/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Win-Guide
+    Mac:     https://www.workbuddy.ai/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Mac-Guide
+
+After WorkBuddy is installed and open, Vera should appear under
+Experts -> My Experts. If she is not there, run setup.bat (Windows) or
+setup.command (Mac) one more time - your key and reports are all kept.
+
+You also need: this folder, your personal API key (in the encrypted spreadsheet we
 sent you), and about 15 minutes.
 
 For internal University jobs you also need Google Chrome on this computer, with
@@ -60,6 +76,11 @@ MAC - TRY THIS FIRST: double-click  setup.command
 -------------------------------------------------
 1. Double-click  setup.command
    - If macOS blocks it: right-click the file once and choose "Open".
+     If that does not help either (newer macOS may make you go through
+     System Settings): open System Settings -> Privacy & Security, scroll
+     to the Security section, and click "Open Anyway" next to the message
+     about setup.command, then choose "Open".
+     After that, double-clicking setup.command works normally.
    - If you see an error message, or nothing happens, or the window closes
      immediately: use the guaranteed fallback below (step 2). It takes one
      pasted line and always works.

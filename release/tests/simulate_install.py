@@ -294,14 +294,30 @@ def main() -> int:
                 [str(uv), "pip", "install", "--python", str(venv_python),
                  "--find-links", str(find_links),
                  "-r", str(staged_requirements(pkg))])
+            # No --version is passed on purpose: setup.bat and setup.command never pass
+            # one either, so this is the shipped-stamp default being exercised. The
+            # installer must stamp the version from the payload's engine/version.json
+            # (not 0.0.0), or every fresh install looks older than the release it
+            # shipped and re-downloads the same version on the expert's first check.
             run("installer (env, expert, marketplace, path rewrite)",
                 [str(venv_python), str(pkg / "scripts" / "setup_engine.py"),
                  "--engine-target", str(sandbox_root / "agent-cv-screening"), "--skip-venv",
-                 "--api-key", "simulate-test-key", "--version", stamp.get("version", "0.0.0")],
+                 "--api-key", "simulate-test-key"],
                 pass_marker="Install complete.")
 
         check("venv interpreter exists", venv_python.is_file())
         check("version stamp matches the zip", stamp.get("version") not in ("", "0.0.0"))
+        # The install itself must report the shipped version. The rehearsal installs
+        # without --version (as the real launchers do), so this catches the old bug
+        # where a fresh install stamped 0.0.0 and immediately re-downloaded the same
+        # release on the expert's first update check.
+        installed_stamp = json.loads(
+            (sandbox_root / "agent-cv-screening" / "version.json").read_text(encoding="utf-8")
+        )
+        check(
+            "fresh install stamps the shipped version",
+            installed_stamp.get("version") == stamp.get("version"),
+        )
         env_text = (sandbox_root / "agent-cv-screening" / ".env").read_text(encoding="utf-8")
         check(".env has the supplied key", "ZAI_API_KEY=simulate-test-key" in env_text)
         check(".env disables the local NER model", "CV_LOCAL_NER_ENABLED=false" in env_text)

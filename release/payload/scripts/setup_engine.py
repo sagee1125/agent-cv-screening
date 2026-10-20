@@ -194,6 +194,24 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def payload_engine_version(pkg: Path) -> str:
+    """Version the release build stamped into this payload's engine/version.json.
+
+    setup.bat and setup.command do not pass --version, so this is the version a
+    fresh install must report. Stamping the argparse default "0.0.0" instead
+    made every new install look older than the release it shipped: the expert's
+    first update check re-downloaded and re-applied the very same version, and
+    told HR the tool had "been updated" minutes after it was installed.
+    """
+    stamp = pkg / "engine" / "version.json"
+    try:
+        parsed = json.loads(stamp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # missing, unreadable or not JSON
+        return ""
+    version = parsed.get("version") if isinstance(parsed, dict) else None
+    return str(version).strip() if version else ""
+
+
 def venv_python_path(engine_dst: Path) -> Path:
     return engine_dst / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
@@ -232,6 +250,58 @@ def workbuddy_config_dir() -> Path:
     chosen = Path.home() / ".workbuddy-ai"
     chosen.mkdir(parents=True, exist_ok=True)
     return chosen
+
+
+# The WorkBuddy desktop app is GUI-only (a Windows .exe or a macOS .dmg from the
+# official install page): there is no CLI, no silent install and no package
+# manager entry, so the most an installer can do for a machine that does not
+# have it yet is detect the absence and open the official install guide in the
+# default browser. The expert files are written either way - WorkBuddy scans
+# plugins/marketplaces/my-experts on startup, so an expert installed before the
+# app is picked up when the app first runs.
+WORKBUDDY_INSTALL_GUIDES = {
+    "win32": "https://www.workbuddy.ai/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Win-Guide",
+    "darwin": "https://www.workbuddy.ai/docs/workbuddy/From-Beginner-to-Expert-Guide/Installation-Mac-Guide",
+}
+WORKBUDDY_SITE = "https://www.workbuddy.ai/"
+
+
+def localappdata() -> Path:
+    value = os.environ.get("LOCALAPPDATA", "")
+    return Path(value) if value else Path.home() / "AppData" / "Local"
+
+
+def workbuddy_app_installed() -> bool:
+    """True when the WorkBuddy desktop app looks installed for THIS user.
+
+    Only a hint: a missing app never blocks the install, it only changes the
+    final instructions and opens the install page.
+    """
+    if sys.platform == "win32":
+        programs = localappdata() / "Programs"
+        return any((programs / name).is_dir() for name in ("WorkBuddyAI", "WorkBuddy"))
+    return any(
+        path.exists()
+        for path in (Path("/Applications/WorkBuddy.app"), Path.home() / "Applications" / "WorkBuddy.app")
+    )
+
+
+def workbuddy_install_guide() -> str:
+    return WORKBUDDY_INSTALL_GUIDES.get(sys.platform, WORKBUDDY_SITE)
+
+
+def open_in_default_browser(url: str) -> bool:
+    """Open url in the default browser. False when that is not possible."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(url)  # type: ignore[attr-type]
+        elif sys.platform == "darwin":
+            subprocess.run(["open", url], check=False)
+        else:
+            subprocess.run(["xdg-open", url], check=False)
+        return True
+    except Exception:
+        return False
 
 
 # Point the installed expert at this machine's engine, using that OS's path separators.
@@ -275,7 +345,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Install the CV screening engine and expert.")
     parser.add_argument("--engine-target", default=None, help="Install location (default: C:\\agent-cv-screening or ~/agent-cv-screening).")
     parser.add_argument("--api-key", default=None, help="ZAI_API_KEY (skips the prompt).")
-    parser.add_argument("--version", default="0.0.0", help="Version stamp written to version.json.")
+    parser.add_argument("--version", default=None, help="Version stamp written to version.json (default: the stamp in this payload's engine/version.json).")
     parser.add_argument("--skip-venv", action="store_true", help="The launcher already prepared Python 3.12 and the venv with uv.")
     args = parser.parse_args()
 
@@ -332,7 +402,7 @@ def main() -> int:
     install_expert(pkg, engine_dst, config_dir)
 
     stamp = {
-        "version": args.version,
+        "version": args.version or payload_engine_version(pkg) or "0.0.0",
         "requirements_sha256": sha256_of(engine_dst / "requirements.txt"),
     }
     (engine_dst / "version.json").write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
@@ -361,9 +431,36 @@ def main() -> int:
     log("Install complete.")
     log(f"  Engine + reports : {engine_dst}")
     log(f"  Expert installed : {config_dir}")
+
+    if workbuddy_app_installed():
+        log("Next steps:")
+        log("  1. Restart WorkBuddy (quit fully, then open it again).")
+        log("  2. Open Experts -> My Experts -> Vera.")
+        log("  3. In Chrome, open the PolyU JES internal pages and sign in first.")
+        log("     You must already be inside the system before you screen anything.")
+        log("  4. Then tell Vera: screen Ref.No xxxxxxxxx")
+        log("     xxxxxxxxx is a real Ref. No. from the internal PolyU JES system.")
+        log("  5. Reports land on your Desktop, in the folder workbuddy-cv-screen.")
+        return 0
+
+    # WorkBuddy itself is not on this computer. The engine and the expert are
+    # fully installed anyway - WorkBuddy picks the expert up when it first runs
+    # - so hand the user the install page instead of telling them to restart an
+    # app that does not exist yet. The install is NOT interrupted either way.
+    guide = workbuddy_install_guide()
+    opened = open_in_default_browser(guide)
     log("Next steps:")
-    log("  1. Restart WorkBuddy (quit fully, then open it again).")
-    log("  2. Open Experts -> My Experts -> Vera.")
+    if opened:
+        log("  1. WorkBuddy is not on this computer yet. The install page has")
+        log("     been opened in your browser. If it did not open, go to:")
+    else:
+        log("  1. WorkBuddy is not on this computer yet. Open this install page:")
+    log(f"       {guide}")
+    log("     Install WorkBuddy from that page, then open it.")
+    log("  2. Open  Experts -> My Experts -> Vera.")
+    log("     If she is not there, quit WorkBuddy completely and open it again.")
+    log("     If she is still missing, run this setup once more - your API key,")
+    log("     saved conditions and past reports are all kept.")
     log("  3. In Chrome, open the PolyU JES internal pages and sign in first.")
     log("     You must already be inside the system before you screen anything.")
     log("  4. Then tell Vera: screen Ref.No xxxxxxxxx")
