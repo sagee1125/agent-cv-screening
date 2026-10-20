@@ -114,6 +114,9 @@ jobs:
       - name: Attach zip to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh cannot read its own git remotes -
+          # tell it the target repository instead of relying on one.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "CV Screening $GITHUB_REF_NAME" \
