@@ -158,15 +158,17 @@ Never, because a command was refused:
   when the user explicitly asks for the offline / public-demo HTTP path.
 - Never pass `--skip-reports`. Never pass `--output-dir` inside the repo or the export folder.
 - The command auto-starts the WebBridge daemon when it is down. If it still cannot start,
-  tell HR to start Kimi WebBridge and retry.
+  run the helper once (Windows: `%USERPROFILE%\.kimi-webbridge\bin\kimi-webbridge.exe start`,
+  macOS: `~/.kimi-webbridge/bin/kimi-webbridge start`), wait a few seconds, and retry.
 - **Second screen in the same conversation fails with "browser connection is down
   (Chrome/Extension not connected)"**: the run-spawned daemon died with its command's
   process tree, and the Chrome extension (idle MV3 service worker) never reconnected to
-  the freshly started daemon within the 30s wait. A persistent daemon is now installed:
-  it auto-starts at logon (`Startup\start-webbridge-daemon.cmd`) and can be started
-  manually by double-clicking `Desktop\start-webbridge-daemon.cmd`. If the error still
-  appears, tell HR to open or click into Chrome once so the extension wakes up and
-  reconnects, then retry. Do not switch drivers over this.
+  the freshly started daemon within the 30s wait. Fix, in this order: tell HR to open or
+  click into Chrome once so the extension wakes up and reconnects, then retry; if the
+  error still appears, start the daemon by hand with the helper `start` command
+  (Windows: `%USERPROFILE%\.kimi-webbridge\bin\kimi-webbridge.exe start`, macOS:
+  `~/.kimi-webbridge/bin/kimi-webbridge start`), wait a few seconds, then retry once
+  more. Do not switch drivers over this.
 - Add `--keep-browser` only when HR explicitly asks to keep the browser pages open. Without
   it, every page the run opened is closed automatically once the ranking report is on screen.
 
@@ -279,9 +281,10 @@ Order of attempts, cheap first:
 3. run the screening without the browser (public-demo HTTP path) and tell HR why.
 
 **Daemon lifetime:** a daemon started from an agent shell dies when that shell's process
-tree is torn down (no crash in `kimi-webbridge logs`, it just disappears). The durable one
-is the logon-started instance; the tool also auto-starts one per run. Do not read a dead
-daemon as a failure.
+tree is torn down (no crash in `kimi-webbridge logs`, it just disappears). The tool also
+auto-starts one per run — do not read a dead daemon as a failure. A logon-started,
+persistent instance may exist on some machines; treat it as a bonus, never presume it is
+there, and never route the fix through it.
 
 Do **not** retry the screening more than twice in one conversation. After the second
 failure, give HR the plain-language explanation plus the two choices (fix the helper vs.

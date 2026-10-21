@@ -6,10 +6,12 @@ learned the hard way, and a digest of every fixed bug so you do not re-diagnose 
 `AGENTS.md` (screening conversation contract, code comment rules) remains mandatory;
 this file adds the engineering view.
 
-Last updated for: **v1.2.33** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
+Last updated for: **v1.2.35** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
 guard, WorkBuddy-absent updater advice, install-page ordering) plus the pyvenv.cfg parse
 fix (§6.14); v1.2.33 added the OneDrive-aware Desktop resolver (§6.15) and the
-install-shape checks in the updater launchers.
+install-shape checks in the updater launchers; v1.2.34 filled doc gaps (this guide +
+START-HERE troubleshooting); v1.2.35 corrected the expert's daemon-repair wording to
+match what the engine actually does (§6.16) — no code changed.
 
 ## 1. What this product is
 
@@ -299,6 +301,23 @@ success), never pause under `--quiet` (the expert's hidden console must not
 block), keep the window open for double-click runs, and pass the updater's
 exit code through.
 
+### 6.16 Shipped docs must only cite artifacts the code actually creates (v1.2.35)
+
+SKILL.md's daemon-repair bullet told HR to double-click
+`Startup\start-webbridge-daemon.cmd` / `Desktop\start-webbridge-daemon.cmd` and called
+"a logon-started instance" the durable one — but nothing in this repository (setup,
+updater, engine, daemon client) has ever created either file; the only real mechanism is
+`ensure_webbridge_daemon()`'s per-run auto-start of `~\.kimi-webbridge\bin\kimi-webbridge`
+(commit 802a9f9). The wording rode in with the packaging commit (5e10432) and described
+intent, not code. An expert doc is an executable part of the product: Vera relays it as a
+procedure, so a fictional path sends a non-technical user looking for files that are not
+there — in exactly the "second screen in one conversation" race the earlier loop fought.
+v1.2.35 rewrote the two paragraphs to describe per-run auto-start plus the real manual
+remedy (helper CLI `start`, then wake Chrome so the MV3 worker reconnects). Rule: before
+shipping any instruction that names a file, grep the repo for what creates it; when the
+fix needs an artifact the code does not make, either make the code or drop the
+instruction.
+
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
 This is what made the product survive real HR use; do not water it down:
@@ -359,6 +378,14 @@ Any claim that is load-bearing must be verified before it is trusted:
   v1.2.32 and v1.2.32/v1.2.33 both ran green, so the issue holds no open work and can be
   closed by hand whenever someone is logged in (the machine opening issues has no token
   to close with).
+- The persistent-daemon question (v1.2.35, §6.16): the installer still does not create a
+  logon-started WebBridge daemon; the expert docs now truthfully describe per-run
+  auto-start plus the helper-CLI manual start. If this is ever wanted (calm cycle):
+  setup_engine + update_engine write an idempotent logon entry + Desktop shortcut
+  (Windows) and a LaunchAgent (macOS), and SKILL.md may name those files again. The
+  2026-10-21 cycle shipped only the doc correction under a same-day on-site deadline.
+  Until then, watch live screenings for the second-screen daemon race; the manual start
+  path is the daily fix.
 - The updater rehearsal in CI validates against the **previous** live release (the one
   already published). Rehearsals for tags up to v1.2.30 therefore exercised the tolerant
   legacy path — no `requires_python`, no sidecar — which is exactly why the pyvenv.cfg
