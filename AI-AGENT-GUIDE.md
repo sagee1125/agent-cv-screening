@@ -6,10 +6,10 @@ learned the hard way, and a digest of every fixed bug so you do not re-diagnose 
 `AGENTS.md` (screening conversation contract, code comment rules) remains mandatory;
 this file adds the engineering view.
 
-Last updated for: **v1.2.32** — it re-ships the v1.2.31 batch (key.txt build guard,
-WorkBuddy-absent updater advice, install-page ordering) plus the pyvenv.cfg parse fix
-(§6.14), because that earlier tag's CI run #46 failed at rehearse-macos and v1.2.31 was
-never published.
+Last updated for: **v1.2.33** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
+guard, WorkBuddy-absent updater advice, install-page ordering) plus the pyvenv.cfg parse
+fix (§6.14); v1.2.33 added the OneDrive-aware Desktop resolver (§6.15) and the
+install-shape checks in the updater launchers.
 
 ## 1. What this product is
 
@@ -74,6 +74,15 @@ PolyU GitLab, both interactively pushed on every release). The shipping surface:
 
 Tag the release even for small changes — the fleet self-updates from tags, and the
 version stamp is derived from the tag at build time.
+
+**The published asset is what CI built from the tag — never distribute a locally built
+`release/dist/CV-Screening-Setup.zip`.** A dev-machine build made before the tag will not
+share the published sha256 (autocrlf line-ending checkout, plus build-versus-tag timing),
+so a hash mismatch against `releases/latest` for it is expected. Point users at the
+GitHub release instead: that asset is the only one the updater's checksum chain (§6.2)
+is built around. Seen directly on 2026-10-20: the local v1.2.33 dist zip hashed
+`8ddf03c8…`, the published asset `f741303f…`, with byte-identical payloads once CRLF
+was normalized — the only difference that was real was nothing in the files.
 
 ## 5. The rehearsal system (know it before changing anything shipped)
 
@@ -316,6 +325,15 @@ This is what made the product survive real HR use; do not water it down:
 - **English only, ASCII-safe.** Installer/sysmsg console output must survive Windows
   code pages. Traditional Chinese is for HR-facing WorkBuddy replies (SKILL.md), not
   for installer console printouts.
+- **Console mojibake is display, not corruption.** The WorkBuddy display fields in
+  `plugin.json` (the zh `displayName` / `profession` / `quickPrompts`) and all SKILL.md
+  text are UTF-8 without BOM. PowerShell's default `Get-Content` renders them as
+  garbage — that is the console's code page, the file itself is fine (verify with
+  Python: `json.loads(path.read_bytes().decode("utf-8-sig"))`, or any editor that
+  shows an encoding picker). Never "fix" this by resaving through an ANSI-default
+  editor or pipeline: WorkBuddy reads these fields as Traditional Chinese, and a
+  mojibake save would ship mojibake to every HR machine. When editing, save as UTF-8
+  and re-verify the zh fields parse.
 - Comments: this repo's house style is heavy explanatory comments that capture *why*,
   especially failure histories. Preserve them; they are the institutional memory that
   keeps agents from re-breaking things. Follow the comment format rules in AGENTS.md.
@@ -337,18 +355,20 @@ Any claim that is load-bearing must be verified before it is trusted:
 ## 10. Known open items
 
 - The old rehearsal-diagnostics issues (#7–#10, v1.2.19–v1.2.28 loop) are all closed.
-  #11 documents run #46 (v1.2.31, the pyvenv.cfg failure of §6.14) — close it by hand
-  once v1.2.32 is verified and shipped (the machine opening issues has no token to
-  close with).
+  #11 documents run #46 (v1.2.31, the pyvenv.cfg failure of §6.14) — its fix shipped in
+  v1.2.32 and v1.2.32/v1.2.33 both ran green, so the issue holds no open work and can be
+  closed by hand whenever someone is logged in (the machine opening issues has no token
+  to close with).
 - The updater rehearsal in CI validates against the **previous** live release (the one
-  already published), so a rehearsal for tag N exercises old-stamp behavior (no
-  `requires_python`, no sidecar) and runs the tolerant path. The first release that
-  carries the new fields (v1.2.30) is validated locally and by rehearsal from
-  v1.2.31's CI onward. Keep this asymmetry in mind when a rehearsal elusively passes
-  for what looks like the wrong reason.
-  This asymmetry is also a diagnostic mechanism, and it fired as designed: v1.2.31 was
-  the first rehearsal whose target release carried `requires_python` (v1.2.30), and it
-  alone surfaced the parsing regression of §6.14 that every earlier run walked past.
+  already published). Rehearsals for tags up to v1.2.30 therefore exercised the tolerant
+  legacy path — no `requires_python`, no sidecar — which is exactly why the pyvenv.cfg
+  regression of §6.14 walked past every green run until v1.2.31's rehearsal was the
+  first whose target (v1.2.30) carried the new fields. From that run on, every
+  rehearsal validates the modern path (stamp fields + sidecar), and the asymmetry
+  survives only as a diagnostic lens: a failure while the target release still lacked
+  the fields is a legacy-parsing regression, a failure once it carries them is the
+  §6.14 class. Keep this in mind when a rehearsal elusively passes for what looks like
+  the wrong reason.
 - A future `requires_python` bump procedure: change `REQUIRES_PYTHON` in
   `build_release.py` **and** the launchers' pinned `uv python install 3.x` and
   `uv venv --python 3.x` in the same commit; expect every installation to take a

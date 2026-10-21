@@ -192,6 +192,9 @@ TROUBLESHOOTING
   ZAI_API_KEY line in the .env file inside the agent-cv-screening folder.
 - Expert missing in WorkBuddy: restart WorkBuddy; if it is still missing,
   run setup again.
+- Rerunning setup while WorkBuddy is open: quit WorkBuddy first. If setup
+  stops with an error about replacing the expert files, that is WorkBuddy
+  holding them open - close it and run setup again.
 - Screening the internal pages fails: Vera's message names the one thing to
   fix. In order, check that Chrome is open, that the Kimi extension is enabled
   in chrome://extensions, that you have signed in on the PolyU JES internal
