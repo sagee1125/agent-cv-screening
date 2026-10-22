@@ -10,15 +10,26 @@ import time
 from typing import Any
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 from zai import ZhipuAiClient
 
 from screening_core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# A full CV JSON from glm-4-flash was measured at 62–135s. Job ads are shorter.
-LLM_CV_READ_TIMEOUT_SECONDS = 180.0
+
+# Raised when the model hit its output-token cap mid-JSON (finish_reason=length).
+# With temperature=0 a retry reproduces the identical truncation byte-for-byte
+# (measured 3x on 2026-10-22), so the tenacity decorators below deliberately
+# never retry this type.
+class LLMResponseTruncated(Exception):
+    pass
+
+# Measured 2026-10-22 on the prod endpoint: glm-4-flash generates at ~15-17 tok/s
+# and a full CV JSON is 4-6K tokens, i.e. up to ~7 minutes. The endpoint sends no
+# body until generation completes, so the read timeout covers the whole generation;
+# the previous 180s killed every long-CV extraction before it could finish.
+LLM_CV_READ_TIMEOUT_SECONDS = 420.0
 LLM_JD_READ_TIMEOUT_SECONDS = 60.0
 LLM_CONNECT_TIMEOUT_SECONDS = 20.0
 
@@ -55,12 +66,19 @@ class LLMClient:
         self._client = ZhipuAiClient(
             api_key=settings.zai_api_key,
             base_url=settings.llm_base_url,
+            # The zai SDK silently re-fires each request up to 3 more times inside
+            # one create() call (ZAI_DEFAULT_MAX_RETRIES=3). Stacked below the
+            # engine-level retries that produced the 2026-10-22 stall: one create()
+            # could reach 4 HTTP attempts x 180s x tenacity x 3 with no visible
+            # output. The engine tenacity policy is the only retry layer now, so
+            # every attempt stays legible and bounded.
+            max_retries=0,
             http_client=_os_trust_http_client(),
         )
         self._model = settings.llm_model
 
     # Sends a system+user chat request and returns parsed JSON.
-    @retry(wait=wait_exponential(multiplier=1, min=1, max=8), stop=stop_after_attempt(3), reraise=True)
+    @retry(wait=wait_exponential(multiplier=1, min=1, max=8), stop=stop_after_attempt(3), retry=retry_if_not_exception_type(LLMResponseTruncated), reraise=True)
     async def chat_completion(
         self,
         system_prompt: str,
@@ -85,7 +103,7 @@ class LLMClient:
         )
 
     # Sends chat messages. Omitting timeout uses the shorter job-ad wait, not the CV wait.
-    @retry(wait=wait_exponential(multiplier=1, min=1, max=8), stop=stop_after_attempt(3), reraise=True)
+    @retry(wait=wait_exponential(multiplier=1, min=1, max=8), stop=stop_after_attempt(3), retry=retry_if_not_exception_type(LLMResponseTruncated), reraise=True)
     async def chat_completion_messages(
         self,
         messages: list[dict[str, Any]],
@@ -132,9 +150,17 @@ class LLMClient:
             usage,
         )
 
-        content = response.choices[0].message.content if response.choices else None
+        choice = response.choices[0] if response.choices else None
+        content = choice.message.content if choice else None
         if not content:
             raise ValueError("LLM returned empty content.")
+        if getattr(choice, "finish_reason", None) == "length":
+            # Deterministic dead end: a retry reproduces the same cut byte-for-byte
+            # with temperature=0. cv-parser records the note and falls back to the
+            # rules path immediately instead of burning the retry quota.
+            raise LLMResponseTruncated(
+                "LLM output hit the model token cap (finish_reason=length); llm_output_truncated=true"
+            )
 
         try:
             parsed = self._parse_json_relaxed(content)

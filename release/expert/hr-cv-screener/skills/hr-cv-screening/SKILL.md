@@ -290,6 +290,16 @@ Do **not** retry the screening more than twice in one conversation. After the se
 failure, give HR the plain-language explanation plus the two choices (fix the helper vs.
 run now without the browser) instead of looping.
 
+**Progress heartbeat (v1.2.36+):** while CVs are being read, `_pipeline/_progress.txt`
+always shows the latest state (`正在解讀第 3/16：285067（已完成 2 份）`, timestamped). A
+stalled batch no longer looks "Running" forever: use the timestamp to tell "long but
+moving" from "stopped", and a failed or budget-killed child leaves
+`_pipeline/last-error-<appno>.txt` (command, attempts, stderr tail) — read it before
+bothering HR. Each candidate gets a 20-minute wall-clock budget by default
+(`--candidate-budget`), after which the hung child is killed, the failure is recorded and
+the batch moves on; an envelope with rows plus failures reports `partial_success`, and
+you tell HR exactly which appnos are missing instead of a bare "failed".
+
 ## Engine self-update (once per conversation, on the first reply)
 
 The installed engine may lag behind the released version. On the **first message of a

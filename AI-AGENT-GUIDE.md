@@ -6,12 +6,15 @@ learned the hard way, and a digest of every fixed bug so you do not re-diagnose 
 `AGENTS.md` (screening conversation contract, code comment rules) remains mandatory;
 this file adds the engineering view.
 
-Last updated for: **v1.2.35** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
+Last updated for: **v1.2.36** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
 guard, WorkBuddy-absent updater advice, install-page ordering) plus the pyvenv.cfg parse
 fix (§6.14); v1.2.33 added the OneDrive-aware Desktop resolver (§6.15) and the
 install-shape checks in the updater launchers; v1.2.34 filled doc gaps (this guide +
 START-HERE troubleshooting); v1.2.35 corrected the expert's daemon-repair wording to
-match what the engine actually does (§6.16) — no code changed.
+match what the engine actually does (§6.16) — no code changed; v1.2.36 hang-proofed the
+LLM chain after the 2026-10-21 on-site stall (§6.17): 420s CV read timeout, SDK internal
+retries off, truncation fail-fast, per-candidate wall-clock budget with heartbeat +
+last-error files, and degraded parses are no longer cached.
 
 ## 1. What this product is
 
@@ -318,6 +321,28 @@ shipping any instruction that names a file, grep the repo for what creates it; w
 fix needs an artifact the code does not make, either make the code or drop the
 instruction.
 
+### 6.17 One retry policy, a bounded wall clock, and a heartbeat per LLM step (v1.2.36)
+
+The 2026-10-21 on-site stall was reproduced on the dev machine (2026-10-22) with the
+same PDF, the same code and a valid key: a long CV's extraction JSON needs 4-6K tokens,
+the endpoint generates at 15-17 tok/s, and because the non-streaming endpoint sends no
+body until generation completes, the 180s read timeout fired *or* the output hit the
+model token cap and returned the identical truncated JSON every retry
+(temperature=0 makes failure deterministic). That failure channel was invisible FOUR
+layers deep: zai SDK internal retries (3 per call) x engine tenacity (3) x pipeline
+`--max-retries` (3 child attempts), none logging and none carrying a global deadline —
+34+ minutes of silence while the task still said "Running".
+
+Rule: every stage that empties into a model call must have (a) exactly one visible
+retry layer, (b) a provable wall-clock ceiling, (c) a progress heartbeat, and (d) any
+degraded result surfaced, never cached. Shipped in v1.2.36: `LLM_CV_READ_TIMEOUT_SECONDS`
+180→420s (measured generation budgets), `ZhipuAiClient(max_retries=0)` (engine tenacity
+is the only retry layer), `finish_reason=length` → `LLMResponseTruncated` is never
+retried and routes to the rules fallback with `llm_output_truncated=true` in the note,
+per-candidate `--candidate-budget` (default 1200s) with `last-error-<appno>.txt`
+stderr tails, `_pipeline/_progress.txt` heartbeat per candidate, and `PARSER_CACHE_VERSION`
+bumped to v11 so any poisoned pre-1.2.36 fallback cache can never be served again.
+
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
 This is what made the product survive real HR use; do not water it down:
@@ -386,6 +411,12 @@ Any claim that is load-bearing must be verified before it is trusted:
   2026-10-21 cycle shipped only the doc correction under a same-day on-site deadline.
   Until then, watch live screenings for the second-screen daemon race; the manual start
   path is the daily fix.
+- The 2026-10-21 hang class (one stalled LLM call silently spinning the batch) is CLOSED
+  in v1.2.36 (§6.17): one retry layer, 420s CV read timeout, deterministic truncation
+  fail-fast, per-candidate 20-min wall-clock budget, heartbeat + last-error files, and
+  cache v11 so degraded results are re-extracted, never reused. Open follow-up only:
+  probe whether a larger-output endpoint (e.g. glm-4-air/glm-4-plus) makes long-CV
+  extraction faster; purely optional, the shipped budget already bounds it.
 - The updater rehearsal in CI validates against the **previous** live release (the one
   already published). Rehearsals for tags up to v1.2.30 therefore exercised the tolerant
   legacy path — no `requires_python`, no sidecar — which is exactly why the pyvenv.cfg

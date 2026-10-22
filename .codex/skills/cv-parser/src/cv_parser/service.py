@@ -64,7 +64,10 @@ from cv_parser.pii import (
 from cv_parser.prompts import PARSER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-PARSER_CACHE_VERSION = "pii-redaction-v10-skill-evidence"
+# v11 = 1.2.36: truncation-aware LLM timeouts plus no-caching of degraded parses.
+# Bumping the name invalidates every pre-1.2.36 cache entry, so any poisoned
+# fallback result (401-era or truncated-era) can never be served again.
+PARSER_CACHE_VERSION = "pii-redaction-v11-skill-evidence"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent
@@ -244,7 +247,8 @@ class CVParserService:
                 "parse_path": "privacy_rule_fallback",
                 "error_message": "privacy_error=local_name_not_detected",
             }
-            await self.cache.set(cache_key, cache_payload)
+            # Privacy-gated fallback output is never cached: a later run with a
+            # repaired environment must get a real extraction, not this fallback.
             return {
                 "file_hash": file_hash,
                 "cache_hit": False,
@@ -326,7 +330,11 @@ class CVParserService:
                 "parse_path": parse_path,
                 "error_message": self._note_error("text_model_disabled=true", hybrid_note),
             }
-        await self.cache.set(cache_key, cache_payload)
+        # Only fully successful parses are cached. Degraded/truncated results stay
+        # out of the cache, so a later run with a working LLM extracts fresh instead
+        # of quietly reusing yesterday's fallback.
+        if cache_payload["status"] == "success":
+            await self.cache.set(cache_key, cache_payload)
         return {
             "file_hash": file_hash,
             "cache_hit": False,

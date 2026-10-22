@@ -45,7 +45,7 @@ def _fake_skill_runner(parse_calls: list[str], fail_cv_names: set[str] | None = 
     fail_until = fail_until or {}
     attempts_by_source: dict[str, int] = {}
 
-    def fake_run(cmd: list[str]) -> subprocess.CompletedProcess:
+    def fake_run(cmd: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
         script = Path(cmd[1]).name
         if script == "run_cv_parse.py":
             source = _flag(cmd, "--file")
@@ -734,3 +734,55 @@ def test_pipeline_manifest_exposes_rejected_only_weight(tmp_path, monkeypatch, c
     assert manifest["jd_source"] == str(jd)
     assert manifest["jd_overrides"]["rejected_weights"][0]["name"] == "Python"
     assert not (out_dir / "jd-final.json").exists()
+
+
+def test_parse_candidates_budget_exhausts_before_attempt(tmp_path, monkeypatch, capsys) -> None:
+    """A zeroed candidate budget fails fast: no child launches, traces are left.
+
+    v1.2.36 hang-proofing regression test for the 2026-10-21 class ("silently
+    Running for 34+ minutes"): the deadline expires before any attempt, the
+    patched _run would blow up loudly if the budget were ignored, the manifest
+    goes to stderr (fully-failed runs exit EXIT_ERROR), and both the heartbeat
+    and the last-error dossier land next to the other artifacts.
+    """
+    module = _import_pipeline()
+    out_dir = tmp_path / "out"
+    cv = tmp_path / "hung.pdf"
+    cv.write_bytes(b"%PDF")
+    jd = tmp_path / "jd.json"
+    jd.write_text("{}", encoding="utf-8")
+
+    def never_run(_cmd: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
+        raise AssertionError("no child may launch once the budget is exhausted")
+
+    parse_calls: list[str] = []
+    monkeypatch.setattr(module, "_run", never_run)
+    exit_code, out, err = _run_cli(
+        module,
+        [
+            "--jd-json",
+            str(jd),
+            "--cv",
+            str(cv),
+            "--skip-reports",
+            "--max-retries",
+            "1",
+            "--candidate-budget",
+            "0",
+            "--output-dir",
+            str(out_dir),
+        ],
+        monkeypatch,
+        capsys,
+    )
+    manifest = json.loads(err)
+    assert exit_code == module.EXIT_ERROR
+    assert manifest["status"] == "error"
+    assert manifest["failures"][0]["attempts"] == 0
+    assert "wall-clock budget (0s) exhausted before attempt 1" in (
+        manifest["failures"][0]["error_message"]
+    )
+    assert (out_dir / "_progress.txt").exists()
+    last_errors = list(out_dir.glob("last-error-*.txt"))
+    assert len(last_errors) == 1
+    assert "wall-clock budget" in last_errors[0].read_text(encoding="utf-8")

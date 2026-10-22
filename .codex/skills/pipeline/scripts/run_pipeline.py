@@ -29,7 +29,8 @@ import json
 import os
 import subprocess
 import sys
-from datetime import date
+import time
+from datetime import date, datetime
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
@@ -145,32 +146,127 @@ def _skill_script(skill: str, script: str) -> Path:
     return path
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess:
-    """Run a skill CLI subprocess and raise its JSON error envelope on failure."""
+# Raised when the per-candidate wall-clock budget killed a subprocess.
+class ChildTimeout(Exception):
+    """A skill CLI subprocess outlived its wall-clock budget and was killed."""
+
+    def __init__(self, cmd: list[str], timeout: float, stderr_tail: str) -> None:
+        self.cmd = " ".join(cmd)
+        self.timeout = timeout
+        self.stderr_tail = stderr_tail
+        super().__init__(
+            f"subprocess killed after exceeding its {timeout:.0f}s wall-clock budget: {self.cmd}"
+        )
+
+
+# Normalizes a subprocess stream fragment (str or bytes) to a bounded readable tail;
+# on Windows TimeoutExpired may carry None when the pipe reader never gathered.
+def _stream_text_tail(value: object, limit: int = 4000) -> str:
+    if value is None:
+        return "(no output captured)"
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    text = str(value).strip()
+    if not text:
+        text = "(empty)"
+    if len(text) > limit:
+        text = "…(earlier output trimmed)…\n" + text[-limit:]
+    return text
+
+
+def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
+    """Run a skill CLI subprocess and raise its JSON error envelope on failure.
+
+    When `timeout` is given, a child that never exits is killed instead of running
+    forever (the 2026-10-21 precedent: one hung LLM call kept the batch "Running"
+    with zero output). TimeoutExpired may carry partial output; the stderr tail is
+    handed to the caller for the last-error file.
+    """
     env = dict(os.environ)
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    proc = subprocess.run(
-        args, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env
-    )
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ChildTimeout(
+            cmd=list(args), timeout=float(timeout or 0.0), stderr_tail=_stream_text_tail(exc.stderr)
+        ) from None
     if proc.returncode != 0:
         message = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
         raise RuntimeError(message)
     return proc
 
 
-def _run_with_retries(cmd: list[str], max_retries: int) -> tuple[int, str | None]:
-    """Run a skill CLI up to 1 + max_retries times. Returns (attempts, error or None)."""
+def _run_with_retries(
+    cmd: list[str], max_retries: int, budget_seconds: float | None = None
+) -> tuple[int, str | None]:
+    """Run a skill CLI up to 1 + max_retries times. Returns (attempts, error or None).
+
+    When `budget_seconds` is given it is a wall-clock budget shared by ALL attempts
+    of this one call (per candidate, not per attempt): a child stuck past the
+    remaining budget is killed, and the run records the failure like any other
+    instead of waiting forever. Callers without an LLM in the child (local
+    jd/scorer/render steps) keep the old unbounded behavior.
+    """
     attempts = 0
     last_error: str | None = None
     total = 1 + max(0, max_retries)
+    started = time.monotonic() if budget_seconds is not None else None
     for _ in range(total):
+        timeout: float | None = None
+        if started is not None:
+            remaining = budget_seconds - (time.monotonic() - started)
+            if remaining < 30.0:
+                last_error = (
+                    f"per-candidate wall-clock budget ({budget_seconds:.0f}s) exhausted "
+                    f"before attempt {attempts + 1}"
+                )
+                break
+            timeout = remaining
         attempts += 1
         try:
-            _run(cmd)
+            _run(cmd, timeout=timeout)
             return attempts, None
+        except ChildTimeout as exc:
+            last_error = (
+                f"attempt {attempts} hit the wall-clock budget after {exc.timeout:.0f}s; "
+                "hung child killed — stderr tail:\n" + exc.stderr_tail
+            )
         except RuntimeError as exc:
             last_error = str(exc)
     return attempts, last_error
+
+
+# Rewrites the single-line progress heartbeat inside out_dir. HR (or a watching
+# agent) compares the timestamp against the wall clock: "moved 10 minutes ago"
+# is checkable at a glance, which is exactly what the 2026-10-21 incident lacked.
+# utf-8-sig so PowerShell/Notepad auto-detect the encoding for HR users.
+def _heartbeat(out_dir: Path, message: str) -> None:
+    payload = f"{datetime.now():%Y-%m-%d %H:%M:%S}  {message}\n"
+    (out_dir / "_progress.txt").write_text(payload, encoding="utf-8-sig")
+
+
+# Persists the failure dossier next to the run's other artifacts, so the
+# "silently Running forever" class always leaves an inspectable trace (v1.2.36).
+def _write_last_error(out_dir: Path, slug: str, source: str, attempts: int, error: str) -> None:
+    lines = [
+        f"candidate: {slug}",
+        f"source: {source}",
+        f"attempts: {attempts}",
+        f"stage: cv-parse",
+        f"recorded: {datetime.now():%Y-%m-%d %H:%M:%S}",
+        "---- error / stderr tail ----",
+        error.strip() or "(empty error text)",
+        "",
+    ]
+    (out_dir / f"last-error-{slug}.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
 def _load_json(path: Path) -> dict:
@@ -863,16 +959,27 @@ def _resolve_raw_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Pat
 def _parse_candidates(
     args: argparse.Namespace, out_dir: Path, jd_text: str | None, failures: list[Failure]
 ) -> list[dict]:
-    """Parse each CV (cv-parser) or reuse provided extracted profiles."""
+    """Parse each CV (cv-parser) or reuse provided extracted profiles.
+
+    Writes `_progress.txt` before and after every CV so HR (or a watching agent)
+    can tell "long but moving" from "stalled" (the 2026-10-21 incident was one CV
+    hanging 34+ minutes with zero observable output). A failed or budget-killed
+    child leaves `last-error-<appno>.txt` with the command, attempts and the
+    child's captured stderr tail next to the other artifacts.
+    """
     jd_context = None
     if jd_text:
         jd_context = out_dir / "jd-context.txt"
         jd_context.write_text(jd_text, encoding="utf-8")
     used_slugs: set[str] = set()
     candidates: list[dict] = []
-    for cv in args.cv:
+    cv_batch = list(args.cv or [])
+    if cv_batch:
+        _heartbeat(out_dir, f"開始解讀 {len(cv_batch)} 份 CV（此檔隨進度更新）")
+    for index, cv in enumerate(cv_batch, start=1):
         source = str(cv)
         slug = _unique_slug(source, used_slugs)
+        _heartbeat(out_dir, f"正在解讀第 {index}/{len(cv_batch)}：{slug}（已完成 {index - 1} 份）")
         extracted_out = out_dir / f"extracted-{slug}.json"
         if (
             args.resume
@@ -891,8 +998,11 @@ def _parse_candidates(
         ]
         if jd_context:
             cmd += ["--jd-file", str(jd_context)]
-        attempts, error = _run_with_retries(cmd, args.max_retries)
+        attempts, error = _run_with_retries(
+            cmd, args.max_retries, budget_seconds=getattr(args, "candidate_budget", None)
+        )
         if error:
+            _write_last_error(out_dir, slug, source, attempts, error)
             _record_failure(
                 args,
                 failures,
@@ -905,6 +1015,8 @@ def _parse_candidates(
         source = str(ext)
         slug = _unique_slug(source, used_slugs)
         candidates.append(_with_identity(args, Path(ext), source, slug))
+    if cv_batch:
+        _heartbeat(out_dir, f"CV 解讀結束：完成 {len(candidates)} 份、失敗 {len(failures)} 份")
     return candidates
 
 
@@ -1784,6 +1896,16 @@ def main() -> int:
     parser.add_argument("--report-dir", default=None, help="HR-facing report folder for ranking-overview.html and <appno>.html/.pdf (default: same as --output-dir).")
     parser.add_argument("--skip-reports", action="store_true", help="Score/rank only; skip HTML/PDF/Excel (do not use for HR runs).")
     parser.add_argument("--max-retries", type=int, default=2, metavar="N", help="Retries per candidate step after the first attempt (default 2).")
+    parser.add_argument(
+        "--candidate-budget",
+        type=int,
+        default=1200,
+        metavar="SECONDS",
+        help="Wall-clock budget per CV candidate, shared across parse attempts "
+        "(default 1200 s = 20 min). A stalled child is killed when the budget runs "
+        "out and the failure is recorded like any other, so the batch keeps moving; "
+        "watch _progress.txt to see each candidate start.",
+    )
     parser.add_argument("--resume", action="store_true", help="Skip JD/CV/score steps when usable artifacts already exist in --output-dir.")
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure (legacy behavior).")
     args = parser.parse_args()
