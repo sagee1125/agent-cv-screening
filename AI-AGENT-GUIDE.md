@@ -370,6 +370,26 @@ overwrites an explicit level), a case-folded scorer fallback, `PARSER_CACHE_VERS
 v12 (any row parsed before the backfill can no longer be served), and tests that pin
 LLM-shaped education to a pass.
 
+The same-day acceptance rerun (cache v13, all 16 CVs re-parsed) exposed two more gaps
+in the SAME gate, closed in the same release: (1) the ladder still missed bare
+abbreviations — 285067's "MA"/"BA" and 276985's "B.S. Hons" kept `degree_level` NULL;
+MS/MA/BS/BA/BEng plus the BBA/BFA/MFA dotted-optional family are now laddered; (2)
+`_has_required_degree` did an exact set-intersection instead of a minimum — 285385
+held `degree_level: master` and still scored 0.0 against a "minimum bachelor" job.
+engine.py's `mandatory_degree` has treated required levels as ordinals
+(`max(candidate levels) >= required`) for years; the standalone filter now matches
+that (hierarchy: other < associate < bachelor < master = mba < phd). Cache bumped to
+v13 because the ladder changed what parse-time backfill produces. Two lessons: port a
+gate's SEMANTICS, not just its keyword list, and an acceptance bar inherited from the
+rule run is a sanity check, not a literal target — the rerun's #1 (279367, 44.0) mills
+lower than the rule run's 50 only because `research_quality` reads the LLM-shaped
+publications differently (60 vs 100), a scoring-semantics follow-up, not a
+filter regression; ranking ORDER matched the rule baseline; 12/15 ranked
+positive, 3 hard-filtered at 0.0 (285067 MA/BA, 276985 B.S., 285385 master).
+The final rerun (cache v13) scored 15/15 — two of those (276985, 285385) were
+hard-filter zeros even in the rule-mode baseline, so the shipped gate now
+beats the rule run instead of merely matching it.
+
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
 This is what made the product survive real HR use; do not water it down:
@@ -448,8 +468,17 @@ Any claim that is load-bearing must be verified before it is trusted:
   v1.2.37 (§6.18): `degree_to_level` keyword ladder + `degree_level` backfill on every
   parse path (cache v12) + case-folded scorer fallback. Found by the first full-LLM
   rerun the v1.2.36 instrumentation made possible; the rule-only recovery run had
-  masked it. Acceptance for the fix is a full-LLM rerun reproducing the rule-mode
-  positives (279367 at 50+); rerun the fixture offline→failed test stays green.
+  masked it. The same-day acceptance rerun closed the remainder in the same release
+  (cache v13): bare-abbreviation ladder entries (MA/BA/B.S. family) and minimum-degree
+  HIERARCHY semantics in `_has_required_degree` (a master satisfies a bachelor
+  requirement). Acceptance for the fix is a full-LLM rerun with no trace of the old
+  all-zero signature: 12/15 positive (279367 at #1) with rank order matching the rule
+  baseline even where dimension mix shifts (research_quality reads LLM publications
+  differently — 60 vs 100 — a follow-up, not a filter issue); the final rerun with
+  cache v13 then scored **15/15**: 276985 (B.S., 0.0 BECAUSE hard-filtered) — 46.25
+  #1, 285067 (MA/BA) — 44.0 #3, 285385 (master) — 35.0 #13 — and 276985/285385 were
+  hard-filter zeros even in the rule baseline, so the filter fix beats the rule run.
+  Rerun the fixture offline→failed test stays green.
 - The updater rehearsal in CI validates against the **previous** live release (the one
   already published). Rehearsals for tags up to v1.2.30 therefore exercised the tolerant
   legacy path — no `requires_python`, no sidecar — which is exactly why the pyvenv.cfg

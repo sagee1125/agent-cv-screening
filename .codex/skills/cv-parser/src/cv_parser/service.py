@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 # v12 = 1.2.37: education degree_level is backfilled from the degree label on
 # every parse path, so pre-1.2.37 caches (LLM-era entries with degree_level=None)
 # must never be served again - they zeroed every LLM-grade CV at the hard filter.
-PARSER_CACHE_VERSION = "pii-redaction-v12-skill-evidence"
+PARSER_CACHE_VERSION = "pii-redaction-v13-degree-hierarchy"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent

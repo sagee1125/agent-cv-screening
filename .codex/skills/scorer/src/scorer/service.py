@@ -283,15 +283,28 @@ class ScorerService:
         return collected
 
     def _has_required_degree(self, extracted_data: dict[str, Any], required_degrees: list[str]) -> bool:
-        # Preferred path: compare normalized degree_level against required levels.
+        # Preferred path: the required levels are MINIMUMS - a candidate passes when
+        # their best degree level is at or above the required one (a master already
+        # satisfies "minimum bachelor"), matching engine.py's mandatory_degree
+        # ordinal rule. The old exact set-intersection zeroed master holders when a
+        # job asked for a bachelor.
         education = extracted_data.get("education", [])
-        required_levels = {degree_to_level(deg) for deg in required_degrees}
-        required_levels.discard(None)
-        if required_levels:
-            candidate_levels = {
-                item.get("degree_level") for item in education if item.get("degree_level")
-            }
-            if candidate_levels & required_levels:
+        level_order = {"other": 0, "associate": 1, "bachelor": 2, "mba": 3, "master": 3, "phd": 4}
+        required_ranks = []
+        for deg in required_degrees:
+            rank = level_order.get(str(degree_to_level(deg)))
+            if rank is not None:
+                required_ranks.append(rank)
+        if required_ranks:
+            best = max(
+                (
+                    level_order.get(str(item.get("degree_level")), -1)
+                    for item in education
+                    if item.get("degree_level")
+                ),
+                default=-1,
+            )
+            if best >= min(required_ranks):
                 return True
         # Backward-compatible substring fallback for raw degree labels (e.g. "MSc",
         # "硕士"); case-folded so a required level of "bachelor" still matches the

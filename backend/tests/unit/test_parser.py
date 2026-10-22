@@ -359,6 +359,18 @@ def test_scorer_matches_degree_by_level_and_substring_fallback() -> None:
     assert scorer._has_required_degree({"education": [{"degree": "BACHELOR OF ARTS"}]}, ["BACHELOR"]) is True
     assert scorer._has_required_degree({"education": [{"major": "Physics"}]}, ["bachelor"]) is False
 
+    # v1.2.37 acceptance follow-up: required levels are MINIMUMS, mirroring
+    # engine.py's mandatory_degree ordinal rule - a master already satisfies
+    # "minimum bachelor" (285385 died on the old exact set-intersection), an
+    # associate does not, and the parse-time ladder gives raw abbreviations
+    # levels so the 285067 "MA" + "BA" shape passes too.
+    assert scorer._has_required_degree({"education": [{"degree": "Master of Fine Arts in Creative Media", "degree_level": "master"}]}, ["bachelor"]) is True
+    assert scorer._has_required_degree({"education": [{"degree": "PhD", "degree_level": "phd"}]}, ["bachelor"]) is True
+    assert scorer._has_required_degree({"education": [{"degree": "Associate", "degree_level": "associate"}]}, ["bachelor"]) is False
+    assert scorer._has_required_degree({"education": [{"degree": "MA", "degree_level": "master"}, {"degree": "BA", "degree_level": "bachelor"}]}, ["bachelor"]) is True
+    # A bachelor alone must NOT satisfy a minimum master requirement.
+    assert scorer._has_required_degree({"education": [{"degree": "BA", "degree_level": "bachelor"}]}, ["master"]) is False
+
 
 # The keyword ladder turns full degree names into the level enum the hard filter
 # expects (v1.2.37: LLM extracts with degree_level=None zeroed every candidate).
@@ -375,6 +387,16 @@ def test_degree_to_level_maps_full_degree_names() -> None:
     assert degree_to_level("MBA") == "mba"
     assert degree_to_level("碩士 in Statistics") == "master"
     assert degree_to_level("学士") == "bachelor"
+    # v1.2.37 acceptance follow-up: the bare abbreviations the first ladder missed.
+    assert degree_to_level("MA") == "master"
+    assert degree_to_level("MA in Statistics") == "master"
+    assert degree_to_level("M.S. in Data Analytics") == "master"
+    assert degree_to_level("BA") == "bachelor"
+    assert degree_to_level("B.A. (Hons)") == "bachelor"
+    assert degree_to_level("B.S. Hons") == "bachelor"
+    assert degree_to_level("BBA") == "bachelor"
+    assert degree_to_level("BFA") == "bachelor"
+    assert degree_to_level("MFA") == "master"
     assert degree_to_level("University of Hong Kong") is None
     assert degree_to_level("") is None
     assert degree_to_level(None) is None
