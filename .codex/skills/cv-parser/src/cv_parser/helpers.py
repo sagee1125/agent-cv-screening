@@ -43,6 +43,41 @@ _DEGREE_LEVEL_ALIASES = {
     "other": "other",
 }
 
+# Keyword ladder for degree names the exact maps miss: real labels are
+# "Bachelor of Science in Physics" / "Master of Science in Data Analytics and
+# Artificial Intelligence" / "Doctor of Philosophy", and the scorer's education
+# hard filter treats a missing level as "requirement not met". Ordered highest
+# level first so a compound label maps to the highest level it mentions. ASCII
+# keys match on word boundaries (\b) so "BSc" and "MSc" never shadow each other
+# inside longer text; CJK keys (which have no word boundaries) are plain
+# substrings. Compiled once at import; searched against the casefolded text.
+_DEGREE_KEYWORD_LADDER: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(pattern), level)
+    for pattern, level in (
+        (r"博士", "phd"),
+        (r"\bdoctorate\b", "phd"),
+        (r"\bdoctor of\b", "phd"),
+        (r"\bdphil\b", "phd"),
+        (r"\bphd\b", "phd"),
+        (r"\bmphil\b", "master"),
+        (r"\bmaster of\b", "master"),
+        (r"\bmaster's\b", "master"),
+        (r"\bmasters\b", "master"),
+        ("碩士", "master"),
+        ("硕士", "master"),
+        (r"\bm\.?sc\b", "master"),
+        (r"\bm\.?eng\b", "master"),
+        (r"\bmba\b", "mba"),
+        ("學士", "bachelor"),
+        ("学士", "bachelor"),
+        (r"\bbachelor of\b", "bachelor"),
+        (r"\bbachelors\b", "bachelor"),
+        (r"\bbachelor's\b", "bachelor"),
+        (r"\bb\.?sc\b", "bachelor"),
+        (r"\bb\.?eng\b", "bachelor"),
+    )
+)
+
 
 # Normalize a degree label or level string into a stable level enum, or None.
 def degree_to_level(degree: str | None) -> str | None:
@@ -54,7 +89,17 @@ def degree_to_level(degree: str | None) -> str | None:
     mapped = _DEGREE_LEVEL_MAP.get(text)
     if mapped:
         return mapped
-    return _DEGREE_LEVEL_ALIASES.get(text.casefold())
+    mapped = _DEGREE_LEVEL_ALIASES.get(text.casefold())
+    if mapped:
+        return mapped
+    # Keyword ladder for full degree names: the scorer hard filter needs a level
+    # enum even when the label is not a bare alias (engine.py's _degree_level has
+    # had the same ladder for years - the service-side filter lacked it).
+    casefolded = text.casefold()
+    for pattern, level in _DEGREE_KEYWORD_LADDER:
+        if pattern.search(casefolded):
+            return level
+    return None
 
 
 # Classify a raw skill token as ("skill", canonical_lower) or ("language", display_name).
@@ -1081,6 +1126,14 @@ def merge_fragmented_education_rows(rows: list[dict[str, Any]]) -> list[dict[str
             "end_date": to_clean_text(raw_item.get("end_date")),
             "graduation_date": to_clean_text(raw_item.get("graduation_date")),
         }
+        # LLM extracts carry full degree names ("Bachelor of Science in Physics")
+        # without a normalized level, but every downstream consumer - the scorer's
+        # education hard filter included - reads degree_level. Derive it from the
+        # degree label when it is missing; never overwrite an explicit level.
+        # This single point covers the rule, LLM and hybrid paths, which all send
+        # education rows through merge_fragmented_education_rows().
+        if not item["degree_level"] and item["degree"]:
+            item["degree_level"] = degree_to_level(item["degree"])
         # A school-only fragment (no degree/major) that is not a standalone
         # institution belongs to the previous degree row: use it as the school
         # (e.g. "MSc in Computer Science, MIT 2020" -> school "MIT 2020").

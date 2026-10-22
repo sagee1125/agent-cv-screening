@@ -64,10 +64,10 @@ from cv_parser.pii import (
 from cv_parser.prompts import PARSER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-# v11 = 1.2.36: truncation-aware LLM timeouts plus no-caching of degraded parses.
-# Bumping the name invalidates every pre-1.2.36 cache entry, so any poisoned
-# fallback result (401-era or truncated-era) can never be served again.
-PARSER_CACHE_VERSION = "pii-redaction-v11-skill-evidence"
+# v12 = 1.2.37: education degree_level is backfilled from the degree label on
+# every parse path, so pre-1.2.37 caches (LLM-era entries with degree_level=None)
+# must never be served again - they zeroed every LLM-grade CV at the hard filter.
+PARSER_CACHE_VERSION = "pii-redaction-v12-skill-evidence"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent

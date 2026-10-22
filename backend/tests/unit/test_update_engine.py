@@ -137,10 +137,13 @@ def test_quiet_offline_prints_a_failed_status(tmp_path, monkeypatch, capsys) -> 
     make_installed_engine(root, version="1.2.16")
     monkeypatch.setattr(module, "engine_root", lambda: root)
 
-    def offline(_url: str, timeout: float = 10.0):
+    def offline(*args, **kwargs):
         raise OSError("offline")
 
-    monkeypatch.setattr(module, "fetch_json", offline)
+    # The version check probes releases/latest via a HEAD request and falls back
+    # to the full download; both go through urlopen (the api.github.com probe the
+    # old fetch_json fixture targeted is gone), so one patch makes the box offline.
+    monkeypatch.setattr(module.urllib.request, "urlopen", offline)
     monkeypatch.setattr(sys, "argv", ["update_engine.py", "--quiet"])
     assert module.main() == 0
     out = capsys.readouterr().out

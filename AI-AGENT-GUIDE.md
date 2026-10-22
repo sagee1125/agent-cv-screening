@@ -6,7 +6,7 @@ learned the hard way, and a digest of every fixed bug so you do not re-diagnose 
 `AGENTS.md` (screening conversation contract, code comment rules) remains mandatory;
 this file adds the engineering view.
 
-Last updated for: **v1.2.36** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
+Last updated for: **v1.2.37** — the v1.2.32 cycle shipped the v1.2.31 batch (key.txt build
 guard, WorkBuddy-absent updater advice, install-page ordering) plus the pyvenv.cfg parse
 fix (§6.14); v1.2.33 added the OneDrive-aware Desktop resolver (§6.15) and the
 install-shape checks in the updater launchers; v1.2.34 filled doc gaps (this guide +
@@ -14,7 +14,9 @@ START-HERE troubleshooting); v1.2.35 corrected the expert's daemon-repair wordin
 match what the engine actually does (§6.16) — no code changed; v1.2.36 hang-proofed the
 LLM chain after the 2026-10-21 on-site stall (§6.17): 420s CV read timeout, SDK internal
 retries off, truncation fail-fast, per-candidate wall-clock budget with heartbeat +
-last-error files, and degraded parses are no longer cached.
+last-error files, and degraded parses are no longer cached; v1.2.37 fixed the education
+hard filter that zeroed every LLM-grade CV (§6.18): degree-label keyword ladder,
+degree_level backfill on every parse path, case-folded scorer fallback, cache v12.
 
 ## 1. What this product is
 
@@ -343,6 +345,31 @@ per-candidate `--candidate-budget` (default 1200s) with `last-error-<appno>.txt`
 stderr tails, `_pipeline/_progress.txt` heartbeat per candidate, and `PARSER_CACHE_VERSION`
 bumped to v11 so any poisoned pre-1.2.36 fallback cache can never be served again.
 
+### 6.18 A hard filter must not depend on a field the LLM leaves blank (v1.2.37)
+
+The first full-LLM ranking run after v1.2.36 (2026-10-22: 31 minutes, 16 CVs, the batch
+v1.2.36 instrumented) ranked 15 candidates at 0.0 / Tier 4 — every LLM-grade parse,
+including the two trusted extracts from the day before, failed the education hard
+filter. Chain: LLM text extraction returns education rows with NULL `degree_level`
+(the old engine's evidence pack carried the same NULLs — the rule fallback masked this
+because its own parser classifies degrees); `cv_parser.degree_to_level()` only matched
+bare labels ("Bachelor", "MSc"), never the full degree names the model actually writes
+("Bachelor of Science in Physics"); and the scorer `_has_required_degree` raw-label
+fallback compared case-sensitively ("bachelor" vs "Bachelor..."). Rule fallback
+extracts carried a normalized `degree_level`, which is why the rule-only recovery run
+the day before showed positive scores — and why its two LLM-grade extracts were quietly
+zeroed as well.
+
+Rule: a normalized field that feeds a gate (hard filter, minimum degree) must be
+guaranteed at the parse boundary — the scorer engine's own `_degree_level` has had the
+same keyword ladder for years; the standalone filter lacked it. Shipped in v1.2.37: a
+keyword ladder in `degree_to_level` (doctorate/master/bachelor aliases on word
+boundaries, CJK plain-substring, highest level first), a `degree_level` backfill in
+`merge_fragmented_education_rows` (covers the rule, LLM and hybrid paths, never
+overwrites an explicit level), a case-folded scorer fallback, `PARSER_CACHE_VERSION`
+v12 (any row parsed before the backfill can no longer be served), and tests that pin
+LLM-shaped education to a pass.
+
 ## 7. The WorkBuddy conversation contract (summary — full text in AGENTS.md and SKILL.md)
 
 This is what made the product survive real HR use; do not water it down:
@@ -417,6 +444,12 @@ Any claim that is load-bearing must be verified before it is trusted:
   cache v11 so degraded results are re-extracted, never reused. Open follow-up only:
   probe whether a larger-output endpoint (e.g. glm-4-air/glm-4-plus) makes long-CV
   extraction faster; purely optional, the shipped budget already bounds it.
+- The education hard-filter hole ("every LLM-grade CV lands at 0.0") is CLOSED in
+  v1.2.37 (§6.18): `degree_to_level` keyword ladder + `degree_level` backfill on every
+  parse path (cache v12) + case-folded scorer fallback. Found by the first full-LLM
+  rerun the v1.2.36 instrumentation made possible; the rule-only recovery run had
+  masked it. Acceptance for the fix is a full-LLM rerun reproducing the rule-mode
+  positives (279367 at 50+); rerun the fixture offline→failed test stays green.
 - The updater rehearsal in CI validates against the **previous** live release (the one
   already published). Rehearsals for tags up to v1.2.30 therefore exercised the tolerant
   legacy path — no `requires_python`, no sidecar — which is exactly why the pyvenv.cfg

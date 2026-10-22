@@ -9,7 +9,12 @@ import pytest
 
 from cv_parser import local_ner as local_ner_module
 from cv_parser import CVParserService
-from cv_parser.helpers import build_compressed_prompt, compress_cv_text
+from cv_parser.helpers import (
+    build_compressed_prompt,
+    compress_cv_text,
+    degree_to_level,
+    merge_fragmented_education_rows,
+)
 from cv_parser.pdf_utils import (
     extract_with_pymupdf,
     render_redacted_pdf_pages_as_data_urls,
@@ -345,6 +350,47 @@ def test_scorer_matches_degree_by_level_and_substring_fallback() -> None:
     # Old-format education (no degree_level) still matches via substring.
     old_extracted = {"education": [{"degree": "硕士"}]}
     assert scorer._has_required_degree(old_extracted, ["硕士"]) is True
+
+    # LLM-shaped education (v1.2.37): full degree name, no normalized level. The
+    # case-folded fallback must make "bachelor" match "Bachelor of Science ...";
+    # missing degree evidence must still fail.
+    llm_extracted = {"education": [{"degree": "Bachelor of Science in Physics"}]}
+    assert scorer._has_required_degree(llm_extracted, ["bachelor"]) is True
+    assert scorer._has_required_degree({"education": [{"degree": "BACHELOR OF ARTS"}]}, ["BACHELOR"]) is True
+    assert scorer._has_required_degree({"education": [{"major": "Physics"}]}, ["bachelor"]) is False
+
+
+# The keyword ladder turns full degree names into the level enum the hard filter
+# expects (v1.2.37: LLM extracts with degree_level=None zeroed every candidate).
+def test_degree_to_level_maps_full_degree_names() -> None:
+    assert degree_to_level("Bachelor") == "bachelor"
+    assert degree_to_level("bachelors") == "bachelor"
+    assert degree_to_level("Bachelor of Science in Physics") == "bachelor"
+    assert degree_to_level("Bachelor of Arts") == "bachelor"
+    assert degree_to_level("Master of Science in Data Analytics and Artificial Intelligence") == "master"
+    assert degree_to_level("Doctor of Philosophy") == "phd"
+    assert degree_to_level("BSc (Hons)") == "bachelor"
+    assert degree_to_level("MSc") == "master"
+    assert degree_to_level("MPhil") == "master"
+    assert degree_to_level("MBA") == "mba"
+    assert degree_to_level("碩士 in Statistics") == "master"
+    assert degree_to_level("学士") == "bachelor"
+    assert degree_to_level("University of Hong Kong") is None
+    assert degree_to_level("") is None
+    assert degree_to_level(None) is None
+
+
+# Every education row must carry a derivable degree_level, whichever path built it.
+def test_education_rows_backfill_degree_level_from_degree_label() -> None:
+    rows = merge_fragmented_education_rows(
+        [
+            {"school": "The University of Hong Kong", "degree": "Bachelor of Science in Physics"},
+            {"school": "HKBU", "degree": "Master of Science in Data Analytics", "degree_level": "master"},
+        ]
+    )
+    assert rows[0]["degree_level"] == "bachelor"
+    # An explicit level is never overwritten.
+    assert rows[1]["degree_level"] == "master"
 
 
 # Verifies P1 fields (location, work_authorization, certifications, projects, summary).

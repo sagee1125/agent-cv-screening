@@ -293,9 +293,11 @@ class ScorerService:
             }
             if candidate_levels & required_levels:
                 return True
-        # Backward-compatible substring fallback for raw degree labels (e.g. "MSc", "硕士").
-        flattened = " ".join(str(item.get("degree", "")) for item in education)
-        return any(degree in flattened for degree in required_degrees)
+        # Backward-compatible substring fallback for raw degree labels (e.g. "MSc",
+        # "硕士"); case-folded so a required level of "bachelor" still matches the
+        # raw degree spelling "Bachelor of Science" that LLM extracts carry.
+        flattened = " ".join(str(item.get("degree", "")) for item in education).casefold()
+        return any(str(degree).casefold() in flattened for degree in required_degrees)
 
     def _estimate_experience_years(self, experiences: list[dict[str, Any]], reference_date: str) -> float:
         total_months = 0
