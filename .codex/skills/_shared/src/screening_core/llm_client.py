@@ -88,6 +88,7 @@ class LLMClient:
         temperature: float = 0,
         seed: int = 42,
         timeout: httpx.Timeout | float | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -100,6 +101,7 @@ class LLMClient:
             temperature=temperature,
             seed=seed,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
 
     # Sends chat messages. Omitting timeout uses the shorter job-ad wait, not the CV wait.
@@ -114,6 +116,7 @@ class LLMClient:
         seed: int = 42,
         allow_json_repair: bool = True,
         timeout: httpx.Timeout | float | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         request_timeout = jd_llm_timeout() if timeout is None else timeout
@@ -128,12 +131,17 @@ class LLMClient:
             "seed": seed,
             "timeout": request_timeout,
         }
+        if max_tokens is not None:
+            # Bounded output keeps generation time under the read timeout; a
+            # cut-off JSON object is repaired locally by _salvage_truncated_json.
+            request_kwargs["max_tokens"] = max_tokens
         try:
             response = await asyncio.to_thread(self._client.chat.completions.create, **request_kwargs)
         except TypeError:
-            # Some model endpoints may not accept seed/response_format args.
+            # Some model endpoints may not accept seed/response_format/max_tokens args.
             request_kwargs.pop("seed", None)
             request_kwargs.pop("response_format", None)
+            request_kwargs.pop("max_tokens", None)
             response = await asyncio.to_thread(self._client.chat.completions.create, **request_kwargs)
         latency_ms = (time.perf_counter() - started) * 1000
         usage_obj = getattr(response, "usage", None)
@@ -216,11 +224,66 @@ class LLMClient:
 
         json_block = LLMClient._extract_first_json_object(fenced)
         if not json_block:
+            # A response cut off mid-object leaves one unclosed brace; closing
+            # it locally avoids both the LLM repair call and a rule fallback.
+            salvaged = LLMClient._salvage_truncated_json(fenced)
+            if salvaged is not None:
+                return salvaged
             raise json.JSONDecodeError("No JSON object found", candidate, 0)
         loaded = json.loads(json_block)
         if not isinstance(loaded, dict):
             raise json.JSONDecodeError("Top-level JSON is not an object", json_block, 0)
         return loaded
+
+    # Closes an unterminated JSON object left by a truncated model response.
+    @staticmethod
+    def _salvage_truncated_json(text: str) -> dict[str, Any] | None:
+        start = text.find("{")
+        if start == -1:
+            return None
+        stack: list[str] = []
+        in_string = False
+        escaped = False
+        for index in range(start, len(text)):
+            ch = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch in "{[":
+                stack.append(ch)
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+        if not stack and not in_string:
+            return None
+        candidate = text[start:].rstrip()
+        # A cut can also leave a trailing separator or an orphan key ("c": or ,"c"),
+        # so strip those before closing the open brackets.
+        while True:
+            while candidate and candidate[-1] in ",:":
+                candidate = candidate[:-1].rstrip()
+            if candidate.endswith('"'):
+                opening = candidate.rfind('"', 0, len(candidate) - 1)
+                if opening == -1:
+                    break
+                candidate = candidate[:opening].rstrip()
+                continue
+            break
+        if in_string:
+            candidate += '"'
+        candidate += "".join("}" if ch == "{" else "]" for ch in reversed(stack))
+        try:
+            loaded = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+        return loaded if isinstance(loaded, dict) else None
 
     @staticmethod
     def _extract_first_json_object(text: str) -> str | None:

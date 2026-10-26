@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,9 @@ from cv_parser.pdf_utils import (
     render_pdf_pages_as_data_urls,
 )
 from cv_parser.pii import (
-    mask_pii_text,
+    contact_values_for_redaction,
+    detect_contact_entities,
+    mask_pii_text_aggressive,
     strip_contact_fields,
 )
 from cv_parser.prompts import PARSER_SYSTEM_PROMPT
@@ -67,7 +70,7 @@ logger = logging.getLogger(__name__)
 # v12 = 1.2.37: education degree_level is backfilled from the degree label on
 # every parse path, so pre-1.2.37 caches (LLM-era entries with degree_level=None)
 # must never be served again - they zeroed every LLM-grade CV at the hard filter.
-PARSER_CACHE_VERSION = "pii-redaction-v13-degree-hierarchy"
+PARSER_CACHE_VERSION = "pii-redaction-v14-mask-all"
 
 # Markers that mean "the model refused the prompt because it was too long". The JD carries no cap
 # (§2.11), so when this happens the failure must be legible: the recorded error names what was sent
@@ -233,7 +236,8 @@ class CVParserService:
         local_names = list(local_pii.names)
         sensitive_values = list(local_pii.sensitive_values)
         contact_hints = self._extract_contact_hints(raw_text, local_names, sensitive_values)
-        masked_text = mask_pii_text(raw_text, local_names, sensitive_values)
+        masked_text = mask_pii_text_aggressive(raw_text, local_names, sensitive_values)
+        pii_values = contact_values_for_redaction(raw_text, local_names, sensitive_values)
         if not contact_hints.get("name"):
             logger.warning("Local name detection failed; blocking all external parser calls.")
             structured = self._merge_contact_hints(self._normalize_schema({}), contact_hints)
@@ -257,6 +261,7 @@ class CVParserService:
         if settings.llm_text_fallback_enabled:
             try:
                 user_prompt = self._build_prompt(raw_text=masked_text, jd_text=jd_text)
+                self._assert_prompt_clean(user_prompt, masked_text, pii_values)
                 llm_result = await self.llm_client.chat_completion(
                     PARSER_SYSTEM_PROMPT,
                     user_prompt,
@@ -343,6 +348,23 @@ class CVParserService:
 
     def _build_prompt(self, *, raw_text: str, jd_text: str | None) -> str:
         return self.build_compressed_prompt(raw_text=raw_text, jd_text=jd_text)
+
+    # Blocks the request when any locally detected identity value survives masking.
+    @staticmethod
+    def _assert_prompt_clean(prompt: str, masked_text: str, pii_values: list[str]) -> None:
+        # The JD half of the prompt is HR-authored job text, not candidate PII;
+        # a salary figure legitimately appears in both a CV and its job ad.
+        cv_portion = prompt.split("JD Context (compressed):")[0]
+        for value in pii_values:
+            if not value:
+                continue
+            # Word-bounded match: a short name ("Lee") inside an unrelated word
+            # ("career") is not a leak, but any standalone occurrence is.
+            if re.search(r"\b" + re.escape(value) + r"\b", cv_portion, flags=re.IGNORECASE):
+                raise ValueError("privacy_error=pii_value_in_prompt")
+        for entity in detect_contact_entities(masked_text):
+            if entity.kind in {"email", "phone", "hkid"}:
+                raise ValueError("privacy_error=structured_pii_in_prompt")
 
     async def _extract_pdf_text(self, file_path: str) -> str:
         return (await self._extract_local_document(file_path)).raw_text

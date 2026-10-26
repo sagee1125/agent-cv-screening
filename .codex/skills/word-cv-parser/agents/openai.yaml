@@ -1,0 +1,4 @@
+interface:
+  display_name: "Word CV Parser"
+  short_description: "Parse Word CVs into the same structured JSON as cv-parser"
+  default_prompt: "Use $skill-word-cv-parser to parse this Word CV into structured data: <path>"

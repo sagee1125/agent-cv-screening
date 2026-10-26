@@ -107,6 +107,9 @@ def _looks_like_name(line: str) -> bool:
         return False
     if any(marker in normalized for marker in ("@", ":", "：", "/", "\\", "|")):
         return False
+    # A lone initial is not a name; it would otherwise match inside words.
+    if len(normalized) < 2:
+        return False
 
     if re.fullmatch(r"[\u3400-\u9fff·]{2,8}", normalized):
         return True
@@ -198,15 +201,15 @@ def detect_contact_entities(
         entities.append(PIIEntity("address", value, start, end))
 
     for name in extract_name_candidates(raw_text, extra_names):
-        flexible_name_pattern = r"\s+".join(re.escape(part) for part in name.split())
-        name_match = re.search(flexible_name_pattern, raw_text, flags=re.IGNORECASE)
-        if name_match:
+        # \b + finditer: mask EVERY occurrence (a CV repeats the name in the
+        # signature and body), and never match a name inside a longer word.
+        flexible_name_pattern = r"\b" + r"\s+".join(re.escape(part) for part in name.split()) + r"\b"
+        for name_match in re.finditer(flexible_name_pattern, raw_text, flags=re.IGNORECASE):
             entities.append(PIIEntity("name", name_match.group(0), name_match.start(), name_match.end()))
 
     for value in extra_sensitive_values or []:
-        flexible_value_pattern = r"\s+".join(re.escape(part) for part in value.split())
-        value_match = re.search(flexible_value_pattern, raw_text, flags=re.IGNORECASE)
-        if value_match:
+        flexible_value_pattern = r"\b" + r"\s+".join(re.escape(part) for part in value.split()) + r"\b"
+        for value_match in re.finditer(flexible_value_pattern, raw_text, flags=re.IGNORECASE):
             entities.append(
                 PIIEntity("private", value_match.group(0), value_match.start(), value_match.end())
             )
@@ -252,6 +255,60 @@ def mask_pii_text(
     for entity in reversed(detect_contact_entities(raw_text, extra_names, extra_sensitive_values)):
         placeholder = CONTACT_PLACEHOLDERS[entity.kind]
         masked = f"{masked[:entity.start]}{placeholder}{masked[entity.end:]}"
+    return masked
+
+
+# True when a residual name span plausibly belongs to the candidate: it shares a
+# token with a detected name (hyphen/spacing/case variants), or sits in the
+# header zone (first 12 non-empty lines) where the candidate's name lives.
+def _is_name_variant(entity: PIIEntity, masked_text: str, primary_tokens: set[str]) -> bool:
+    value_tokens = {
+        token.casefold().strip(".,'’-")
+        for token in entity.value.split()
+    }
+    value_tokens.discard("")
+    if value_tokens & primary_tokens:
+        return True
+    header_end = 0
+    nonempty_seen = 0
+    for line in masked_text.splitlines(keepends=True):
+        if line.strip():
+            nonempty_seen += 1
+            if nonempty_seen >= 12:
+                header_end = masked_text.find(line) + len(line)
+                break
+    else:
+        header_end = len(masked_text)
+    return entity.start < header_end
+
+
+# Masks what the single pass missed: structured contact spans plus name
+# variants, re-detecting on the already-masked text until nothing new appears.
+# The outgoing prompt is only allowed to contain this text or better.
+def mask_pii_text_aggressive(
+    raw_text: str,
+    extra_names: list[str] | None = None,
+    extra_sensitive_values: list[str] | None = None,
+) -> str:
+    masked = mask_pii_text(raw_text, extra_names, extra_sensitive_values)
+    known_names = list(extra_names or []) + extract_name_candidates(raw_text)
+    primary_tokens = {
+        token.casefold().strip(".,'’-")
+        for name in known_names
+        for token in name.split()
+    }
+    primary_tokens.discard("")
+    for _ in range(3):
+        residual = [
+            entity
+            for entity in detect_contact_entities(masked)
+            if entity.kind != "name" or _is_name_variant(entity, masked, primary_tokens)
+        ]
+        if not residual:
+            break
+        for entity in reversed(residual):
+            placeholder = CONTACT_PLACEHOLDERS[entity.kind]
+            masked = f"{masked[:entity.start]}{placeholder}{masked[entity.end:]}"
     return masked
 
 

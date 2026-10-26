@@ -261,8 +261,23 @@ def _ocr_lines_text(lines: list[OCRLine], image_width: float) -> str:
     return "\n".join(item.text for item in ordered).strip()
 
 
+# Rejects files whose bytes are not a PDF before any parsing work starts.
+def _ensure_real_pdf(path: Path) -> None:
+    with path.open("rb") as file_obj:
+        header = file_obj.read(8)
+    if header.startswith(b"%PDF-"):
+        return
+    if header[:4] == b"\xd0\xcf\x11\xe0":
+        raise ValueError(
+            "File is a Microsoft Word (.doc) document renamed to .pdf; "
+            "convert it with the word-convert skill before parsing."
+        )
+    raise ValueError("File is not a valid PDF document.")
+
+
 # Extracts embedded text and runs local OCR only on pages without a usable text layer.
 def extract_local_cv_document(path: Path) -> LocalCVDocument:
+    _ensure_real_pdf(path)
     document = pymupdf.open(path)
     try:
         if document.page_count == 0:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Word Convert"
+  short_description: "Convert Word CVs (.doc/.docx) into PDFs locally"
+  default_prompt: "Use $skill-word-convert to convert this Word CV into a PDF: <path>"
