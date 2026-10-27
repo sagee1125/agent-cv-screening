@@ -36,7 +36,12 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
 from jd_parser.post_split import PostSplit, split_advertisement
-from screening_core.candidate_id import appno_from_filename, format_candidate_label, refno_from_url
+from screening_core.candidate_id import (
+    appno_from_filename,
+    format_candidate_label,
+    masked_display_name,
+    refno_from_url,
+)
 from screening_core.board_tooltip import public_radar_dimensions
 from screening_core.hr_output import (
     CV_PACK_SUBDIR,
@@ -1149,6 +1154,18 @@ def _score_legacy_candidate(
     return True
 
 
+# The candidate's locally detected name, for the masked local ranking column.
+# Only ever read from the local extracted artifact; never sent anywhere.
+def _candidate_name(cand: dict) -> str | None:
+    try:
+        extracted = _load_json(cand["extracted"])
+    except Exception:
+        return None
+    structured = extracted.get("structured_data") or {}
+    value = structured.get("name")
+    return str(value) if value else None
+
+
 def _legacy_row(cand: dict) -> dict:
     """Build a comparison/ranking row from a successfully scored legacy candidate."""
     score = _load_json(cand["score"])
@@ -1159,6 +1176,8 @@ def _legacy_row(cand: dict) -> dict:
         "refno": cand.get("refno"),
         "appno": cand.get("appno"),
         "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
+        # First character + fixed stars, for the local ranking table only.
+        "name_masked": masked_display_name(_candidate_name(cand)),
         # None on a single-post job, which has no post column to read (FR-2).
         "post": cand.get("post"),
         "total_score": score.get("total_score", 0),
@@ -1302,6 +1321,8 @@ def _match_candidate(
         "refno": cand.get("refno"),
         "appno": cand.get("appno"),
         "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
+        # First character + fixed stars, for the local ranking table only.
+        "name_masked": masked_display_name(_candidate_name(cand)),
         # None on a single-post job, which has no post column to read (FR-2).
         "post": cand.get("post"),
         "total_score": float(detail.get("match_score", 0)),

@@ -6,9 +6,13 @@ from urllib.parse import parse_qs, urlparse
 
 from screening_core import site_mode
 
-# Display identity is always (refno, appno). Names are never shown.
-# First-letter masking (e.g. "C***") is not used: it is still identifying in a
-# small applicant pool and is not de-identification under PIPL/GDPR.
+# Display identity is (refno, appno) everywhere data leaves the machine.
+# Local-only HR reports MAY additionally show masked_display_name() (first
+# character + fixed-width stars): an explicit product decision from 2026-10-27
+# trading a little identifiability for usability on a local artifact. Prompts
+# bound for the cloud stay fully redacted ([NAME_REDACTED]) — a partial name
+# buys no parsing quality and first characters remain identifying in a small
+# applicant pool (not de-identification under PIPL/GDPR).
 
 
 # Strip a job-ref prefix from a CV filename stem and return the application no.
@@ -31,6 +35,16 @@ def format_candidate_label(refno: str | None, appno: str | None) -> str:
     if job == "-":
         return application
     return f"{job}/{application}"
+
+
+# Partially mask a locally known candidate name for local HR reports: keep the
+# first character, hide the rest behind a fixed five stars (fixed width on
+# purpose — it also hides the name length). Never used for cloud-bound text.
+def masked_display_name(name: str | None) -> str:
+    cleaned = " ".join(str(name or "").split()).strip(" ,;")
+    if not cleaned:
+        return "—"
+    return f"{cleaned[0]}*****"
 
 
 # True when the value is a bare JAS job reference number (digits only).

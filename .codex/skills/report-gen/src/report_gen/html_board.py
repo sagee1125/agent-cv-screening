@@ -1125,6 +1125,7 @@ def _ranking_table(ranked: list[dict[str, Any]]) -> str:
             "<tr>"
             f"<td>{_esc(row.get('rank'))}</td>"
             f"<td><a href='{_esc(match_stem)}.html'>{_esc(appno)}</a></td>"
+            f"<td>{_esc(row.get('name_masked') or '—')}</td>"
             f"<td>{_esc(row.get('total_score'))}</td>"
             f"<td>{_esc(_tier_label(row))}</td>"
             f"<td>{_resume_cell(row)}</td>"
@@ -1132,7 +1133,7 @@ def _ranking_table(ranked: list[dict[str, Any]]) -> str:
         )
     return (
         "<table>"
-        "<thead><tr><th>Rank</th><th>Application No.</th><th>Score</th><th>Tier</th>"
+        "<thead><tr><th>Rank</th><th>Application No.</th><th>Name</th><th>Score</th><th>Tier</th>"
         "<th>CV</th></tr></thead>"
         f"<tbody>{''.join(table_rows)}</tbody></table>"
     )

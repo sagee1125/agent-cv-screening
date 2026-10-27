@@ -32,3 +32,15 @@ def test_is_jas_refno_and_records_url() -> None:
     assert is_jas_refno("260818001")
     assert not is_jas_refno("abc")
     assert records_url_for_refno("260818001").endswith("refno=260818001")
+
+
+# Local-report name masking: first character only, fixed five stars so the
+# name length never leaks. Empty/missing names render a dash.
+def test_masked_display_name() -> None:
+    from screening_core.candidate_id import masked_display_name
+
+    assert masked_display_name("張三") == "張*****"
+    assert masked_display_name("Zhang San") == "Z*****"
+    assert masked_display_name("  Chan, Tai Man ") == "C*****"
+    assert masked_display_name("") == "—"
+    assert masked_display_name(None) == "—"
