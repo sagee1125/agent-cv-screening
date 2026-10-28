@@ -80,7 +80,6 @@ _PAGE_CSS_BASE = """
     .axis-score { font-size: 10.5px; font-weight: 700; fill: #2563eb; }
     .questions { padding-left: 1.1rem; }
     /* Capability portrait (cv-portrait skill): tags, evidence-cited claims. */
-    .portrait-section { border-top: 1px solid #e2e8f0; margin-top: 18px; padding-top: 12px; }
     .portrait-headline { font-weight: 650; margin: 0 0 6px; }
     .portrait-tags { margin: 0 0 10px; }
     .tag { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 10px;
@@ -130,10 +129,14 @@ _PAGE_CSS_BASE = """
     /* Candidate match page: radar beside an always-visible dimension breakdown. */
     .match-layout { display: grid; gap: 22px; margin-top: 6px; align-items: start; }
     @media (min-width: 900px) { .match-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
-    /* Radar (with its dimension panel beneath) on the left, portrait on the right. */
-    .col-radar { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-    .col-portrait { min-width: 0; }
-    .col-portrait .portrait-section { border-top: 0; margin-top: 0; padding-top: 0; }
+    /* Card content flows as a two-column masonry: radar, portrait head,
+       strengths, gaps, flags and prompts each keep their natural height and
+       pack into the shorter column, so there is no stretched whitespace. */
+    .masonry { margin-top: 6px; columns: 1; column-gap: 22px; }
+    @media (min-width: 900px) { .masonry { columns: 2; } }
+    .m-block { break-inside: avoid; page-break-inside: avoid; margin: 0 0 18px; min-width: 0; }
+    .m-block:last-child { margin-bottom: 0; }
+    .m-block h3 { margin: 0 0 8px; }
     .dim-list { display: flex; flex-direction: column; gap: 10px; }
     .dim-card {
       background: #fff; border: 1px solid #e2e8f0; border-left: 3px solid #94a3b8;
@@ -692,39 +695,33 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
         q_html = f"<h3>Interview prompts</h3><ol class='questions'>{items}</ol>"
     score = row.get("total_score")
     score_txt = f"{float(score):.1f}" if _score(score) is not None else "—"
-    portrait_html = _portrait_section(row)
     # The card title jumps to the candidate's own match page.
     appno = str(row.get("appno") or "").strip()
     title_html = _esc(_label(row))
     if appno:
         title_html = f"<a href='{_esc(candidate_match_stem(appno))}.html'>{title_html}</a>"
+    # Radar, portrait head/strengths/gaps/flags and interview prompts all flow
+    # as natural-height blocks in a two-column masonry: no stretched columns.
+    # The detail page keeps radar and its dimension panel side by side inside
+    # the first block (the breakdown belongs next to the chart, not below it).
+    blocks: list[str] = []
     if layout == "detail":
-        left = f'<div class="radar-wrap">{_radar_svg(axes)}</div>' f"{_dimension_panel(axes)}"
-        if portrait_html:
-            body = (
-                '<div class="match-layout">'
-                f'<div class="col-radar">{left}</div>'
-                f'<div class="col-portrait">{portrait_html}</div>'
-                "</div>"
-            )
-        else:
-            body = (
-                '<div class="match-layout">'
-                f'<div class="radar-wrap">{_radar_svg(axes)}</div>'
-                f"{_dimension_panel(axes)}"
-                "</div>"
-            )
+        blocks.append(
+            '<div class="match-layout">'
+            f'<div class="radar-wrap">{_radar_svg(axes)}</div>'
+            f"{_dimension_panel(axes)}"
+            "</div>"
+        )
     else:
-        radar = f'<div class="radar-wrap">{_radar_svg(axes)}{_axis_tips(axes)}</div>'
-        if portrait_html:
-            body = (
-                '<div class="match-layout">'
-                f'<div class="col-radar">{radar}</div>'
-                f'<div class="col-portrait">{portrait_html}</div>'
-                "</div>"
-            )
-        else:
-            body = radar
+        blocks.append(f'<div class="radar-wrap">{_radar_svg(axes)}{_axis_tips(axes)}</div>')
+    blocks.extend(_portrait_blocks(row))
+    if q_html:
+        blocks.append(q_html)
+    body = (
+        "<div class='masonry'>"
+        + "".join(f"<div class='m-block'>{block}</div>" for block in blocks)
+        + "</div>"
+    )
     return f"""
     <article class="card" id="app-{_esc(row.get('appno') or row.get('rank'))}">
       <header>
@@ -735,7 +732,6 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
         </div>
       </header>
       {body}
-      {q_html}
     </article>
     """
 
@@ -760,34 +756,35 @@ def _portrait_claim_list(claims: list[dict[str, Any]]) -> str:
     return f"<ul class='portrait-claims'>{''.join(items)}</ul>" if items else ""
 
 
-# The JD-independent capability portrait section (cv-portrait skill). Empty
-# string when the run had no portrait, so existing reports are unchanged.
-def _portrait_section(row: dict[str, Any]) -> str:
+# The capability portrait rendered as independent masonry blocks: header
+# (headline/tags/overview), strengths, gaps, reliability flags. Empty blocks
+# are omitted so the flow stays dense.
+def _portrait_blocks(row: dict[str, Any]) -> list[str]:
     portrait = row.get("portrait")
     if not isinstance(portrait, dict) or not portrait.get("headline"):
-        return ""
+        return []
+    blocks: list[str] = []
     tags = "".join(f"<span class='tag'>{_esc(tag)}</span>" for tag in portrait.get("capability_tags") or [])
     overview = "".join(f"<li>{_esc(line)}</li>" for line in portrait.get("overview") or [])
-    strengths = _portrait_claim_list(portrait.get("strengths") or [])
-    gaps = _portrait_claim_list(portrait.get("gaps") or [])
-    flags = "".join(f"<li>{_esc(flag)}</li>" for flag in portrait.get("reliability_flags") or [])
-    parts = [
-        "<div class='portrait-section'>",
+    head = [
         "<h3>Capability portrait <span class='muted'>(JD-independent · evidence-cited)</span></h3>",
         f"<p class='portrait-headline'>{_esc(portrait.get('headline'))}</p>",
     ]
     if tags:
-        parts.append(f"<p class='portrait-tags'>{tags}</p>")
+        head.append(f"<p class='portrait-tags'>{tags}</p>")
     if overview:
-        parts.append(f"<ul class='portrait-claims'>{overview}</ul>")
+        head.append(f"<ul class='portrait-claims'>{overview}</ul>")
+    blocks.append("".join(head))
+    strengths = _portrait_claim_list(portrait.get("strengths") or [])
     if strengths:
-        parts.append(f"<h3>Strengths</h3>{strengths}")
+        blocks.append(f"<h3>Strengths</h3>{strengths}")
+    gaps = _portrait_claim_list(portrait.get("gaps") or [])
     if gaps:
-        parts.append(f"<h3>Gaps</h3>{gaps}")
+        blocks.append(f"<h3>Gaps</h3>{gaps}")
+    flags = "".join(f"<li>{_esc(flag)}</li>" for flag in portrait.get("reliability_flags") or [])
     if flags:
-        parts.append(f"<h3>Reliability flags</h3><ul class='flags'>{flags}</ul>")
-    parts.append("</div>")
-    return "".join(parts)
+        blocks.append(f"<h3>Reliability flags</h3><ul class='flags'>{flags}</ul>")
+    return blocks
 
 
 # Render a link to the locally downloaded CV PDF; em dash when the file was not collected.
