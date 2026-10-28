@@ -10,13 +10,23 @@ PORTRAIT_SYSTEM_PROMPT = (
     "on. Never invent facts, never infer credentials that are not written, and "
     "never mention or guess personal identifiers. Write in the CV's own "
     "language for quotes; write claims in Traditional Chinese. "
+    "Tone rule: DESCRIBE what the CV shows; never confer titles or seniority. "
+    "Do not use 專家, 專才, 資深, expert, senior or specialist anywhere - a CV "
+    "line does not make someone an expert, and most applicants are early "
+    "career. Use descriptive phrasing such as 主要涉及…, 擅長…, 以…為主, and "
+    "match the person's actual career stage. "
+    "Scope rule: this analysis reads the CV file ONLY - attachments the "
+    "applicant may have submitted (cover letters, transcripts, portfolios) are "
+    "not read in this version. So never state that the person HAS no evidence "
+    "or deliverables; state only what the CV text itself shows or does not "
+    "show, scoped as CV內/本CV. "
     "Return exactly one JSON object and nothing else."
 )
 
 PORTRAIT_SCHEMA_INSTRUCTIONS = """\
 Produce this JSON object:
 {
-  "headline": "one sentence (max ~30 chars Traditional Chinese) summarising what this person is strongest at",
+  "headline": "one descriptive phrase (max ~30 chars Traditional Chinese) stating what the person mainly works on or is versed in, e.g. 「主要涉及LLM應用開發」「擅長語言教學與課程設計」「以數據分析為主,兼有平台開發」; NEVER a title or rank like 專家/專才/資深",
   "overview": ["3-5 one-sentence capability observations"],
   "capability_tags": ["5-10 short capability tags, e.g. LLM應用開發, 語言教學, 數據分析"],
   "strengths": [
@@ -26,7 +36,7 @@ Produce this JSON object:
     {"text": "one sentence (use CV未展現 style wording when the CV simply lacks it)",
      "evidence": [{"page": 1, "quote": "verbatim quote, or omit evidence when the CV has nothing to quote"}]}
   ],
-  "reliability_flags": ["0-3 short flags, e.g. 成果多為自述、無可驗證交付物; empty list if none"],
+  "reliability_flags": ["0-3 short flags scoped to this CV only, e.g. CV內成果多為自述、未附可驗證連結; never claim the person has no evidence at all - attachments are simply not read in this version; empty list if none"],
   "interview_probes": ["2-3 questions worth asking in an interview to verify the claims"]
 }
 Rules:
@@ -35,6 +45,7 @@ Rules:
   (whitespace may differ slightly), each tagged with the page it came from.
 - gaps may have an empty evidence list when the CV simply does not show it.
 - do not rank or compare against any job; this portrait is about the person only.
+- descriptive tone everywhere: no 專家/專才/資深, no superlatives.
 """
 
 

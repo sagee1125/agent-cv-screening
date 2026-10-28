@@ -17,7 +17,36 @@ from cv_parser.service import CVParserService
 from cv_portrait.prompts import PORTRAIT_SYSTEM_PROMPT, build_portrait_user_prompt
 from word_convert.converter import convert_to_pdf, detect_kind
 
-PORTRAIT_CACHE_VERSION = "portrait-v4"
+PORTRAIT_CACHE_VERSION = "portrait-v5"
+
+# Title-conferral words the headline must never contain: a CV line does not
+# make someone an expert, and LLMs default to inflated LinkedIn-style titles.
+_INFLATED_TITLE_WORDS = (
+    "專家",
+    "專才",
+    "資深",
+    "顶尖",
+    "頂尖",
+    "权威",
+    "權威",
+    "expert",
+    "senior",
+    "specialist",
+    "guru",
+)
+
+
+def headline_compliant(headline: str) -> bool:
+    folded = headline.casefold()
+    return not any(word in folded for word in _INFLATED_TITLE_WORDS)
+
+
+# Deterministic descriptive fallback built from the (grounded) capability tags.
+def _fallback_headline(tags: list[str]) -> str:
+    top = [tag for tag in tags if tag][:3]
+    if not top:
+        return "能力畫像見下方明細"
+    return "主要涉及:" + "、".join(top)
 PORTRAIT_MAX_TOKENS = 1500
 
 # Claim lists are capped so a verbose model cannot balloon the output tokens.
@@ -158,6 +187,40 @@ class PortraitService:
         self.llm_client = llm_client
         self.cache = cache
 
+    # Asks the model once to rephrase an inflated headline descriptively.
+    async def _rewrite_headline(self, portrait: dict[str, Any]) -> str | None:
+        system = (
+            "You rephrase CV summary headlines. Output exactly one JSON object "
+            '{"headline": "..."} and nothing else. The headline must DESCRIBE '
+            "what the person mainly works on (e.g. 主要涉及…, 擅長…, 以…為主), "
+            "never confer a title, and must not contain 專家/專才/資深/expert/"
+            "senior/specialist. Max ~30 Traditional Chinese characters."
+        )
+        user = (
+            "Capability tags: "
+            + ", ".join(portrait.get("capability_tags") or [])
+            + "\nCurrent (inflated) headline: "
+            + str(portrait.get("headline") or "")
+            + "\nOverview: "
+            + " / ".join(portrait.get("overview") or [])
+            + "\nRewrite the headline descriptively."
+        )
+        try:
+            result = await self.llm_client.chat_completion(
+                system,
+                user,
+                response_format={"type": "json_object"},
+                temperature=0,
+                seed=42,
+                timeout=cv_llm_timeout(),
+                max_tokens=120,
+            )
+        except Exception:
+            logger.warning("Headline rewrite call failed; using tag fallback.", exc_info=True)
+            return None
+        rewritten = _clean_text((result.get("parsed") or {}).get("headline"))[:_MAX_HEADLINE_CHARS]
+        return rewritten if rewritten and headline_compliant(rewritten) else None
+
     # Builds (or reuses from cache) one candidate's capability portrait.
     async def build_portrait(
         self, file_path: str, converted_pdf: str | None = None
@@ -224,6 +287,12 @@ class PortraitService:
             max_tokens=PORTRAIT_MAX_TOKENS,
         )
         portrait = normalize_portrait(llm_result["parsed"], masked_pages)
+        if not headline_compliant(portrait.get("headline") or ""):
+            # One corrective rewrite; if the model still confers a title, fall
+            # back to a deterministic descriptive headline from the tags.
+            portrait["headline"] = await self._rewrite_headline(portrait) or _fallback_headline(
+                portrait.get("capability_tags") or []
+            )
         payload = {
             "status": "success",
             "portrait": portrait,

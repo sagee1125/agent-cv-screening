@@ -138,3 +138,63 @@ def test_build_portrait_end_to_end_and_cache(tmp_path) -> None:
     third = asyncio.run(service.build_portrait(str(cv)))
     assert third["cache_hit"] is False
     assert stub.calls == 2
+
+
+# The headline must never confer titles; the fallback is tag-derived.
+def test_headline_compliance_and_fallback() -> None:
+    from cv_portrait.service import _fallback_headline, headline_compliant
+
+    assert headline_compliant("主要涉及LLM應用開發") is True
+    for inflated in ("AI與NLP專家", "資深數據分析", "Expert in NLP", "Senior後端開發"):
+        assert headline_compliant(inflated) is False
+    assert _fallback_headline(["LLM應用開發", "Python", "教學設計"]) == "主要涉及:LLM應用開發、Python、教學設計"
+    assert _fallback_headline([]) == "能力畫像見下方明細"
+
+
+# An inflated headline triggers one corrective rewrite; if the model keeps
+# conferring titles, the deterministic tag fallback wins.
+def test_inflated_headline_is_corrected_or_falls_back(tmp_path) -> None:
+    import asyncio
+
+    import pymupdf
+
+    from cv_portrait.service import PortraitService
+    from screening_core.hash_cache import HashCache
+
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((72, 90), "Ann Lee Tester")
+    page.insert_text((72, 130), "Built a tutoring platform with Python in 2025.")
+    document.save(tmp_path / "cv2.pdf")
+    document.close()
+
+    base = {
+        "headline": "AI專家",
+        "overview": ["有平台交付經驗。"],
+        "capability_tags": ["Python", "教學平台"],
+        "strengths": [],
+        "gaps": [],
+        "reliability_flags": [],
+        "interview_probes": [],
+    }
+
+    class _QueueStub:
+        def __init__(self, responses):
+            self.responses = list(responses)
+            self.calls = 0
+
+        async def chat_completion(self, *_args, **_kwargs) -> dict:
+            self.calls += 1
+            return {"model": "glm-4-flash", "parsed": self.responses.pop(0)}
+
+    # Case 1: rewrite succeeds -> descriptive headline kept.
+    stub = _QueueStub([base, {"headline": "主要涉及Python教學平台開發"}])
+    service = PortraitService(llm_client=stub, cache=HashCache(str(tmp_path / "c1")))
+    result = asyncio.run(service.build_portrait(str(tmp_path / "cv2.pdf")))
+    assert result["portrait"]["headline"] == "主要涉及Python教學平台開發"
+
+    # Case 2: rewrite still inflated -> deterministic tag fallback.
+    stub2 = _QueueStub([base, {"headline": "還是專家"}])
+    service2 = PortraitService(llm_client=stub2, cache=HashCache(str(tmp_path / "c2")))
+    result2 = asyncio.run(service2.build_portrait(str(tmp_path / "cv2.pdf")))
+    assert result2["portrait"]["headline"] == "主要涉及:Python、教學平台"
