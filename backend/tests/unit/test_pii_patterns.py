@@ -185,7 +185,9 @@ def test_address_is_masked_and_listed_for_redaction() -> None:
 def test_function_words_are_never_name_candidates() -> None:
     from cv_parser.pii import _looks_like_name
 
-    for junk in ("and", "or", "of", "The", "WITH", "dr", "Prof."):
+    for junk in ("and", "or", "of", "The", "WITH", "Dr.", "Prof."):
         assert _looks_like_name(junk) is False
-    # Real short names still pass.
+    # Real short names and honorific-prefixed names still pass.
     assert _looks_like_name("Ng Tai") is True
+    assert _looks_like_name("Dr. John Chan") is True
+    assert _looks_like_name("Ms Wong Sai Han") is True

@@ -71,10 +71,10 @@ NON_NAME_TOKENS = {
     "scientist",
     "student",
     "university",
-    # Function words and honorifics: a wrapped heading line can leave one of
-    # these alone on a line (a 2013-era Word CV produced a bare "and"), and a
-    # junk candidate then masks every ordinary occurrence of the word in the
-    # document ("Economics [NAME_REDACTED] Business").
+    # Function words: a wrapped heading line can leave one of these alone on a
+    # line (a 2013-era Word CV produced a bare "and"), and a junk candidate
+    # then masks every ordinary occurrence of the word in the document
+    # ("Economics [NAME_REDACTED] Business").
     "and",
     "or",
     "of",
@@ -92,13 +92,10 @@ NON_NAME_TOKENS = {
     "are",
     "was",
     "were",
-    "mr",
-    "mrs",
-    "ms",
-    "miss",
-    "dr",
-    "prof",
 }
+# Stripped from the START of a name-like line, not grounds for rejection:
+# "Dr. John Chan" is a name line; a bare "and" is not.
+_HONORIFICS = ("mr", "mrs", "ms", "miss", "dr", "prof")
 CONTACT_PLACEHOLDERS = {
     "name": "[NAME_REDACTED]",
     "email": "[EMAIL_REDACTED]",
@@ -124,6 +121,11 @@ class PIIEntity:
 # Returns whether a line conservatively resembles a candidate name.
 def _looks_like_name(line: str) -> bool:
     normalized = " ".join(line.split()).strip(" ,;")
+    # Drop leading honorifics: "Dr. John Chan" should judge as "John Chan".
+    tokens = normalized.split()
+    while tokens and tokens[0].casefold().strip(".,") in _HONORIFICS:
+        tokens = tokens[1:]
+    normalized = " ".join(tokens).strip(" ,;")
     if not normalized or normalized.casefold().rstrip(":") in SECTION_HEADINGS:
         return False
     if normalized.casefold() in KNOWN_SKILLS:
