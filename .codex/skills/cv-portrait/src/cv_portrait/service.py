@@ -207,9 +207,12 @@ class PortraitService:
             if page_masked.strip()
         )
         user_prompt = build_portrait_user_prompt(paged_text)
-        # The same pre-send guard as the parser: if any detected identity value
-        # survives masking, nothing leaves the machine.
-        CVParserService._assert_prompt_clean(user_prompt, "\n".join(masked_pages), pii_values)
+        # The same pre-send guard as the parser, scoped to the CV body only:
+        # the fixed instruction preamble cannot leak anything, and a detected
+        # value that coincidentally matches the schema wording (e.g. a
+        # three-character value hitting "2-4 strengths") must not block the
+        # portrait on a false positive.
+        CVParserService._assert_prompt_clean(paged_text, "\n".join(masked_pages), pii_values)
 
         llm_result = await self.llm_client.chat_completion(
             PORTRAIT_SYSTEM_PROMPT,
