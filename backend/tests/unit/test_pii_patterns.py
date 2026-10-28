@@ -177,3 +177,15 @@ def test_address_is_masked_and_listed_for_redaction() -> None:
     values = " ".join(contact_values_for_redaction(raw_text))
     assert "12 Queen Street" in values
     assert "皇后大道中88號" in values
+
+
+# A wrapped heading can leave a bare function word on a line; such a junk
+# candidate must not become a name (a 2013 Word CV produced a bare "and",
+# which masked every ordinary "and" in the document).
+def test_function_words_are_never_name_candidates() -> None:
+    from cv_parser.pii import _looks_like_name
+
+    for junk in ("and", "or", "of", "The", "WITH", "dr", "Prof."):
+        assert _looks_like_name(junk) is False
+    # Real short names still pass.
+    assert _looks_like_name("Ng Tai") is True

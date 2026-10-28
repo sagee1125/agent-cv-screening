@@ -71,6 +71,33 @@ NON_NAME_TOKENS = {
     "scientist",
     "student",
     "university",
+    # Function words and honorifics: a wrapped heading line can leave one of
+    # these alone on a line (a 2013-era Word CV produced a bare "and"), and a
+    # junk candidate then masks every ordinary occurrence of the word in the
+    # document ("Economics [NAME_REDACTED] Business").
+    "and",
+    "or",
+    "of",
+    "the",
+    "for",
+    "to",
+    "in",
+    "on",
+    "at",
+    "by",
+    "with",
+    "from",
+    "as",
+    "is",
+    "are",
+    "was",
+    "were",
+    "mr",
+    "mrs",
+    "ms",
+    "miss",
+    "dr",
+    "prof",
 }
 CONTACT_PLACEHOLDERS = {
     "name": "[NAME_REDACTED]",
