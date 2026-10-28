@@ -17,7 +17,7 @@ from cv_parser.service import CVParserService
 from cv_portrait.prompts import PORTRAIT_SYSTEM_PROMPT, build_portrait_user_prompt
 from word_convert.converter import convert_to_pdf, detect_kind
 
-PORTRAIT_CACHE_VERSION = "portrait-v1"
+PORTRAIT_CACHE_VERSION = "portrait-v2"
 PORTRAIT_MAX_TOKENS = 1500
 
 # Claim lists are capped so a verbose model cannot balloon the output tokens.
@@ -181,20 +181,26 @@ class PortraitService:
                 "error_message": "portrait_error=cv_not_readable",
             }
 
-        # Same local PII pipeline as cv-parser: detect names on the whole
-        # document, then mask every page with the same detections.
+        # Same local PII pipeline as cv-parser: detect the candidate name on the
+        # WHOLE document, then mask every page with the same detections. The
+        # whole-document name must be passed into each page's masking, because a
+        # name reappearing deep inside a later page (e.g. as a publication
+        # author) is only found when the candidate comes from outside that page.
         heuristic_hints = extract_contact_hints(raw_text)
-        names: list[str] = []
+        mask_names: list[str] = []
         sensitive: list[str] = []
         if document.ocr_page_indexes or not heuristic_hints.get("name"):
             local_pii = detect_local_pii(raw_text)
-            names = list(local_pii.names)
+            mask_names = list(local_pii.names)
             sensitive = list(local_pii.sensitive_values)
+        hint_name = heuristic_hints.get("name")
+        if hint_name:
+            mask_names = [hint_name] + [n for n in mask_names if n != hint_name]
         masked_pages = [
-            mask_pii_text_aggressive(page_text, names, sensitive)
+            mask_pii_text_aggressive(page_text, mask_names, sensitive)
             for page_text in document.page_texts
         ]
-        pii_values = contact_values_for_redaction(raw_text, names, sensitive)
+        pii_values = contact_values_for_redaction(raw_text, mask_names, sensitive)
         paged_text = "\n\n".join(
             f"[Page {index}]\n{page_masked}"
             for index, page_masked in enumerate(masked_pages, start=1)
