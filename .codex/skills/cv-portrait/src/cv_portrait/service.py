@@ -17,7 +17,7 @@ from cv_parser.service import CVParserService
 from cv_portrait.prompts import PORTRAIT_SYSTEM_PROMPT, build_portrait_user_prompt
 from word_convert.converter import convert_to_pdf, detect_kind
 
-PORTRAIT_CACHE_VERSION = "portrait-v3"
+PORTRAIT_CACHE_VERSION = "portrait-v4"
 PORTRAIT_MAX_TOKENS = 1500
 
 # Claim lists are capped so a verbose model cannot balloon the output tokens.

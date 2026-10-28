@@ -142,7 +142,9 @@ def _looks_like_name(line: str) -> bool:
 
     if re.fullmatch(r"[\u3400-\u9fff·]{2,8}", normalized):
         return True
-    if not re.fullmatch(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ'’.-]+){0,5}", normalized):
+    # Commas are allowed inside a name: "Yu, Ziheng" / "HUANG Shaoqin, Martin"
+    # (Last, First) are the most common CV header name formats.
+    if not re.fullmatch(r"[A-Za-zÀ-ÖØ-öø-ÿ'’.,\-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ'’.,\-]+){0,5}", normalized):
         return False
     return 1 <= len(normalized.split()) <= 6
 

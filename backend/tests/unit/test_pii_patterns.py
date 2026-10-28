@@ -191,3 +191,8 @@ def test_function_words_are_never_name_candidates() -> None:
     assert _looks_like_name("Ng Tai") is True
     assert _looks_like_name("Dr. John Chan") is True
     assert _looks_like_name("Ms Wong Sai Han") is True
+    # "Last, First" header names are names, not junk.
+    assert _looks_like_name("Yu, Ziheng") is True
+    assert _looks_like_name("HUANG Shaoqin, Martin") is True
+    # A phrase line with a function word is still not a name.
+    assert _looks_like_name("Data Science and Analytics") is False
