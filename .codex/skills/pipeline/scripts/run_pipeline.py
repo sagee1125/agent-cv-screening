@@ -965,12 +965,16 @@ def _resolve_raw_jd_source(args: argparse.Namespace, out_dir: Path) -> tuple[Pat
 
 # True when the submission is a Word document by content (OLE2 .doc, or a
 # docx zip whatever its extension claims), so parsing routes to the
-# word-cv-parser skill instead of the PDF-only cv-parser.
+# word-cv-parser skill instead of the PDF-only cv-parser. A missing or
+# unreadable file is simply not a Word document.
 def _is_word_document(source: str) -> bool:
     import zipfile
 
-    with Path(source).open("rb") as file_obj:
-        header = file_obj.read(8)
+    try:
+        with Path(source).open("rb") as file_obj:
+            header = file_obj.read(8)
+    except OSError:
+        return False
     if header.startswith(b"%PDF-"):
         return False
     if header[:4] == b"\xd0\xcf\x11\xe0":
@@ -1597,6 +1601,32 @@ def _report_jd_inputs(
     return jd_digest, str(text_path) if text_path else None, str(json_path) if json_path else None
 
 
+# Publish each candidate's CV PDF into the report pack (cvs/<appno>.pdf) so
+# the HR folder is self-contained and the table's CV links resolve. Word
+# submissions publish their locally converted PDF.
+def _publish_cv_pack(report_dir: Path, rows: list[dict], out_dir: Path) -> None:
+    import shutil
+
+    if not report_dir:
+        return
+    cvs_dir = report_dir / CV_PACK_SUBDIR
+    cvs_dir.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        appno = row.get("appno")
+        slug = row.get("_slug") or appno
+        if not appno or not slug:
+            continue
+        target = cvs_dir / f"{candidate_match_stem(appno)}.pdf"
+        if target.is_file():
+            continue
+        source = Path(row.get("_source") or "")
+        if source.is_file() and _is_word_document(str(source)):
+            converted = out_dir / f"converted-{slug}.pdf"
+            source = converted if converted.is_file() else source
+        if source.is_file():
+            shutil.copyfile(source, target)
+
+
 def _generate_reports(
     args: argparse.Namespace,
     out_dir: Path,
@@ -1613,6 +1643,7 @@ def _generate_reports(
         return reports
     jd_text = jd_sources.text if jd_sources is not None else jd_text
     report_dir = _report_dir(args, out_dir)
+    _publish_cv_pack(report_dir, rows, out_dir)
     previous = load_fingerprints(out_dir)
     previous_candidates = previous.get("candidates") if isinstance(previous.get("candidates"), dict) else {}
     candidate_fps: dict[str, str] = {}
