@@ -1156,23 +1156,17 @@ def _build_portraits(
         with ThreadPoolExecutor(max_workers=min(workers, len(candidates))) as pool:
             for index, (slug, attempts, error) in enumerate(pool.map(build_one, candidates), start=1):
                 if error:
+                    # A portrait failure is an enhancement miss, not a screening
+                    # failure: record it for audit, keep the run green so the
+                    # score/ranking always ships (e.g. an expired API key in a
+                    # test environment must not turn the batch partial).
                     _write_last_error(out_dir, slug, "", attempts, error)
-                    _record_failure(
-                        args,
-                        failures,
-                        Failure(source=slug, stage="cv-portrait", attempts=attempts, error_message=error),
-                    )
                 _heartbeat(out_dir, f"能力畫像：已完成 {index}/{len(candidates)}（最新：{slug}）")
     else:
         for index, cand in enumerate(candidates, start=1):
             slug, attempts, error = build_one(cand)
             if error:
                 _write_last_error(out_dir, slug, "", attempts, error)
-                _record_failure(
-                    args,
-                    failures,
-                    Failure(source=slug, stage="cv-portrait", attempts=attempts, error_message=error),
-                )
             _heartbeat(out_dir, f"能力畫像：第 {index}/{len(candidates)}（{slug}）")
     _heartbeat(out_dir, "能力畫像結束，繼續評分")
 

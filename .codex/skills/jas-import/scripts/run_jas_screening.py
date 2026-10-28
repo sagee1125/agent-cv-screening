@@ -277,6 +277,8 @@ def _pipeline_cmd(
     report_dir: Path | None = None,
     conditions: str | None = None,
     cv_posts: list[tuple[str, str]] | None = None,
+    parse_workers: int = 3,
+    with_portrait: bool = True,
 ) -> list[str]:
     cmd = [
         PYTHON,
@@ -291,7 +293,14 @@ def _pipeline_cmd(
         engine,
         "--max-retries",
         str(max_retries),
+        # Product defaults for the no-technical-background HR flow (2026-10-28):
+        # parallel parsing and the capability portrait are on unless explicitly
+        # disabled via --no-portrait / --parse-workers 1.
+        "--parse-workers",
+        str(parse_workers),
     ]
+    if with_portrait:
+        cmd.append("--with-portrait")
     if report_dir is not None:
         cmd += ["--report-dir", str(report_dir)]
     if refno:
@@ -457,6 +466,8 @@ def _run_screening(
         report_dir=job_dir,
         conditions=getattr(args, "conditions", None),
         cv_posts=_cv_posts(job, staged),
+        parse_workers=max(1, int(getattr(args, "parse_workers", 3) or 3)),
+        with_portrait=not getattr(args, "no_portrait", False),
     )
     exit_code, payload = _run_pipeline(cmd)
     # Persist run history + CV hashes so later runs can skip unchanged downloads.
@@ -749,6 +760,17 @@ def main() -> int:
     )
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure.")
     parser.add_argument("--max-retries", type=int, default=2, help="Extra attempts per candidate step.")
+    parser.add_argument(
+        "--parse-workers",
+        type=int,
+        default=3,
+        help="CVs parsed concurrently (default 3; 1 restores the serial behaviour).",
+    )
+    parser.add_argument(
+        "--no-portrait",
+        action="store_true",
+        help="Skip the JD-independent capability portraits (on by default for HR runs).",
+    )
     args = parser.parse_args()
     try:
         apply_site_defaults(args, repo_root=REPO_ROOT)
