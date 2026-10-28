@@ -36,7 +36,7 @@ Produce this JSON object:
     {"text": "one sentence (use CV未展現 style wording when the CV simply lacks it)",
      "evidence": [{"page": 1, "quote": "verbatim quote, or omit evidence when the CV has nothing to quote"}]}
   ],
-  "reliability_flags": ["0-3 short flags scoped to this CV only, e.g. CV內成果多為自述、未附可驗證連結; never claim the person has no evidence at all - attachments are simply not read in this version; empty list if none"],
+  "reliability_flags": ["0-3 short flags about THIS CV text only; phrase gaps as CV內未見… (e.g. CV內未見可驗證連結或成果展示), never as 未附/未提供 - the applicant may have submitted attachments the system simply does not read in this version; empty list if none"],
   "interview_probes": ["2-3 questions worth asking in an interview to verify the claims"]
 }
 Rules:

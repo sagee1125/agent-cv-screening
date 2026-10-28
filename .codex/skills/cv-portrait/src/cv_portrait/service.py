@@ -17,7 +17,7 @@ from cv_parser.service import CVParserService
 from cv_portrait.prompts import PORTRAIT_SYSTEM_PROMPT, build_portrait_user_prompt
 from word_convert.converter import convert_to_pdf, detect_kind
 
-PORTRAIT_CACHE_VERSION = "portrait-v5"
+PORTRAIT_CACHE_VERSION = "portrait-v6"
 
 # Title-conferral words the headline must never contain: a CV line does not
 # make someone an expert, and LLMs default to inflated LinkedIn-style titles.
@@ -102,6 +102,16 @@ def _clean_text(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
+# Flags must never say the applicant did not ATTACH/PROVIDE something - the
+# system only reads the CV file, and attachments may well exist. Deterministic
+# rewording so a non-compliant model output still ships scoped correctly.
+def _scope_flag(flag: str) -> str:
+    scoped = flag
+    for phrase in ("沒有提供", "未提供", "未附上", "未附"):
+        scoped = scoped.replace(phrase, "CV內未見")
+    return scoped
+
+
 def _normalize_evidence(items: Any, masked_pages: list[str]) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
@@ -154,7 +164,9 @@ def normalize_portrait(parsed: dict[str, Any], masked_pages: list[str]) -> dict[
         _clean_text(tag) for tag in (parsed.get("capability_tags") or [])[:_MAX_TAGS] if _clean_text(tag)
     ]
     flags = [
-        _clean_text(flag) for flag in (parsed.get("reliability_flags") or [])[:3] if _clean_text(flag)
+        _scope_flag(_clean_text(flag))
+        for flag in (parsed.get("reliability_flags") or [])[:3]
+        if _clean_text(flag)
     ]
     probes = [
         _clean_text(q) for q in (parsed.get("interview_probes") or [])[:_MAX_PROBES] if _clean_text(q)

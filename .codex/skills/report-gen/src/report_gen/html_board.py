@@ -68,8 +68,8 @@ _PAGE_CSS_BASE = """
     table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
     th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
     th { background: #0f172a; color: #fff; font-weight: 600; }
+    /* Cards stack vertically: one candidate per row reads like a list, not tiles. */
     .grid { display: grid; gap: 18px; margin-top: 28px; }
-    @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
     .card { position: relative; background: #fff; border-radius: 16px; padding: 16px 16px 20px; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
     .card:hover, .card:focus-within { z-index: 5; }
     .card header { display: flex; gap: 12px; align-items: center; }
@@ -130,6 +130,10 @@ _PAGE_CSS_BASE = """
     /* Candidate match page: radar beside an always-visible dimension breakdown. */
     .match-layout { display: grid; gap: 22px; margin-top: 6px; align-items: start; }
     @media (min-width: 900px) { .match-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+    /* Radar (with its dimension panel beneath) on the left, portrait on the right. */
+    .col-radar { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+    .col-portrait { min-width: 0; }
+    .col-portrait .portrait-section { border-top: 0; margin-top: 0; padding-top: 0; }
     .dim-list { display: flex; flex-direction: column; gap: 10px; }
     .dim-card {
       background: #fff; border: 1px solid #e2e8f0; border-left: 3px solid #94a3b8;
@@ -688,26 +692,49 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
         q_html = f"<h3>Interview prompts</h3><ol class='questions'>{items}</ol>"
     score = row.get("total_score")
     score_txt = f"{float(score):.1f}" if _score(score) is not None else "—"
+    portrait_html = _portrait_section(row)
+    # The card title jumps to the candidate's own match page.
+    appno = str(row.get("appno") or "").strip()
+    title_html = _esc(_label(row))
+    if appno:
+        title_html = f"<a href='{_esc(candidate_match_stem(appno))}.html'>{title_html}</a>"
     if layout == "detail":
-        body = (
-            '<div class="match-layout">'
-            f'<div class="radar-wrap">{_radar_svg(axes)}</div>'
-            f"{_dimension_panel(axes)}"
-            "</div>"
-        )
+        left = f'<div class="radar-wrap">{_radar_svg(axes)}</div>' f"{_dimension_panel(axes)}"
+        if portrait_html:
+            body = (
+                '<div class="match-layout">'
+                f'<div class="col-radar">{left}</div>'
+                f'<div class="col-portrait">{portrait_html}</div>'
+                "</div>"
+            )
+        else:
+            body = (
+                '<div class="match-layout">'
+                f'<div class="radar-wrap">{_radar_svg(axes)}</div>'
+                f"{_dimension_panel(axes)}"
+                "</div>"
+            )
     else:
-        body = f'<div class="radar-wrap">{_radar_svg(axes)}{_axis_tips(axes)}</div>'
+        radar = f'<div class="radar-wrap">{_radar_svg(axes)}{_axis_tips(axes)}</div>'
+        if portrait_html:
+            body = (
+                '<div class="match-layout">'
+                f'<div class="col-radar">{radar}</div>'
+                f'<div class="col-portrait">{portrait_html}</div>'
+                "</div>"
+            )
+        else:
+            body = radar
     return f"""
     <article class="card" id="app-{_esc(row.get('appno') or row.get('rank'))}">
       <header>
         <p class="rank">#{_esc(row.get('rank') or '—')}</p>
         <div>
-          <h2>{_esc(_label(row))}</h2>
+          <h2>{title_html}</h2>
           <p class="meta">Tier {_esc(_tier_label(row) or '—')} · score {_esc(score_txt)}</p>
         </div>
       </header>
       {body}
-      {_portrait_section(row)}
       {q_html}
     </article>
     """
@@ -1185,11 +1212,12 @@ def _ranking_table(ranked: list[dict[str, Any]]) -> str:
     for row in ranked:
         appno = str(row.get("appno") or row.get("rank") or "unknown")
         match_stem = candidate_match_stem(appno)
+        detail_href = f"{_esc(match_stem)}.html"
         table_rows.append(
             "<tr>"
             f"<td>{_esc(row.get('rank'))}</td>"
-            f"<td><a href='{_esc(match_stem)}.html'>{_esc(appno)}</a></td>"
-            f"<td>{_esc(row.get('name_masked') or '—')}</td>"
+            f"<td><a href='{detail_href}'>{_esc(appno)}</a></td>"
+            f"<td><a href='{detail_href}'>{_esc(row.get('name_masked') or '—')}</a></td>"
             f"<td class='cell-summary'>{_esc(row.get('portrait_headline') or '—')}</td>"
             f"<td>{_esc(row.get('total_score'))}</td>"
             f"<td>{_esc(_tier_label(row))}</td>"

@@ -198,3 +198,22 @@ def test_inflated_headline_is_corrected_or_falls_back(tmp_path) -> None:
     service2 = PortraitService(llm_client=stub2, cache=HashCache(str(tmp_path / "c2")))
     result2 = asyncio.run(service2.build_portrait(str(tmp_path / "cv2.pdf")))
     assert result2["portrait"]["headline"] == "主要涉及:Python、教學平台"
+
+
+# Flags never say the applicant failed to attach something; the system only
+# reads the CV, so 未附/未提供 wording is deterministically rescoped.
+def test_reliability_flags_are_scoped_to_the_cv() -> None:
+    from cv_portrait.service import normalize_portrait
+
+    portrait = normalize_portrait(
+        {
+            "headline": "ok",
+            "reliability_flags": ["未附可驗證連結", "未提供具體的項目成果展示", "CV內未見量化結果"],
+        },
+        [],
+    )
+    assert portrait["reliability_flags"] == [
+        "CV內未見可驗證連結",
+        "CV內未見具體的項目成果展示",
+        "CV內未見量化結果",
+    ]
