@@ -35,6 +35,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (sets sys.path + cwd before app imports)
+from cv_portrait.service import PORTRAIT_CACHE_VERSION
 from jd_parser.post_split import PostSplit, split_advertisement
 from screening_core.candidate_id import (
     appno_from_filename,
@@ -1102,6 +1103,92 @@ def _parse_candidates(
     return candidates
 
 
+# Build the JD-independent capability portraits (cv-portrait skill) for every
+# candidate. No-op unless --with-portrait. Portraits are cached by CV file hash
+# in the engine cache and reused across runs (and across job ads) via the
+# portrait_logic stamp on the artifact; a portrait failure never blocks scoring.
+def _build_portraits(
+    args: argparse.Namespace, out_dir: Path, candidates: list[dict], failures: list[Failure]
+) -> None:
+    if not getattr(args, "with_portrait", False) or not candidates:
+        return
+
+    def build_one(cand: dict) -> tuple[str, int, str | None]:
+        slug = cand["slug"]
+        portrait_out = out_dir / f"portrait-{slug}.json"
+
+        def usable() -> bool:
+            if not (_is_usable_json(portrait_out) and portrait_out.is_file()):
+                return False
+            try:
+                data = _load_json(portrait_out)
+            except Exception:
+                return False
+            return data.get("portrait_logic") == PORTRAIT_CACHE_VERSION and data.get("status") == "success"
+
+        if args.resume and usable():
+            cand["portrait"] = portrait_out
+            return slug, 0, None
+        cmd = [
+            PYTHON,
+            str(_skill_script("cv-portrait", "run_cv_portrait.py")),
+            "--file",
+            cand["source"],
+            "--output",
+            str(portrait_out),
+            "--converted-pdf",
+            str(out_dir / f"converted-{slug}.pdf"),
+        ]
+        attempts, error = _run_with_retries(
+            cmd, args.max_retries, budget_seconds=getattr(args, "candidate_budget", None)
+        )
+        if not error:
+            cand["portrait"] = portrait_out
+        return slug, attempts, error
+
+    workers = max(1, getattr(args, "parse_workers", 1) or 1)
+    if workers > 1 and len(candidates) > 1:
+        _heartbeat(out_dir, f"並行生成能力畫像 {len(candidates)} 份（cv-portrait）")
+        with ThreadPoolExecutor(max_workers=min(workers, len(candidates))) as pool:
+            for index, (slug, attempts, error) in enumerate(pool.map(build_one, candidates), start=1):
+                if error:
+                    _write_last_error(out_dir, slug, "", attempts, error)
+                    _record_failure(
+                        args,
+                        failures,
+                        Failure(source=slug, stage="cv-portrait", attempts=attempts, error_message=error),
+                    )
+                _heartbeat(out_dir, f"能力畫像：已完成 {index}/{len(candidates)}（最新：{slug}）")
+    else:
+        for index, cand in enumerate(candidates, start=1):
+            slug, attempts, error = build_one(cand)
+            if error:
+                _write_last_error(out_dir, slug, "", attempts, error)
+                _record_failure(
+                    args,
+                    failures,
+                    Failure(source=slug, stage="cv-portrait", attempts=attempts, error_message=error),
+                )
+            _heartbeat(out_dir, f"能力畫像：第 {index}/{len(candidates)}（{slug}）")
+    _heartbeat(out_dir, "能力畫像結束，繼續評分")
+
+
+# Load one candidate's portrait payload; (None, None) when absent or failed.
+def _load_portrait(cand: dict) -> tuple[dict | None, str | None]:
+    path = cand.get("portrait")
+    if not path or not Path(path).is_file():
+        return None, None
+    try:
+        data = _load_json(Path(path))
+    except Exception:
+        return None, None
+    if data.get("status") != "success":
+        return None, None
+    portrait = data.get("portrait") or {}
+    headline = portrait.get("headline") or None
+    return portrait, headline
+
+
 # Attach the composite JAS key (refno, appno) used for ranking and reports.
 def _with_identity(args: argparse.Namespace, extracted: Path, source: str, slug: str) -> dict:
     refno = getattr(args, "refno", None) or None
@@ -1178,6 +1265,9 @@ def _legacy_row(cand: dict) -> dict:
         "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
         # First character + fixed stars, for the local ranking table only.
         "name_masked": masked_display_name(_candidate_name(cand)),
+        # JD-independent capability portrait (only when --with-portrait ran).
+        "portrait": _load_portrait(cand)[0],
+        "portrait_headline": _load_portrait(cand)[1],
         # None on a single-post job, which has no post column to read (FR-2).
         "post": cand.get("post"),
         "total_score": score.get("total_score", 0),
@@ -1323,6 +1413,9 @@ def _match_candidate(
         "display_label": cand.get("display_label") or format_candidate_label(cand.get("refno"), cand.get("appno")),
         # First character + fixed stars, for the local ranking table only.
         "name_masked": masked_display_name(_candidate_name(cand)),
+        # JD-independent capability portrait (only when --with-portrait ran).
+        "portrait": _load_portrait(cand)[0],
+        "portrait_headline": _load_portrait(cand)[1],
         # None on a single-post job, which has no post column to read (FR-2).
         "post": cand.get("post"),
         "total_score": float(detail.get("match_score", 0)),
@@ -1909,6 +2002,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         failures: list[Failure] = []
         jd_sources = _resolve_jd_sources(args, out_dir)
         candidates = _parse_candidates(args, out_dir, jd_sources.text, failures)
+        _build_portraits(args, out_dir, candidates, failures)
         if args.engine == "matching":
             return _run_matching_engine(args, out_dir, jd_sources, candidates, failures)
         return _run_legacy_engine(args, out_dir, jd_sources, candidates, failures)
@@ -2014,6 +2108,13 @@ def main() -> int:
         "switched to a completion counter).",
     )
     parser.add_argument("--resume", action="store_true", help="Skip JD/CV/score steps when usable artifacts already exist in --output-dir.")
+    parser.add_argument(
+        "--with-portrait",
+        action="store_true",
+        help="Also build a JD-independent, evidence-cited capability portrait per CV "
+        "(cv-portrait skill). Cached by CV file hash, so it is only recomputed when "
+        "a CV file changes; adds a Headline column and a portrait section to the reports.",
+    )
     parser.add_argument("--fail-fast", action="store_true", help="Abort the batch on the first per-candidate failure (legacy behavior).")
     args = parser.parse_args()
 

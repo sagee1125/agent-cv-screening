@@ -79,6 +79,19 @@ _PAGE_CSS_BASE = """
     .axis-label { font-size: 9.5px; fill: #334155; }
     .axis-score { font-size: 10.5px; font-weight: 700; fill: #2563eb; }
     .questions { padding-left: 1.1rem; }
+    /* Capability portrait (cv-portrait skill): tags, evidence-cited claims. */
+    .portrait-section { border-top: 1px solid #e2e8f0; margin-top: 18px; padding-top: 12px; }
+    .portrait-headline { font-weight: 650; margin: 0 0 6px; }
+    .portrait-tags { margin: 0 0 10px; }
+    .tag { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 10px;
+           padding: 1px 9px; margin: 0 4px 4px 0; font-size: .82rem; }
+    .portrait-claims { margin: 0; padding-left: 1.1rem; }
+    .portrait-claims li { margin-bottom: 8px; }
+    .ev { display: block; margin-top: 2px; font-size: .84rem; color: #475569; }
+    .ev .badge-v { color: #047857; font-weight: 600; }
+    .ev .badge-u { color: #b45309; font-weight: 600; }
+    .ev .quote { font-style: italic; }
+    .flags { color: #92400e; font-size: .86rem; }
     /* Interview-prompt skill names pop so HR can scan prompts without re-reading them. */
     .skill { display: inline; font-weight: 600; color: #1e40af; background: #dbeafe;
              border-radius: 4px; padding: 0 4px; }
@@ -694,9 +707,60 @@ def _card(row: dict[str, Any], layout: str = "board") -> str:
         </div>
       </header>
       {body}
+      {_portrait_section(row)}
       {q_html}
     </article>
     """
+
+
+# One evidence line: page anchor + verified badge + verbatim quote.
+def _portrait_evidence_html(item: dict[str, Any]) -> str:
+    page = item.get("page")
+    page_txt = f"p.{_esc(page)}" if page not in (None, "") else "p.?"
+    if item.get("verified"):
+        badge = "<span class='badge-v'>✓ verified</span>"
+    else:
+        badge = "<span class='badge-u'>⚠ unverified</span>"
+    quote = _esc(item.get("quote") or "")
+    return f"<span class='ev'>{page_txt} · {badge} · <span class='quote'>“{quote}”</span></span>"
+
+
+def _portrait_claim_list(claims: list[dict[str, Any]]) -> str:
+    items = []
+    for claim in claims:
+        evidence = "".join(_portrait_evidence_html(item) for item in claim.get("evidence") or [])
+        items.append(f"<li>{_esc(claim.get('text') or '')}{evidence}</li>")
+    return f"<ul class='portrait-claims'>{''.join(items)}</ul>" if items else ""
+
+
+# The JD-independent capability portrait section (cv-portrait skill). Empty
+# string when the run had no portrait, so existing reports are unchanged.
+def _portrait_section(row: dict[str, Any]) -> str:
+    portrait = row.get("portrait")
+    if not isinstance(portrait, dict) or not portrait.get("headline"):
+        return ""
+    tags = "".join(f"<span class='tag'>{_esc(tag)}</span>" for tag in portrait.get("capability_tags") or [])
+    overview = "".join(f"<li>{_esc(line)}</li>" for line in portrait.get("overview") or [])
+    strengths = _portrait_claim_list(portrait.get("strengths") or [])
+    gaps = _portrait_claim_list(portrait.get("gaps") or [])
+    flags = "".join(f"<li>{_esc(flag)}</li>" for flag in portrait.get("reliability_flags") or [])
+    parts = [
+        "<div class='portrait-section'>",
+        "<h3>Capability portrait <span class='muted'>(JD-independent · evidence-cited)</span></h3>",
+        f"<p class='portrait-headline'>{_esc(portrait.get('headline'))}</p>",
+    ]
+    if tags:
+        parts.append(f"<p class='portrait-tags'>{tags}</p>")
+    if overview:
+        parts.append(f"<ul class='portrait-claims'>{overview}</ul>")
+    if strengths:
+        parts.append(f"<h3>Strengths</h3>{strengths}")
+    if gaps:
+        parts.append(f"<h3>Gaps</h3>{gaps}")
+    if flags:
+        parts.append(f"<h3>Reliability flags</h3><ul class='flags'>{flags}</ul>")
+    parts.append("</div>")
+    return "".join(parts)
 
 
 # Render a link to the locally downloaded CV PDF; em dash when the file was not collected.
@@ -1126,6 +1190,7 @@ def _ranking_table(ranked: list[dict[str, Any]]) -> str:
             f"<td>{_esc(row.get('rank'))}</td>"
             f"<td><a href='{_esc(match_stem)}.html'>{_esc(appno)}</a></td>"
             f"<td>{_esc(row.get('name_masked') or '—')}</td>"
+            f"<td class='cell-summary'>{_esc(row.get('portrait_headline') or '—')}</td>"
             f"<td>{_esc(row.get('total_score'))}</td>"
             f"<td>{_esc(_tier_label(row))}</td>"
             f"<td>{_resume_cell(row)}</td>"
@@ -1133,8 +1198,8 @@ def _ranking_table(ranked: list[dict[str, Any]]) -> str:
         )
     return (
         "<table>"
-        "<thead><tr><th>Rank</th><th>Application No.</th><th>Name</th><th>Score</th><th>Tier</th>"
-        "<th>CV</th></tr></thead>"
+        "<thead><tr><th>Rank</th><th>Application No.</th><th>Name</th><th>Headline</th>"
+        "<th>Score</th><th>Tier</th><th>CV</th></tr></thead>"
         f"<tbody>{''.join(table_rows)}</tbody></table>"
     )
 

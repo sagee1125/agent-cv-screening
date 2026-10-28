@@ -15,6 +15,7 @@ _REEXEC_GUARD_ENV = "SCREENING_VENV_REEXEC"
 _SKILL_SRC_DIRS = (
     ("_shared", "src"),
     ("cv-parser", "src"),
+    ("cv-portrait", "src"),
     ("jd-parser", "src"),
     ("scorer", "src"),
     ("report-gen", "src"),
@@ -22,6 +23,7 @@ _SKILL_SRC_DIRS = (
     ("jas-import", "src"),
     ("host-envelope", "src"),
     ("webridge-collect", "src"),
+    ("word-convert", "src"),
 )
 
 

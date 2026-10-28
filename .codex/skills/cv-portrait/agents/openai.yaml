@@ -1,0 +1,4 @@
+interface:
+  display_name: "CV Portrait"
+  short_description: "Evidence-cited, JD-independent capability summary per CV"
+  default_prompt: "Use $skill-cv-portrait to build a capability portrait of this CV: <path>"
