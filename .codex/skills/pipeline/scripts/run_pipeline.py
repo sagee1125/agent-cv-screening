@@ -1611,14 +1611,41 @@ def _publish_cv_pack(report_dir: Path, rows: list[dict], out_dir: Path) -> None:
         if not appno or not slug:
             continue
         target = cvs_dir / f"{candidate_match_stem(appno)}.pdf"
+        # An existing target is kept only when it is a real PDF: earlier
+        # releases copied raw Word bytes here under a .pdf name, which Acrobat
+        # refuses to open.
         if target.is_file():
-            continue
+            with target.open("rb") as handle:
+                if handle.read(5).startswith(b"%PDF-"):
+                    continue
         source = Path(row.get("_source") or "")
         if source.is_file() and _is_word_document(str(source)):
             converted = out_dir / f"converted-{slug}.pdf"
             source = converted if converted.is_file() else source
         if source.is_file():
             shutil.copyfile(source, target)
+
+
+# One human-readable line per application absent from the ranking: parse
+# failures from this run, plus applicants the JAS page lists without any CV
+# (jas-manifest.json lives in the same out_dir on JAS-driven runs).
+def _collect_unparsed_note(out_dir: Path, failures: list[Failure]) -> list[str]:
+    lines: list[str] = []
+    for failure in failures:
+        if failure.stage != "cv-parse":
+            continue
+        appno = appno_from_filename(Path(failure.source).stem, None)
+        reason = failure.error_message.strip().splitlines()[0][:160] if failure.error_message else "unreadable file"
+        lines.append(f"Application No. {appno} - not scored: {reason}")
+    manifest_path = out_dir / "jas-manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = _load_json(manifest_path)
+            for appno in manifest.get("candidates_without_cv") or []:
+                lines.append(f"Application No. {appno} - no CV was submitted, so there is nothing to score")
+        except Exception:
+            pass
+    return lines
 
 
 def _generate_reports(
@@ -1740,6 +1767,14 @@ def _generate_reports(
     else:
         rows_out = out_dir / "rows.json"
         rows_out.write_text(json.dumps(comparison_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        # HR must see who is missing and why: collect every application that is
+        # absent from the ranking (parse failures here, plus applicants the JAS
+        # page lists without any CV) and hand the list to the board.
+        unparsed_note = _collect_unparsed_note(out_dir, failures)
+        unparsed_path = None
+        if unparsed_note:
+            unparsed_path = out_dir / "unparsed-candidates.json"
+            unparsed_path.write_text(json.dumps(unparsed_note, ensure_ascii=False, indent=2), encoding="utf-8")
         html_cmd = [
             PYTHON,
             str(_skill_script("report-gen", "run_report.py")),
@@ -1757,6 +1792,8 @@ def _generate_reports(
             html_cmd += ["--jd-file", jd_text_arg]
         if jd_json_arg:
             html_cmd += ["--jd-json", jd_json_arg]
+        if unparsed_path:
+            html_cmd += ["--unparsed-note-file", str(unparsed_path)]
         # A multi-post board carries one section per post, so it needs each post's own effective
         # JD and delta, not just the shared base the panel above shows (FR-6.3).
         if jd_sources is not None and jd_sources.multi_post:

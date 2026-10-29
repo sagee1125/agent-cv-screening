@@ -1277,6 +1277,24 @@ def _unmatched_posts(labels: list[str]) -> str:
     )
 
 
+# HR must never have to notice a missing candidate by counting: every
+# application that is absent from the ranking is listed here with the reason
+# (no CV submitted, or the file could not be read/parsed).
+def _unparsed_note(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    items = "".join(f"<li>{_esc(line)}</li>" for line in lines)
+    return (
+        "<section class='note' aria-label='Applicants not in this ranking'>"
+        "<h2>Applicants not in this ranking</h2>"
+        "<p>The applicants below are NOT scored in this report. They are not "
+        "ranked low - they are absent, for the reason shown. Check whether the "
+        "missing item matters before treating this ranking as complete.</p>"
+        f"<ul>{items}</ul>"
+        "</section>"
+    )
+
+
 # A post's effective JD is the base JD plus its delta (FR-4), so most of its tag set is the base's
 # tag set. Repeating it under every post buries the post-specific requirements in text the reader has
 # already read at the top of the page, so a group stating the same requirements as the shared panel's
@@ -1385,6 +1403,7 @@ def write_screening_board(
     jd_parsed: dict | None = None,
     post_jds: dict[str, dict[str, Any]] | None = None,
     unmatched_posts: list[str] | None = None,
+    unparsed_note: list[str] | None = None,
 ) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1403,7 +1422,11 @@ def write_screening_board(
     grouped = group_by_post(rows, multi_post=bool(post_jds))
     # A cross-check disagreement questions the split itself, so it is stated above the sections
     # rather than after them (FR-3). Empty on a single-post run, which has no post universe.
-    warning = _unmatched_posts(unmatched_posts or [])
+    # The post cross-check warning is a multi-post concern only (a single-post
+    # job has no post dimension to cross-check). The unparsed-applicants note
+    # applies to every shape: HR must see who is missing and why.
+    posts_warning = _unmatched_posts(unmatched_posts or [])
+    unparsed_warning = _unparsed_note(unparsed_note or [])
     if grouped.groups:
         sections = []
         for index, group in enumerate(grouped.groups):
@@ -1418,13 +1441,13 @@ def write_screening_board(
                     expanded=index == 0,
                 )
             )
-        body = warning + "".join(sections) + _needs_confirmation(grouped.unassigned)
+        body = posts_warning + unparsed_warning + "".join(sections) + _needs_confirmation(grouped.unassigned)
     elif grouped.multi_post:
         # A multi-post page on which no applicant's post could be read has no section to show.
         # Saying so beats an empty board that looks like a silent drop (FR-7).
-        body = warning + _needs_confirmation(grouped.unassigned)
+        body = posts_warning + unparsed_warning + _needs_confirmation(grouped.unassigned)
     else:
-        body = f"{_ranking_table(ranked)}{_low_band_advisory(ranked)}{_cards(ranked)}"
+        body = f"{unparsed_warning}{_ranking_table(ranked)}{_low_band_advisory(ranked)}{_cards(ranked)}"
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>

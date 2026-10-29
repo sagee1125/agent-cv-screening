@@ -406,6 +406,7 @@ class ReporterService:
         jd_parsed: dict | None = None,
         post_jds: dict[str, dict[str, Any]] | None = None,
         unmatched_posts: list[str] | None = None,
+        unparsed_note: list[str] | None = None,
     ) -> None:
         from report_gen.html_board import write_screening_board
 
@@ -419,6 +420,7 @@ class ReporterService:
             jd_parsed=jd_parsed,
             post_jds=post_jds,
             unmatched_posts=unmatched_posts,
+            unparsed_note=unparsed_note,
         )
 
     # Writes one candidate HTML match page (application-no. filename).

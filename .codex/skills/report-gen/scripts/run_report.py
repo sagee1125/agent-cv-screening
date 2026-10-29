@@ -92,6 +92,17 @@ def _read_post_warnings(path: str | None) -> list[str]:
     ]
 
 
+# Reads the pipeline's unparsed-candidates.json: one line per application that
+# is absent from the ranking, with the reason (no CV, unreadable file, ...).
+def _read_unparsed_note(path: str | None) -> list[str]:
+    if not path:
+        return []
+    payload = _read_json(path)
+    if not isinstance(payload, list):
+        return []
+    return [str(line).strip() for line in payload if str(line).strip()]
+
+
 # Generate a one-page PDF report for one scored candidate (optionally with matching detail).
 def _run_candidate(args: argparse.Namespace) -> int:
     try:
@@ -155,6 +166,7 @@ def _run_board(args: argparse.Namespace) -> int:
             jd_parsed=jd_parsed,
             post_jds=post_jds,
             unmatched_posts=_read_post_warnings(args.post_jds),
+            unparsed_note=_read_unparsed_note(getattr(args, "unparsed_note_file", None)),
         )
     except Exception as exc:
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -219,6 +231,7 @@ def _build_parser() -> argparse.ArgumentParser:
     board_parser.add_argument("--jd-file", default=None, help="Optional raw JD text file shown in the board panel.")
     board_parser.add_argument("--jd-json", default=None, help="Optional parsed JD JSON (jd-parser output); structured_data is unwrapped.")
     board_parser.add_argument("--post-jds", default=None, help="Optional post-jds.json from a multi-post run; renders one collapsible section per post.")
+    board_parser.add_argument("--unparsed-note-file", default=None, help="Optional JSON array of lines naming applicants absent from the ranking (no CV submitted, or the file could not be parsed). Rendered as a warning card.")
     board_parser.add_argument("--output", required=True, help="Path to write the HTML file.")
     board_parser.set_defaults(func=_run_board)
 

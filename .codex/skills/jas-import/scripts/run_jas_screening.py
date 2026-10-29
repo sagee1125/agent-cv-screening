@@ -234,12 +234,21 @@ def _stage_cvs_by_appno(work_dir: Path, cvs: list[tuple[str, Path]]) -> list[tup
 
 # Copy staged CVs beside the HTML report pack so the board opens local PDFs, not JES URLs.
 def _publish_cvs_to_pack(job_dir: Path, staged: list[tuple[str, Path]]) -> None:
-    """Publish downloaded CV PDFs under <job-dir>/cvs/, skipping unchanged files."""
+    """Publish downloaded CV PDFs under <job-dir>/cvs/, skipping unchanged files.
+
+    Only real PDFs are published: JAS stores some Word submissions under a
+    .pdf name, and copying those bytes here produced report-pack files that
+    Acrobat refuses to open. Word submissions are published by the pipeline
+    stage instead, after the local conversion produced a real PDF.
+    """
     pack_dir = job_dir / CV_PACK_SUBDIR
     pack_dir.mkdir(parents=True, exist_ok=True)
     for appno, src in staged:
         if not src.is_file():
             continue
+        with src.open("rb") as handle:
+            if not handle.read(5).startswith(b"%PDF-"):
+                continue
         dest = pack_dir / f"{safe_pack_id(appno, fallback='unknown')}.pdf"
         if dest.is_file():
             same_size = dest.stat().st_size == src.stat().st_size
