@@ -26,6 +26,7 @@ python-multipart==0.0.20
 # Reports
 reportlab==4.2.5
 pywin32==306; sys_platform == "win32"  # word-convert skill: drives installed MS Word via COM (Windows only)
+olefile==0.47  # word-convert: pure-python .doc text extraction (no external software)
 openpyxl==3.1.5
 
 # Utils

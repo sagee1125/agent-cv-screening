@@ -66,6 +66,27 @@ def convert_to_pdf(source: Path, target: Path) -> tuple[Path, str]:
                     return target, "docx_text"
             except Exception as exc:
                 errors.append(f"_convert_docx_via_text: {exc}")
+        elif kind == "doc":
+            # Pure-code last resort for legacy .doc: a machine with neither
+            # Word nor LibreOffice must still produce a scannable text-layer
+            # PDF, so the offline text extraction covers .doc as well.
+            target.unlink(missing_ok=True)
+            try:
+                from word_convert.doc_text import extract_text_from_doc
+
+                paragraphs = [
+                    line.strip()
+                    for line in extract_text_from_doc(staged).splitlines()
+                    if line.strip()
+                ]
+                if not paragraphs:
+                    raise ValueError("no text recovered from the .doc piece table")
+                _typeset_text_pdf(paragraphs, target)
+                if target.is_file() and target.stat().st_size > 0:
+                    logger.info("Converted .doc to text-layer PDF (offline extraction).")
+                    return target, "doc_text"
+            except Exception as exc:
+                errors.append(f"_convert_doc_text: {exc}")
     finally:
         staged.unlink(missing_ok=True)
     raise ValueError(f"Could not convert this .{kind} file to PDF locally. " + " | ".join(errors))
@@ -150,10 +171,9 @@ def _soffice_candidate() -> str | None:
     return None
 
 
-# Last-resort offline path: pull the text out of the .docx XML and typeset a
-# simple text-layer PDF with reportlab. No layout survives, but the screening
-# parser only needs the text layer, and every masking rule still applies.
-def _convert_docx_via_text(source: Path, target: Path) -> None:
+# Typesets plain paragraphs into a simple text-layer PDF (the shared tail of
+# both offline paths). Screening only needs the text layer; layout is lost.
+def _typeset_text_pdf(paragraphs: list[str], target: Path) -> None:
     from io import BytesIO
 
     from reportlab.lib.pagesizes import A4
@@ -162,9 +182,8 @@ def _convert_docx_via_text(source: Path, target: Path) -> None:
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.pdfgen import canvas as pdf_canvas
 
-    paragraphs = _docx_paragraphs(source)
     if not paragraphs:
-        raise ValueError("No text found inside the .docx")
+        raise ValueError("no text to typeset")
 
     try:
         pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
@@ -191,6 +210,16 @@ def _convert_docx_via_text(source: Path, target: Path) -> None:
         renderer.showPage()
     renderer.save()
     target.write_bytes(buffer.getvalue())
+
+
+# Last-resort offline path for .docx: pull the text out of the XML and typeset
+# a simple text-layer PDF with reportlab. No layout survives, but the
+# screening parser only needs the text layer, and every masking rule applies.
+def _convert_docx_via_text(source: Path, target: Path) -> None:
+    paragraphs = _docx_paragraphs(source)
+    if not paragraphs:
+        raise ValueError("No text found inside the .docx")
+    _typeset_text_pdf(paragraphs, target)
 
 
 # Extracts paragraph text (including table cells) from a .docx archive.

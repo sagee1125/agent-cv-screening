@@ -13,10 +13,13 @@ works unchanged.
 
 1. **Microsoft Word via COM** (Windows + installed Word, highest fidelity)
 2. **LibreOffice headless** (`soffice`, Windows/macOS, if installed)
-3. **Offline text extraction** (.docx only): pulls the text out of the docx XML
-   and typesets a simple text-layer PDF with reportlab. Layout is lost, but
-   the screening parser only needs the text layer and every masking rule
-   still applies. Old `.doc` files have no offline fallback.
+3. **Offline text extraction (pure Python, no external software)**:
+   - `.docx`: text from the docx XML
+   - `.doc`: text from the OLE2 piece table (olefile)
+   Both are typeset into a simple text-layer PDF with reportlab. Layout is
+   lost, but the screening parser only needs the text layer and every masking
+   rule still applies. No backends beyond #3 are REQUIRED - a machine with
+   neither Word nor LibreOffice converts everything in pure code.
 
 ## Run
 
