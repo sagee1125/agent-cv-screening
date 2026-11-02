@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -206,9 +207,56 @@ def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedP
             cmd=list(args), timeout=float(timeout or 0.0), stderr_tail=_stream_text_tail(exc.stderr)
         ) from None
     if proc.returncode != 0:
-        message = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
-        raise RuntimeError(message)
+        raw = proc.stderr.strip() or proc.stdout.strip()
+        cleaned = _strip_ansi(raw) if raw else ""
+        reason = _extract_child_error_message(cleaned)
+        raise RuntimeError(reason or cleaned or f"exit code {proc.returncode}")
     return proc
+
+
+# Terminal colour codes that libraries (RapidOCR's logger among them) emit even
+# into captured pipes; they end up verbatim in HR-facing failure notes otherwise.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Library log lines ([INFO] ... / [RapidOCR] ...) are noise around the real error.
+_LOG_LINE_RE = re.compile(r"^\s*\[(INFO|DEBUG|WARNING|ERROR|CRITICAL)\]", re.IGNORECASE)
+_JSON_ERROR_LINE_RE = re.compile(r'^\s*(\{.*"status"\s*:\s*"error".*\})\s*$', re.MULTILINE)
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+# The child CLIs print their real failure as a JSON error envelope (usually the
+# LAST stderr line); library logs surround it. Returns the envelope's
+# error_message, or None when no envelope is present.
+def _extract_child_error_message(text: str) -> str | None:
+    found: str | None = None
+    for match in _JSON_ERROR_LINE_RE.finditer(text):
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        message = str(payload.get("error_message") or "").strip()
+        if message:
+            found = message
+    return found
+
+
+# A human-readable failure reason from raw child output: the JSON envelope's
+# message when present, else the last non-log line, else a safe generic.
+def _human_error_reason(raw: str) -> str:
+    cleaned = _strip_ansi(raw or "").strip()
+    if not cleaned:
+        return "file could not be processed"
+    envelope = _extract_child_error_message(cleaned)
+    if envelope:
+        return envelope
+    lines = [
+        line.strip()
+        for line in cleaned.splitlines()
+        if line.strip() and not _LOG_LINE_RE.match(line) and "Using engine_name" not in line
+    ]
+    return lines[-1][:200] if lines else "file could not be processed"
 
 
 def _run_with_retries(
@@ -1635,8 +1683,8 @@ def _collect_unparsed_note(out_dir: Path, failures: list[Failure]) -> list[str]:
         if failure.stage != "cv-parse":
             continue
         appno = appno_from_filename(Path(failure.source).stem, None)
-        reason = failure.error_message.strip().splitlines()[0][:160] if failure.error_message else "unreadable file"
-        lines.append(f"Application No. {appno} - not scored: {reason}")
+        reason = _human_error_reason(failure.error_message or "")
+        lines.append(f"Application No. {appno} - not scored: {reason[:200]}")
     manifest_path = out_dir / "jas-manifest.json"
     if manifest_path.is_file():
         try:
