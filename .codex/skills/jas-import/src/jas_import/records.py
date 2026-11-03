@@ -407,14 +407,23 @@ def parse_list_html(html: str, *, base_url: str | None = None) -> list[JASJobRow
     return items
 
 
-# Report which of the three independent multi-post signals a records page carries (FR-1).
+# Report which of the independent multi-post signals a records page carries (FR-1).
+# Real-site markers: the "Post applied for" column and a " / "-separated Post title
+# (e.g. "Research Assistant / Part-time Research Assistant"). The multi-post-table
+# class token exists only in the mock fixtures - real single- and multi-post pages
+# share class "listTable job-detail-table" (confirmed against a real records page),
+# so it is kept for the mocks and cannot discriminate real pages on its own.
 def multi_post_signals(
     candidate_table: dict[str, Any] | None,
     column_indexes: dict[str, int],
     jd_fields: list[tuple[str, str]],
 ) -> dict[str, bool]:
-    """Return the three signal flags; any one of them being true means multi-post."""
+    """Return the signal flags; any one of them being true means multi-post."""
     classes = (candidate_table or {}).get("attrs", {}).get("class", "") or ""
+    post_title = next(
+        (value.strip() for label, value in jd_fields if label.casefold() == "post title" and value.strip()),
+        "",
+    )
     return {
         "table_class": "multi-post-table" in classes,
         "post_header": "post" in column_indexes,
@@ -422,6 +431,7 @@ def multi_post_signals(
             label.casefold() == "multi-post" and value.strip().casefold() == "yes"
             for label, value in jd_fields
         ),
+        "post_title_separator": " / " in post_title,
     }
 
 

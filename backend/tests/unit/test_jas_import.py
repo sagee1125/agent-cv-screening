@@ -204,11 +204,21 @@ def test_multi_post_detection_reports_every_signal() -> None:
 
     multi = parse_job_html(mock_records_html(multi_post=True))
     assert multi.multi_post is True
-    assert multi.multi_post_signals == {"table_class": True, "post_header": True, "jd_field": True}
+    assert multi.multi_post_signals == {
+        "table_class": True,
+        "post_header": True,
+        "jd_field": True,
+        "post_title_separator": True,  # mock multi-post title is "A / B"
+    }
 
     single = parse_job_html(mock_records_html())
     assert single.multi_post is False
-    assert single.multi_post_signals == {"table_class": False, "post_header": False, "jd_field": False}
+    assert single.multi_post_signals == {
+        "table_class": False,
+        "post_header": False,
+        "jd_field": False,
+        "post_title_separator": False,
+    }
 
 
 # Each signal is independently sufficient: a page carrying only one of them is still multi-post.
@@ -216,11 +226,25 @@ def test_multi_post_detection_accepts_a_single_signal() -> None:
     from jas_import.records import multi_post_signals
 
     none = multi_post_signals(None, {"appno": 1}, [("Multi-post", "No")])
-    assert none == {"table_class": False, "post_header": False, "jd_field": False}
+    assert none == {"table_class": False, "post_header": False, "jd_field": False, "post_title_separator": False}
 
     assert multi_post_signals(None, {"appno": 1, "post": 2}, [])["post_header"] is True
     assert multi_post_signals({"attrs": {"class": "listTable multi-post-table"}}, {}, [])["table_class"] is True
     assert multi_post_signals(None, {}, [("Multi-post", "Yes")])["jd_field"] is True
+    # A real-site page carries no mock class token and no Multi-post field; the
+    # " / "-separated post title is one of its live markers.
+    real_like = multi_post_signals(
+        {"attrs": {"class": "listTable job-detail-table"}},
+        {},
+        [("Post title", "Research Assistant / Part-time Research Assistant")],
+    )
+    assert real_like == {
+        "table_class": False,
+        "post_header": False,
+        "jd_field": False,
+        "post_title_separator": True,
+    }
+    assert multi_post_signals(None, {}, [("Post title", "Clerk")])["post_title_separator"] is False
     # A single-post page states "Multi-post: No" explicitly, which must not read as multi-post.
     assert multi_post_signals(None, {}, [("Multi-post", "No")])["jd_field"] is False
 
@@ -367,3 +391,64 @@ def test_build_jd_text_preserves_description_paragraph_breaks() -> None:
     )
     # The second paragraph keeps its colon intact and stays on its own line.
     assert "The work covers the project titled Data governance: records and analytics." in text
+
+
+# Regression against a REAL records page (sanitized replica of refno 260417018's
+# markup): class is "listTable job-detail-table" on both single- and multi-post
+# real pages, so detection must ride the live real-site markers - the Post
+# applied-for column and the " / "-separated post title - and still parse each
+# applicant's chosen post for per-post grouping (FR-5).
+def test_real_site_markup_detects_multi_post_and_reads_each_post() -> None:
+    from jas_import.records import parse_job_html
+
+    html = """
+    <html><body><div id="middle-list"><p>Number of applications: 3</p>
+    <table id="f-list" class="listTable job-detail-table">
+      <thead><tr>
+        <th class="f-header">No.</th>
+        <th class="f-header">Application no.</th>
+        <th class="f-header">Post applied for</th>
+        <th class="f-header">Online job application form summary (printable version)</th>
+        <th class="f-header">Status</th>
+        <th class="f-header">Surname</th>
+        <th class="f-header">Given name</th>
+        <th class="f-header">Curriculum vitae</th>
+        <th class="f-header">Other supplementary information</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>900001</td><td>Research Assistant</td>
+            <td><a href="record_detail.php?id=900001&amp;refno=260417018">p</a></td>
+            <td>TBC</td><td>Alpha</td><td>One</td>
+            <td><a href="file.php?t=cv&amp;id=900001&amp;refno=260417018">cv</a></td><td></td></tr>
+        <tr><td>2</td><td>900002</td><td>Part-time Research Assistant</td>
+            <td><a href="record_detail.php?id=900002&amp;refno=260417018">p</a></td>
+            <td>TBC</td><td>Beta</td><td>Two</td>
+            <td><a href="file.php?t=cv&amp;id=900002&amp;refno=260417018">cv</a></td><td></td></tr>
+        <tr><td>3</td><td>900003</td><td>Research Assistant</td>
+            <td><a href="record_detail.php?id=900003&amp;refno=260417018">p</a></td>
+            <td>TBC</td><td>Gamma</td><td>Three</td>
+            <td><a href="file.php?t=cv&amp;id=900003&amp;refno=260417018">cv</a></td><td></td></tr>
+      </tbody>
+    </table>
+    <table id="f-list">
+      <tr><td class="f-header">Reference number</td><td class="f-data-1">260417018</td></tr>
+      <tr><td class="f-header">Post title</td>
+        <td class="f-data-1">Research Assistant / Part-time Research Assistant</td></tr>
+    </table>
+    </div></body></html>
+    """
+    job = parse_job_html(html, base_url="https://jobs.polyu.edu.hk/internal/records.php?refno=260417018")
+    assert job.multi_post is True
+    assert job.multi_post_signals == {
+        "table_class": False,       # real pages never carry the mock token
+        "post_header": True,
+        "jd_field": False,          # real pages have no Multi-post field
+        "post_title_separator": True,
+    }
+    posts = {c.appno: c.post for c in job.candidates}
+    assert posts == {
+        "900001": "Research Assistant",
+        "900002": "Part-time Research Assistant",
+        "900003": "Research Assistant",
+    }
+    assert all(c.cv_url for c in job.candidates)
