@@ -44,6 +44,7 @@ from screening_core.candidate_id import (
     masked_display_name,
     refno_from_url,
 )
+from screening_core.diagnostics import log_event as _diagnostics_log_event
 from screening_core.board_tooltip import public_radar_dimensions
 from screening_core.hr_output import (
     CV_PACK_SUBDIR,
@@ -2108,11 +2109,26 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     _collect_need_input(args)
     downloaded_cvs = _resolve_url_inputs(args, out_dir)
     _sync_resume_with_inputs(args, out_dir)
+    started_at = time.perf_counter()
     try:
         failures: list[Failure] = []
         jd_sources = _resolve_jd_sources(args, out_dir)
         candidates = _parse_candidates(args, out_dir, jd_sources.text, failures)
         _build_portraits(args, out_dir, candidates, failures)
+        _diagnostics_log_event(
+            "run",
+            refno=args.refno,
+            engine=args.engine,
+            version=_engine_version(),
+            candidates=len(candidates),
+            failed_cv_parse=sum(1 for f in failures if f.stage == "cv-parse"),
+            failure_reasons=[
+                f"{f.stage}: {_human_error_reason(f.error_message or '')[:160]}"
+                for f in failures
+            ][:8],
+            portraits=sum(1 for c in candidates if c.get("portrait")),
+            seconds=round(time.perf_counter() - started_at, 1),
+        )
         if args.engine == "matching":
             return _run_matching_engine(args, out_dir, jd_sources, candidates, failures)
         return _run_legacy_engine(args, out_dir, jd_sources, candidates, failures)
@@ -2120,6 +2136,14 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         if getattr(args, "cleanup_cvs", False):
             for path in downloaded_cvs:
                 path.unlink(missing_ok=True)
+
+
+# The installed engine version for the diagnostics trail (never a secret).
+def _engine_version() -> str:
+    try:
+        return json.loads((REPO_ROOT / "version.json").read_text(encoding="utf-8")).get("version", "?")
+    except Exception:
+        return "?"
 
 
 def _print_need_input(exc: NeedInputError) -> int:

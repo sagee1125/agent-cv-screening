@@ -173,8 +173,13 @@ class LLMClient:
         try:
             parsed = self._parse_json_relaxed(content)
         except json.JSONDecodeError as exc:
-            snippet = content[:500].replace("\n", "\\n")
-            logger.warning("Invalid JSON snippet: %s", snippet)
+            # Log shape only, never content: the response carries CV-derived
+            # text, and log files travel inside diagnostics bundles.
+            logger.warning(
+                "Invalid JSON from model: length=%d first_char=%r",
+                len(content),
+                content[:1],
+            )
             if allow_json_repair:
                 try:
                     repaired = await self._repair_json_response(
