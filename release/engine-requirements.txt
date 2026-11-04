@@ -33,6 +33,9 @@ pypdfium2==5.13.0
 
 # --- OCR, for CVs that are scans or images ---
 rapidocr==3.9.2
+onnxruntime==1.29.0  # RapidOCR inference engine (missing here broke every scanned CV)
+pywin32==306; sys_platform == "win32"  # word-convert skill: drives installed MS Word via COM
+olefile==0.47  # word-convert skill: pure-python .doc text extraction
 opencv-python==4.14.0.94
 
 # --- Report output: HTML, PDF, XLSX ---

@@ -518,6 +518,28 @@ with no `ranking-overview.html` in `hr_files` means the run is waiting on HR, no
 - `error_code: conditions_unreadable` → the saved conditions file cannot be read. Nothing was
   scored; see "When the saved conditions cannot be read" above and put the two ways on to HR.
 
+## When a screening run has failures
+
+The ranking board's warning card names each absent applicant and the reason. Additionally,
+WHENEVER a run finishes with a non-empty `failures` list (or any screen command fails):
+
+1. Run `C:gent-cv-screening\collect_diagnostics.bat` (it is double-clickable; from here,
+   run it via cmd). It writes ONE small zip to the Desktop: `cv-diagnostics-<timestamp>.zip`
+   containing only versions, the event trail and last-error texts - no CVs, no reports,
+   no credentials.
+2. Tell HR, and the send-request MUST be bilingual and unmissable - render it as its own
+   paragraph, entirely in **bold** (chat has no font-size control, so bold + standalone
+   line + the filename is the maximum prominence available):
+
+   **請把這個檔案發給技術支援：cv-diagnostics-\<timestamp\>.zip（在您的桌面上）**
+   **Please send this file to technical support: cv-diagnostics-\<timestamp\>.zip (on your Desktop)**
+
+   Keep the two bold lines adjacent, Chinese first, English second, and include the exact
+   zip filename. Before them, state in one normal line how many applicants could not be
+   scored. Never open or paste the zip's contents into the chat.
+3. In your own reply to the developer (when the user is the developer), include the
+   failure reasons verbatim from the warning card.
+
 ## Privacy red lines (instant fail)
 
 - Never show candidate names, emails, phone numbers, HKIDs, or salaries. Identity is

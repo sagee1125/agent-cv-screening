@@ -50,6 +50,24 @@ from pathlib import Path
 REPO_SLUG = "sagee1125/agent-cv-screening"
 ASSET_URL = f"https://github.com/{REPO_SLUG}/releases/latest/download/CV-Screening-Setup.zip"
 CHECKSUM_URL = f"https://github.com/{REPO_SLUG}/releases/latest/download/CV-Screening-Setup.zip.sha256"
+
+
+def _log_diag_event(event: str, **fields) -> None:
+    # Privacy-safe trail: versions/reasons only. Stdlib-only duplicate of
+    # screening_core.diagnostics so the updater logs without the skill packages.
+    try:
+        from datetime import datetime
+
+        root = engine_root()
+        path = root / "data" / "logs" / "diagnostics.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event, **fields}
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
 USER_AGENT = "agent-cv-screening-updater"
 
 # Cache families a code update invalidates (FR-10). Move, never delete.
@@ -375,14 +393,18 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
         new_version = str(new_stamp_data.get("version") or "0")
         new_required = str(new_stamp_data.get("requires_python") or "")
 
+        def digest(path: Path) -> str:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+
         requirements_changed = False
         old_req = root / "requirements.txt"
         new_req = staged / "requirements.txt"
-        if new_req.is_file() and old_req.is_file():
-            def digest(path: Path) -> str:
-                return hashlib.sha256(path.read_bytes()).hexdigest()
-
-            requirements_changed = digest(new_req) != digest(old_req)
+        if new_req.is_file():
+            # A missing old file means dependencies were never installed from a
+            # managed list: treat that as a change so pip runs.
+            requirements_changed = (
+                not old_req.is_file() or digest(new_req) != digest(old_req)
+            )
 
         # The environment is checked for an interpreter bump BEFORE anything is
         # copied: the decision compares pyvenv.cfg (excluded from the copy)
@@ -404,6 +426,26 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
         # the next conversation. Advancing the stamp first would report a
         # half-applied update (new engine code, missing deps) as done -- the one
         # failure that must not be silent, because nothing else retries it.
+        venv_python = root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        deps_reason = ""
+        # Import probe: even when the requirements list is unchanged, a package
+        # can be missing (an earlier install failed halfway). One cheap import
+        # check self-heals that instead of failing every scanned CV at runtime.
+        if (
+            venv_python.is_file()
+            and new_req.is_file()
+            and not requirements_changed
+            and not rebuild
+        ):
+            probe = subprocess.run(
+                [str(venv_python), "-c",
+                 "import onnxruntime, rapidocr, pymupdf, reportlab, cv2, PIL, httpx, zai, olefile"],
+                capture_output=True, text=True, timeout=120, check=False,
+            )
+            if probe.returncode != 0:
+                requirements_changed = True
+                deps_reason = "probe: " + (probe.stderr.strip().splitlines() or ["?"])[-1][:160]
+
         deps_ok = True
         if rebuild:
             # A new interpreter minor invalidates the whole private venv (its
@@ -411,32 +453,57 @@ def apply_update(payload_zip: Path, quiet: bool) -> bool:
             # itself, so this branch covers both a bump and a requirements
             # change; the plain pip path below only fires without a bump.
             deps_ok = reprovision_venv(root, new_required, new_req, quiet)
-        elif requirements_changed:
-            venv_python = root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-            if venv_python.is_file():
-                if not quiet:
-                    log("[..] dependencies changed - updating the Python environment...")
-                # uv-created venvs have no pip inside them, so prefer the uv
-                # binary the launcher left in <engine>/tools/.
-                uv = root / "tools" / ("uv.exe" if sys.platform == "win32" else "uv")
-                if uv.is_file():
-                    pip_result = subprocess.run(
-                        [str(uv), "pip", "install", "--python", str(venv_python), "-r", str(new_req)],
-                        check=False,
-                    )
+        elif requirements_changed and venv_python.is_file():
+            if not quiet:
+                log("[..] dependencies changed - updating the Python environment...")
+            # uv-created venvs have no pip inside them, so prefer the uv binary
+            # the launcher left in <engine>/tools/; then the venv's own pip; and
+            # bootstrap pip via ensurepip before one final try.
+            uv = root / "tools" / ("uv.exe" if sys.platform == "win32" else "uv")
+            attempts = []
+            if uv.is_file():
+                attempts.append([str(uv), "pip", "install", "--python", str(venv_python), "-r", str(new_req)])
+            attempts.append([str(venv_python), "-m", "pip", "install", "-r", str(new_req)])
+            deps_ok = False
+            for cmd in attempts:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if result.returncode == 0:
+                    deps_ok = True
+                    break
+                tail = (result.stderr or result.stdout or "").strip().splitlines()
+                deps_reason = ("uv: " if uv.is_file() and cmd[0] == str(uv) else "pip: ") + (
+                    tail[-1][:200] if tail else "no output"
+                )
+            if not deps_ok:
+                subprocess.run(
+                    [str(venv_python), "-m", "ensurepip", "--upgrade"],
+                    capture_output=True, text=True, check=False,
+                )
+                retry = subprocess.run(
+                    [str(venv_python), "-m", "pip", "install", "-r", str(new_req)],
+                    capture_output=True, text=True, check=False,
+                )
+                if retry.returncode == 0:
+                    deps_ok = True
+                    deps_reason = "healed via ensurepip"
                 else:
-                    pip_result = subprocess.run(
-                        [str(venv_python), "-m", "pip", "install", "-r", str(new_req)], check=False
+                    tail = (retry.stderr or "").strip().splitlines()
+                    deps_reason = "ensurepip: " + (
+                        tail[-1][:200] if tail else "pip still unavailable"
                     )
-                deps_ok = pip_result.returncode == 0
 
         if not deps_ok:
             # The copy above already dropped the new stamp into place; put the
             # previous one back, or a half-applied update would be reported as
             # done and never retried.
             (root / "version.json").write_text(json.dumps(previous_stamp, indent=2) + "\n", encoding="utf-8")
+            _log_diag_event(
+                "update_deps_failed",
+                **{"from": previous_stamp.get("version", "?"), "to": new_version,
+                   "reason": deps_reason or "unknown"},
+            )
             if not quiet:
-                log("[ERROR] the dependency update failed - the version stamp stays at "
+                log(f"[ERROR] the dependency update failed ({deps_reason or 'unknown reason'}) - the stamp stays at "
                     f"{previous_stamp.get('version', '?')},")
                 log("        so the next run retries the update automatically. The screening engine")
                 log("        may not start until it succeeds.")

@@ -54,6 +54,13 @@ LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 LLM_MODEL=glm-4-flash
 LLM_VISION_MODEL=glm-4v-flash
 
+# Performance tuning (measured 2026-10): JPEG instead of PNG (5-10x smaller
+# upload, no accuracy loss on printed text), smaller render (fewer vision
+# tokens), one vision attempt (no multi-minute silent stalls).
+LLM_VISION_IMAGE_FORMAT=JPEG
+LLM_VISION_RENDER_SCALE=2.0
+LLM_VISION_RETRY_ATTEMPTS=1
+
 # The optional on-device name-detection model is switched off, because it
 # needs a ~700 MB download that is not part of this package. Name detection
 # falls back to the built-in text heuristics.

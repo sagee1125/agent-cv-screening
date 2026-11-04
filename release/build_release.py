@@ -129,6 +129,13 @@ def stage_engine(stage: Path, version: str) -> str:
             shutil.copy2(source, destination)
         else:
             raise SystemExit(f"[ERROR] expected repo entry missing: {entry}")
+    # Engine-root support tools (key renewal, environment check, diagnostics
+    # collector) ship beside the skills so updates deliver them to installs.
+    engine_root_tools = RELEASE_ROOT / "engine-root"
+    for tool in sorted(engine_root_tools.iterdir()) if engine_root_tools.is_dir() else []:
+        if tool.is_file():
+            shutil.copy2(tool, engine / tool.name)
+
     # The engine's runtime requirements: the pinned CLI-only set (release/
     # engine-requirements.txt), NOT the repo-root requirements.txt, which is an
     # unrelated leftover and would break the chain on a clean machine.
@@ -171,6 +178,8 @@ def sanity_checks(stage: Path) -> None:
         stage / "engine" / "site_profiles.json",
         stage / "engine" / "requirements.txt",
         stage / "engine" / "version.json",
+        stage / "engine" / "update_key.bat",
+        stage / "engine" / "collect_diagnostics.bat",
         stage / "expert" / "hr-cv-screener" / ".codebuddy-plugin" / "plugin.json",
         stage / "expert" / "hr-cv-screener" / "agents" / "hr-cv-screener.md",
         stage / "expert" / "hr-cv-screener" / "skills" / "hr-cv-screening" / "SKILL.md",
