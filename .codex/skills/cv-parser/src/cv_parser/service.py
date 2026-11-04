@@ -378,7 +378,10 @@ class CVParserService:
             return await asyncio.to_thread(self._extract_local_cv_document, path)
         except Exception as exc:
             logger.exception("Failed to extract PDF text or local OCR file=%s", file_path)
-            raise ValueError("Failed to extract PDF text with local OCR.") from exc
+            # The underlying reason rides along: "onnxruntime is not installed" vs a
+            # corrupt scan vs anything else decides the remote-support fix, and the
+            # generic wording alone hid it from HR and from last-error files.
+            raise ValueError(f"Failed to extract PDF text with local OCR: {exc}") from exc
 
 
 # Builds a CV parser with the shared LLM client and on-disk hash cache.
