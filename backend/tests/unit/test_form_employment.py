@@ -120,3 +120,35 @@ def test_same_cv_different_form_regenerates(tmp_path) -> None:
     # Same CV + corrected form: regenerates once.
     corrected = asyncio.run(service.build_portrait(cv, form_employment="Senior Tutor / Test Ltd"))
     assert corrected["cache_hit"] is False and service.llm_client.calls == 2
+
+
+# Regression: the job payload serialization (parse_job_skill -> _candidate_to_item)
+# dropped form_employment, so the real chain never reached the manifest even
+# though the dataclass carried it. Caught by re-running the real records page.
+def test_job_payload_carries_form_employment() -> None:
+    import sys as _sys
+
+    repo = Path(__file__).resolve().parents[3]
+    _sys.path.insert(0, str(repo / ".codex" / "skills" / "_shared" / "src"))
+    _sys.path.insert(0, str(repo / ".codex" / "skills" / "jas-import" / "src"))
+    from jas_import.skill import job_payload_from_html
+
+    html = """
+    <table id="f-list" class="listTable job-detail-table">
+    <thead><tr>
+      <th>No.</th><th>Application no.</th>
+      <th>Post title and organization of current / most recent full-time job</th>
+      <th>Post title and organization of last / second last full-time job</th>
+      <th>Curriculum vitae</th>
+    </tr></thead>
+    <tbody><tr>
+      <td>1</td><td>9900001</td>
+      <td>Research Assistant / Test Lab</td>
+      <td></td>
+      <td><a href="file.php?t=cv&amp;id=9900001&amp;refno=999990001">cv</a></td>
+    </tr></tbody></table>
+    <table id="f-list"><tr><td class="f-header">Reference number</td><td>9</td></tr></table>
+    """
+    payload = job_payload_from_html(html, base_url="https://jobs.polyu.edu.hk/internal/records.php?refno=999990001")
+    entry = payload["candidates"][0]
+    assert entry["form_employment"] == "Research Assistant / Test Lab"

@@ -63,6 +63,7 @@ def _candidate_to_item(candidate: JASCandidate) -> dict[str, Any]:
         "supp_url": candidate.supp_url,
         "record_detail_url": candidate.record_detail_url,
         "post": candidate.post,
+        "form_employment": candidate.form_employment,
     }
 
 

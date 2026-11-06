@@ -335,6 +335,7 @@ def test_parse_job_skill_drops_candidate_pii() -> None:
         "supp_url",
         "record_detail_url",
         "post",
+        "form_employment",  # professional facts only, no contact details
     }
     # This fixture is a single-post advertisement, so no post was applied for.
     assert candidate["post"] is None
