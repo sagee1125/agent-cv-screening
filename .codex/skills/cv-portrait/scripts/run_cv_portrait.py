@@ -22,11 +22,25 @@ def main() -> int:
         default=None,
         help="Reuse this converted PDF when it exists instead of re-converting Word input.",
     )
+    parser.add_argument(
+        "--form-facts",
+        default=None,
+        help="Optional JSON file with an employment field from the JAS application form; enriches the portrait.",
+    )
     args = parser.parse_args()
 
+    form_facts = None
+    if args.form_facts:
+        try:
+            payload = json.loads(Path(args.form_facts).read_text(encoding="utf-8"))
+            form_facts = str(payload.get("employment") or "") or None
+        except Exception:
+            form_facts = None
     service = build_portrait_service()
     try:
-        result = asyncio.run(service.build_portrait(args.file, converted_pdf=args.converted_pdf))
+        result = asyncio.run(
+            service.build_portrait(args.file, converted_pdf=args.converted_pdf, form_employment=form_facts)
+        )
     except Exception as exc:  # surface errors to the agent instead of a traceback
         print(json.dumps({"status": "error", "error_message": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 1

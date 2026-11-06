@@ -75,7 +75,8 @@ def run_apply(monkeypatch, root: Path, payload: Path, pip_rc: int, quiet: bool =
     )
     monkeypatch.setattr(module, "bust_score_caches", lambda quiet_flag: busted.append(quiet_flag) or 0)
     fake_subprocess = SimpleNamespace(
-        run=lambda cmd, check=False: pip_calls.append(cmd) or SimpleNamespace(returncode=pip_rc)
+        run=lambda cmd, check=False, **kwargs: pip_calls.append(cmd)
+                or SimpleNamespace(returncode=pip_rc, stderr="", stdout="")
     )
     monkeypatch.setattr(module, "subprocess", fake_subprocess)
 
@@ -96,7 +97,8 @@ def test_failed_dependency_install_keeps_the_old_stamp(tmp_path, monkeypatch) ->
 
     # The dependency step ran and failed, so the stamp was kept at the old
     # version: the next conversation retries the whole update.
-    assert len(pip_calls) == 1
+    installs = [c for c in pip_calls if "install" in c]
+    assert len(installs) == 2  # hardened chain: plain pip, then post-ensurepip retry
     assert read_stamp(root)["version"] == "1.1.8"
     # Cache invalidation only accompanies a completed update.
     assert busted == []
@@ -111,7 +113,8 @@ def test_successful_dependency_install_advances_the_stamp(tmp_path, monkeypatch)
 
     pip_calls, busted = run_apply(monkeypatch, root, payload, pip_rc=0)
 
-    assert len(pip_calls) == 1
+    installs = [c for c in pip_calls if "install" in c]
+    assert len(installs) == 1
     stamp = read_stamp(root)
     assert stamp["version"] == "1.1.9"
     assert stamp["requirements_sha256"] == "new-digest"
@@ -125,7 +128,8 @@ def test_unchanged_requirements_skip_pip_but_still_advance(tmp_path, monkeypatch
 
     pip_calls, busted = run_apply(monkeypatch, root, payload, pip_rc=0)
 
-    assert pip_calls == []
+    # Only the import health probe ran (python -c); no install was attempted.
+    assert all("install" not in " ".join(str(p) for p in call) for call in pip_calls)
     assert read_stamp(root)["version"] == "1.1.9"
     assert busted == [True]
 

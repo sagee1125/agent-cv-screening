@@ -46,13 +46,24 @@ Rules:
 - gaps may have an empty evidence list when the CV simply does not show it.
 - do not rank or compare against any job; this portrait is about the person only.
 - descriptive tone everywhere: no 專家/專才/資深, no superlatives.
+- when an 'Application form' section is present, treat it as the applicant's own
+  statement of their jobs; cite it with page 0.
 """
 
 
-# Assembles the user prompt: schema rules plus the page-anchored masked CV text.
-def build_portrait_user_prompt(paged_masked_text: str) -> str:
+# Assembles the user prompt: schema rules plus the page-anchored masked CV text,
+# optionally followed by the masked application-form employment facts.
+def build_portrait_user_prompt(paged_masked_text: str, masked_form: str | None = None) -> str:
+    form_section = ""
+    if masked_form:
+        form_section = (
+            "\n\nApplication form (as the applicant stated on the job system; "
+            "employment facts only):\n"
+            f"{masked_form}\n"
+            "(Quote from this section with page 0.)"
+        )
     return (
         f"{PORTRAIT_SCHEMA_INSTRUCTIONS}\n"
         "CV text (redacted; [Page N] marks each page's start):\n\n"
-        f"{paged_masked_text}"
+        f"{paged_masked_text}{form_section}"
     )

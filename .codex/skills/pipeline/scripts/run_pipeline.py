@@ -1166,6 +1166,22 @@ def _build_portraits(
     if not getattr(args, "with_portrait", False) or not candidates:
         return
 
+    # Application-form employment facts feed the portrait when a JAS manifest
+    # sits in the output dir (a JAS-driven run). Absent on direct-pipeline runs,
+    # which simply stay CV-only.
+    form_employment_by_appno: dict[str, str] = {}
+    manifest_path = out_dir / "jas-manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest_data = _load_json(manifest_path)
+            for entry in manifest_data.get("candidates") or []:
+                appno = str(entry.get("appno") or "")
+                employment = str(entry.get("form_employment") or "")
+                if appno and employment:
+                    form_employment_by_appno[appno] = employment
+        except Exception:
+            pass
+
     def build_one(cand: dict) -> tuple[str, int, str | None]:
         slug = cand["slug"]
         portrait_out = out_dir / f"portrait-{slug}.json"
@@ -1192,6 +1208,13 @@ def _build_portraits(
             "--converted-pdf",
             str(out_dir / f"converted-{slug}.pdf"),
         ]
+        employment = form_employment_by_appno.get(str(cand.get("appno") or ""))
+        if employment:
+            facts_path = out_dir / f"form-facts-{slug}.json"
+            facts_path.write_text(
+                json.dumps({"employment": employment}, ensure_ascii=False), encoding="utf-8"
+            )
+            cmd += ["--form-facts", str(facts_path)]
         attempts, error = _run_with_retries(
             cmd, args.max_retries, budget_seconds=getattr(args, "candidate_budget", None)
         )

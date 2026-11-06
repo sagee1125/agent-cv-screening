@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -90,12 +91,14 @@ def _quote_verified(quote: str, page: Any, masked_pages: list[str]) -> bool:
         page_no = int(page)
     except (TypeError, ValueError):
         return False
-    if not 1 <= page_no <= len(masked_pages):
+    # Page 0 is the application-form section (first pool entry); pages 1..N
+    # are the CV pages. Out-of-range pages never verify.
+    if not 0 <= page_no < len(masked_pages):
         return False
     needle = _norm_text(str(quote))
     if len(needle) < _MIN_VERIFIABLE_CHARS:
         return False
-    return needle in _norm_text(masked_pages[page_no - 1])
+    return needle in _norm_text(masked_pages[page_no])
 
 
 def _clean_text(value: Any) -> str:
@@ -235,14 +238,25 @@ class PortraitService:
 
     # Builds (or reuses from cache) one candidate's capability portrait.
     async def build_portrait(
-        self, file_path: str, converted_pdf: str | None = None
+        self,
+        file_path: str,
+        converted_pdf: str | None = None,
+        form_employment: str | None = None,
     ) -> dict[str, Any]:
         source = Path(file_path)
         file_hash = await self.cache.md5_for_file(str(source))
-        cache_key = f"{file_hash}-{PORTRAIT_CACHE_VERSION}"
+        # Cache keyed on CV bytes AND the form text: an unchanged CV with an
+        # unchanged form reuses the portrait; a corrected form regenerates it.
+        form_hash = hashlib.md5((form_employment or "").encode("utf-8")).hexdigest()
+        cache_key = f"{file_hash}-{form_hash}-{PORTRAIT_CACHE_VERSION}"
         cached = await self.cache.get(cache_key)
         if cached:
-            return {"file_hash": file_hash, "cache_hit": True, **cached}
+            return {
+                "file_hash": file_hash,
+                "form_employment_hash": form_hash,
+                "cache_hit": True,
+                **cached,
+            }
 
         pdf_path = _resolve_pdf(source, converted_pdf)
         document = await _extract_document(pdf_path)
@@ -281,13 +295,25 @@ class PortraitService:
             for index, page_masked in enumerate(masked_pages, start=1)
             if page_masked.strip()
         )
-        user_prompt = build_portrait_user_prompt(paged_text)
+        # The form can carry the candidate's name inside a company name
+        # ("Wong Consulting"); mask it with the same detections as the CV.
+        masked_form = (
+            mask_pii_text_aggressive(form_employment, mask_names, sensitive)
+            if form_employment and form_employment.strip()
+            else ""
+        )
+        user_prompt = build_portrait_user_prompt(paged_text, masked_form or None)
         # The same pre-send guard as the parser, scoped to the CV body only:
         # the fixed instruction preamble cannot leak anything, and a detected
         # value that coincidentally matches the schema wording (e.g. a
         # three-character value hitting "2-4 strengths") must not block the
-        # portrait on a false positive.
-        CVParserService._assert_prompt_clean(paged_text, "\n".join(masked_pages), pii_values)
+        # portrait on a false positive. The masked form rides along in the
+        # guarded text; its quotes verify against page 0 below.
+        CVParserService._assert_prompt_clean(
+            (masked_form + "\n" if masked_form else "") + paged_text,
+            "\n".join(masked_pages),
+            pii_values,
+        )
 
         llm_result = await self.llm_client.chat_completion(
             PORTRAIT_SYSTEM_PROMPT,
@@ -298,7 +324,10 @@ class PortraitService:
             timeout=cv_llm_timeout(),
             max_tokens=PORTRAIT_MAX_TOKENS,
         )
-        portrait = normalize_portrait(llm_result["parsed"], masked_pages)
+        verification_pool = [" ".join(masked_form.split())] + masked_pages
+        # Slot 0 is the application form (empty string when absent, so a
+        # page-0 quote never verifies); pages 1..N follow unchanged.
+        portrait = normalize_portrait(llm_result["parsed"], verification_pool)
         if not headline_compliant(portrait.get("headline") or ""):
             # One corrective rewrite; if the model still confers a title, fall
             # back to a deterministic descriptive headline from the tags.
@@ -314,7 +343,12 @@ class PortraitService:
         }
         # Only successful portraits are cached; fallbacks retry on a later run.
         await self.cache.set(cache_key, payload)
-        return {"file_hash": file_hash, "cache_hit": False, **payload}
+        return {
+            "file_hash": file_hash,
+            "form_employment_hash": form_hash,
+            "cache_hit": False,
+            **payload,
+        }
 
 
 async def _extract_document(pdf_path: Path):

@@ -18,25 +18,31 @@ from screening_core.hash_cache import HashCache
 
 # Normalisation collapses case, punctuation and whitespace families.
 def test_norm_text_and_quote_verified() -> None:
+    # Pool convention: slot 0 = application form (empty here), CV page 1 next.
     page = "Built a multi-agent tutoring platform with Python and FastAPI in 2025."
-    assert _quote_verified("multi-agent tutoring platform", 1, [page]) is True
+    pool = ["", page]
+    assert _quote_verified("multi-agent tutoring platform", 1, pool) is True
     # Whitespace and punctuation variants still verify.
-    assert _quote_verified("multi—agent   TUTORING, platform", 1, [page]) is True
+    assert _quote_verified("multi—agent   TUTORING, platform", 1, pool) is True
     # A fabricated quote must not verify.
-    assert _quote_verified("won a best-paper award at NeurIPS", 1, [page]) is False
+    assert _quote_verified("won a best-paper award at NeurIPS", 1, pool) is False
     # Wrong page or out-of-range page must not verify.
-    assert _quote_verified("multi-agent tutoring platform", 2, [page]) is False
-    assert _quote_verified("multi-agent tutoring platform", 0, [page]) is False
+    assert _quote_verified("multi-agent tutoring platform", 2, pool) is False
+    # An empty form slot never verifies a page-0 quote.
+    assert _quote_verified("multi-agent tutoring platform", 0, pool) is False
     # Too short to verify meaningfully.
-    assert _quote_verified("py", 1, [page]) is False
+    assert _quote_verified("py", 1, pool) is False
     # CJK text verifies through the same normaliser.
-    cjk_page = "負責開發多智能體語言學習平台的核心模組。"
-    assert _quote_verified("多智能體語言學習平台", 1, [cjk_page]) is True
+    cjk_pool = ["", "負責開發多智能體語言學習平台的核心模組。"]
+    assert _quote_verified("多智能體語言學習平台", 1, cjk_pool) is True
+    # A quote from the application form verifies against form slot 0.
+    form_pool = ["Head Tutor / Test Learning Centre", "irrelevant page"]
+    assert _quote_verified("Head Tutor / Test Learning Centre", 0, form_pool) is True
 
 
 # The normaliser caps every list and stamps verified flags per evidence item.
 def test_normalize_portrait_caps_and_flags() -> None:
-    pages = ["Led a team of five engineers to ship the platform."]
+    pages = ["", "Led a team of five engineers to ship the platform."]
     parsed = {
         "headline": "h" * 200,
         "overview": [f"point {i}" for i in range(10)],

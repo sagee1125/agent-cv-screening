@@ -41,6 +41,10 @@ class JASCandidate:
     record_detail_url: str | None
     # The "Post applied for" value; None on a single-post advertisement, which has no such column.
     post: str | None = None
+    # Employment as stated on the application form (current and last full-time
+    # job titles/organizations), feeding the capability portrait. "" when the
+    # page has no such columns; professional facts only, no contact details.
+    form_employment: str = ""
 
 
 @dataclass
@@ -334,6 +338,13 @@ def _candidate_column_indexes(table: dict[str, Any] | None) -> dict[str, int]:
                     key = "cv"
                 elif label in ("supplementary", "other supplementary information"):
                     key = "supp"
+                elif label in (
+                    "post title and organization of current / most recent full-time job",
+                    "post title and organization of last / second last full-time job",
+                ):
+                    # Two separate columns: both indexes land in one ordered
+                    # list. key stays None so the int assignment below skips.
+                    indexes.setdefault("form_jobs", []).append(index)
                 elif label == "post applied for":
                     # Only a multi-post advertisement carries this column, so its presence is
                     # both the post mapping and one of the three multi-post signals.
@@ -366,6 +377,12 @@ def _candidate_from_row(row: list[dict[str, Any]], origin: str, indexes: dict[st
         cv_url = normalize_polyu_cv_download_url(cv_url)
     supp_url = _first_link_url(supp_cell, origin) if supp_cell else None
     post = _text(post_cell).strip() if post_cell else ""
+    job_indexes = indexes.get("form_jobs") or []
+    form_jobs = [
+        " ".join(_text_block(row[i]).split())
+        for i in job_indexes
+        if i < len(row) and _text_block(row[i]).strip()
+    ]
     if not appno:
         appno = _appno_from_url(cv_url or record_detail_url)
     return JASCandidate(
@@ -375,6 +392,7 @@ def _candidate_from_row(row: list[dict[str, Any]], origin: str, indexes: dict[st
         supp_url=supp_url,
         record_detail_url=record_detail_url,
         post=post or None,
+        form_employment=" | ".join(form_jobs),
     )
 
 

@@ -371,6 +371,10 @@ def _build_manifest(
 ) -> dict:
     status_by_appno = {candidate["appno"]: candidate.get("status") for candidate in job.get("candidates", [])}
     post_by_appno = {candidate["appno"]: candidate.get("post") for candidate in job.get("candidates", [])}
+    employment_by_appno = {
+        candidate["appno"]: candidate.get("form_employment") or ""
+        for candidate in job.get("candidates", [])
+    }
     known_appnos = {candidate["appno"] for candidate in job.get("candidates", [])}
     entries = [
         # None on a single-post job, so a mapped key always has a field to land in (FR-2). The
@@ -380,6 +384,7 @@ def _build_manifest(
             "appno": appno,
             "status": status_by_appno.get(appno),
             "post": post_by_appno.get(appno),
+            "form_employment": employment_by_appno.get(appno, ""),
             "cv_path": str(path),
         }
         for appno, path in cvs
