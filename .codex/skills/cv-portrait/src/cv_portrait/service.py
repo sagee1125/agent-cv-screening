@@ -18,7 +18,7 @@ from cv_parser.service import CVParserService
 from cv_portrait.prompts import PORTRAIT_SYSTEM_PROMPT, build_portrait_user_prompt
 from word_convert.converter import convert_to_pdf, detect_kind
 
-PORTRAIT_CACHE_VERSION = "portrait-v6"
+PORTRAIT_CACHE_VERSION = "portrait-v7"
 
 # Title-conferral words the headline must never contain: a CV line does not
 # make someone an expert, and LLMs default to inflated LinkedIn-style titles.
